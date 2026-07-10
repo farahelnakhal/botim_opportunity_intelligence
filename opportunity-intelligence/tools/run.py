@@ -14,12 +14,13 @@ Workstream B folders; the tool refuses Workstream A paths).
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from opportunity_engine import commercial, evidence, scoring, subsidy  # noqa: E402
+from opportunity_engine import backlog, commercial, evidence, experiments, scoring, subsidy  # noqa: E402
 
 FOREIGN_DIRS = (
     "customer-intelligence",
@@ -74,6 +75,9 @@ def main(argv=None):
     p.add_argument("ids", help="comma-separated EV ids")
     p.add_argument("--dir", default="knowledge-base/customer-evidence")
 
+    p = sub.add_parser("check", help="sweep the whole knowledge base: models, scorecards, citations, VE specs, backlog")
+    p.add_argument("--root", default=".", help="repo root (default: cwd)")
+
     args = ap.parse_args(argv)
 
     try:
@@ -97,8 +101,100 @@ def main(argv=None):
             print(json.dumps(result, indent=2))
             if result["missing"] or result["malformed"]:
                 sys.exit(2)
+        elif args.cmd == "check":
+            sys.exit(run_check(Path(args.root)))
     except commercial.InputError as exc:
         sys.exit(f"input error: {exc}")
+
+
+EV_CITE_RE = re.compile(r"\bEV-\d{4}-W\d{2}-\d{3}\b")
+
+
+def run_check(root):
+    """Sweep the knowledge base; print a report; return exit code (0 ok, 1 failures)."""
+    kb = root / "knowledge-base"
+    failures, notes = [], []
+
+    def ok(msg):
+        print(f"  ok    {msg}")
+
+    def fail(msg):
+        failures.append(msg)
+        print(f"  FAIL  {msg}")
+
+    print("== commercial & subsidy models ==")
+    model_files = sorted((kb / "commercial-models").glob("*.json"))
+    for path in model_files:
+        rel = path.relative_to(root)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if path.name.endswith("-subsidy-inputs.json"):
+                subsidy.compute_model(data)
+            elif path.name.endswith("-inputs.json"):
+                commercial.compute_model(data)
+            else:
+                notes.append(f"skipped unrecognised json: {rel}")
+                continue
+            ok(f"{rel} computes across all three cases")
+        except (commercial.InputError, json.JSONDecodeError) as exc:
+            fail(f"{rel}: {exc}")
+    if not model_files:
+        notes.append("no model input files found")
+
+    print("== scorecards ==")
+    records = evidence.load_records(kb / "customer-evidence")
+    for path in sorted((kb / "opportunity-scores").glob("*.json")):
+        rel = path.relative_to(root)
+        try:
+            card = json.loads(path.read_text(encoding="utf-8"))
+            ev = scoring.evaluate(card)
+        except (commercial.InputError, json.JSONDecodeError) as exc:
+            fail(f"{rel}: {exc}")
+            continue
+        if ev["violations"]:
+            fail(f"{rel}: " + "; ".join(ev["violations"]))
+        else:
+            ok(f"{rel} valid (composite {ev['composite_indicative']}, {ev['assumption_count']}/17 (A))")
+        cited = sorted({m for e in ev["scores"].values() for m in EV_CITE_RE.findall(e["basis"])})
+        if cited:
+            res = evidence.check_citations(cited, records)
+            if res["missing"] or res["malformed"]:
+                fail(f"{rel}: citations not found in evidence records: "
+                     + ", ".join(res["missing"] + res["malformed"]))
+            if res["weak"]:
+                notes.append(f"{rel}: weak-evidence citations (leads, not findings): " + ", ".join(res["weak"]))
+    if not records:
+        notes.append("no Workstream A evidence records yet — citation checks limited to format")
+
+    print("== validation experiments ==")
+    ve_results = experiments.validate_dir(kb / "validation")
+    for path, issues in ve_results.items():
+        rel = Path(path).relative_to(root)
+        if issues:
+            fail(f"{rel}: " + "; ".join(issues))
+        else:
+            ok(f"{rel} has all mandatory fields, quantified thresholds")
+
+    print("== backlog ==")
+    backlog_path = kb / "product-ideas" / "BACKLOG.md"
+    if backlog_path.exists():
+        data, issues = backlog.check(backlog_path)
+        for issue in issues:
+            fail(f"BACKLOG.md: {issue}")
+        if not issues:
+            ok(f"BACKLOG.md: {len(data['backlog'])} live, {len(data['archive'])} archived, "
+               f"{len(data['requests'])} evidence requests")
+        for ve_id in sorted(backlog.referenced_experiments(data)):
+            if not list((kb / "validation").glob(f"{ve_id}-*.md")):
+                fail(f"BACKLOG.md references {ve_id} but no {ve_id}-*.md exists in knowledge-base/validation/")
+    else:
+        notes.append("no BACKLOG.md yet")
+
+    print()
+    for note in notes:
+        print(f"  note  {note}")
+    print(f"\n{'CHECK FAILED' if failures else 'CHECK PASSED'} — {len(failures)} failure(s)")
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
