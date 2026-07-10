@@ -1,0 +1,31 @@
+{
+  "experiment_id": "VE-001",
+  "proposition": "OPP-001",
+  "comment": "Thresholds pre-committed from VE-001-revenue-routing-commitment.md BEFORE the run. Fill 'observed' after field work, then: python3 opportunity-intelligence/tools/run.py verdict knowledge-base/validation/VE-001-result.json",
+  "metrics": [
+    {
+      "name": "waitlist_completion_pct",
+      "description": "% of qualified merchants offered the waitlist who complete it including the >=30% routing condition",
+      "observed": null,
+      "success": {"op": ">=", "value": 40},
+      "failure": {"op": "<=", "value": 15}
+    },
+    {
+      "name": "costly_workaround_interviews",
+      "description": "of 15 interviews: merchants describing a costly current workaround unprompted",
+      "observed": null,
+      "success": {"op": ">=", "value": 8},
+      "failure": null
+    },
+    {
+      "name": "no_costly_workaround_interviews",
+      "description": "of 15 interviews: merchants showing no costly workaround (kill signal)",
+      "observed": null,
+      "success": null,
+      "failure": {"op": ">=", "value": 8}
+    }
+  ],
+  "on_pass": "OPP-001 stays Promising; start 7-week concierge MVP (conditionally pre-approved in recommendation 2026-07-10); re-score scorecard with interview evidence",
+  "on_fail": "Reclassify OPP-001 as Weak in BACKLOG.md; run stress-test review before any archive decision",
+  "on_inconclusive": "Redesign incentive or segment and re-run; do not extend the same design silently"
+}

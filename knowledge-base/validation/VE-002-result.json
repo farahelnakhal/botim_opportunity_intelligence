@@ -1,0 +1,24 @@
+{
+  "experiment_id": "VE-002",
+  "proposition": "OPP-002",
+  "comment": "Thresholds pre-committed from VE-002-supplier-payment-mapping.md BEFORE the run. Fill 'observed' after field work, then: python3 opportunity-intelligence/tools/run.py verdict knowledge-base/validation/VE-002-result.json",
+  "metrics": [
+    {
+      "name": "card_acceptance_share_pct",
+      "description": "% of mapped supplier relationships card-payable without surcharge (today or stated willingness)",
+      "observed": null,
+      "success": {"op": ">=", "value": 20},
+      "failure": {"op": "<", "value": 20}
+    },
+    {
+      "name": "spend_coverage_pct",
+      "description": "% of merchants' monthly supplier spend (by value) covered by those card-payable relationships",
+      "observed": null,
+      "success": {"op": ">=", "value": 30},
+      "failure": null
+    }
+  ],
+  "on_pass": "Build OPP-002 full commercial model + MVP design; feed supplier-side feasibility into OPP-006",
+  "on_fail": "Reclassify OPP-002 as Weak in BACKLOG.md with the acceptance data as the decisive record",
+  "on_inconclusive": "Acceptance share passed but spend coverage below 30%: extend supplier calls by 10 before deciding, per spec"
+}

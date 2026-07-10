@@ -20,11 +20,25 @@ python3 opportunity-intelligence/tools/run.py evidence
 # Check EV-id citations before putting them in a scorecard; exit code 2 on missing/malformed
 python3 opportunity-intelligence/tools/run.py cite EV-2026-W28-001,EV-2026-W28-002
 
+# Tornado sensitivity: perturb every input ±50% (harmful direction kept), rank by
+# contribution damage — the assumption register's "if 50% worse" column, computed
+python3 opportunity-intelligence/tools/run.py sensitivity knowledge-base/commercial-models/opp-001-inputs.json --case base --degrade 0.5
+
+# Evaluate experiment results against their PRE-COMMITTED thresholds (verdict:
+# pass / fail / inconclusive / pending; kill thresholds kill even mid-run)
+python3 opportunity-intelligence/tools/run.py verdict knowledge-base/validation/VE-001-result.json
+
 # CI-style sweep of the whole knowledge base: every model computes, every scorecard
-# passes caps, every VE spec has quantified pre-committed thresholds, the backlog is
-# internally consistent and its VE/REQ references resolve. Exit code 1 on any failure.
+# passes caps, every VE spec has quantified pre-committed thresholds, every result
+# file evaluates, the backlog is internally consistent and its VE/REQ references
+# resolve. Exit code 1 on any failure.
 python3 opportunity-intelligence/tools/run.py check
 ```
+
+When VE field work completes: fill the `observed` values in
+`knowledge-base/validation/VE-nnn-result.json` (thresholds were pre-committed there
+before the run — do not edit them), run `verdict`, and apply the pre-committed
+`on_pass`/`on_fail`/`on_inconclusive` action to the backlog.
 
 Run `check` before every commit that touches `knowledge-base/` — it is the module's regression test.
 
@@ -50,6 +64,8 @@ Every numeric input may be `{"value": n, "label": "F|E|A", "note": "..."}`; bare
 - **Evidence honesty:** citations are checked against real records; records with evidence strength ≤2 or status `needs-more-evidence` are flagged as leads, not findings.
 - **No unfalsifiable experiments:** VE specs missing any mandatory field, or with hypotheses/thresholds that contain no number, fail `check` (`experiments.py`).
 - **Backlog integrity:** duplicate OPP ids, `reject` rows outside the archive, live rows without a next action, and dangling VE-/REQ- references all fail `check` (`backlog.py`).
+- **No post-hoc verdicts:** experiment outcomes are computed from thresholds committed before the run (`results.py`); a breached kill threshold fails the experiment even while other metrics are pending.
+- **Mechanical sensitivity:** the harmful direction of each input is discovered by perturbation, not hand-labelled (`sensitivity.py`) — for OPP-001 it ranks `financing_rate_annual`, `monthly_revenue_per_merchant`, and `routed_share` as the top risks.
 
 ## Workstream A integration
 
@@ -61,4 +77,4 @@ Every numeric input may be `{"value": n, "label": "F|E|A", "note": "..."}`; bare
 python3 -m unittest discover -s opportunity-intelligence/tools/tests -v
 ```
 
-36 tests pin the engine to the published OPP-001/OPP-002 numbers and run the process validators against the repo's real knowledge-base files, so code, markdown, and process artefacts can't silently drift.
+51 tests pin the engine to the published OPP-001/OPP-002 numbers and run the process validators against the repo's real knowledge-base files, so code, markdown, and process artefacts can't silently drift.

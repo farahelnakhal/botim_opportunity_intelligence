@@ -9,9 +9,14 @@ Computation layer for the markdown frameworks in opportunity-intelligence/:
 - experiments: validator for VE-*.md specs (mandatory fields, quantified
   pre-committed thresholds)
 - backlog: parser and integrity checker for BACKLOG.md
+- sensitivity: tornado analysis on commercial-model inputs
+- results: verdict engine for experiment results vs pre-committed thresholds
 
 Pure standard library. Inputs are JSON files kept in the module's own
 knowledge-base folders; Workstream A files are never written.
 """
 
-__all__ = ["commercial", "subsidy", "scoring", "evidence", "experiments", "backlog"]
+__all__ = [
+    "commercial", "subsidy", "scoring", "evidence",
+    "experiments", "backlog", "sensitivity", "results",
+]
