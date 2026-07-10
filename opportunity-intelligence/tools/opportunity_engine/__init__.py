@@ -1,0 +1,14 @@
+"""Opportunity Intelligence engine (Workstream B).
+
+Computation layer for the markdown frameworks in opportunity-intelligence/:
+- commercial: three-case commercial model (contribution, break-even, subsidy ceilings)
+- subsidy: MDR/interchange subsidy budget for card products
+- scoring: 17-dimension scorecard validation, caps and floors
+- evidence: read-only parser for Workstream A records in
+  knowledge-base/customer-evidence/records/ (EV-YYYY-Wnn-nnn format)
+
+Pure standard library. Inputs are JSON files kept in the module's own
+knowledge-base folders; Workstream A files are never written.
+"""
+
+__all__ = ["commercial", "subsidy", "scoring", "evidence"]

@@ -1,0 +1,46 @@
+{
+  "opportunity_id": "OPP-002",
+  "name": "Supplier-payment commercial card - free-credit-days package test",
+  "comment": "Machine-readable source for the subsidy table in opportunity-intelligence/test-cases/02-supplier-payment-card.md. Offered package under test: 20 free days, no cashback, no fee subsidy, no lending top-up. Gated: full commercial model waits for VE-002. Run: python3 opportunity-intelligence/tools/run.py subsidy knowledge-base/commercial-models/opp-002-subsidy-inputs.json",
+  "cases": {
+    "downside": {
+      "gross_interchange_bps": {"value": 90, "label": "A"},
+      "programme_split_bps": {"value": 40, "label": "A"},
+      "scheme_fee_bps": {"value": 10, "label": "A"},
+      "processing_bps": {"value": 10, "label": "A"},
+      "fraud_bps": {"value": 5, "label": "A"},
+      "monthly_card_spend": {"value": 30000, "label": "A"},
+      "funding_rate_annual": {"value": 0.08, "label": "A"},
+      "offered_free_days": {"value": 20, "label": "A"},
+      "offered_cashback_pct": {"value": 0, "label": "F"},
+      "offered_fee_subsidy": {"value": 0, "label": "F"},
+      "lending_contribution": {"value": 0, "label": "A", "note": "no top-up until lending model proven positive after risk"}
+    },
+    "base": {
+      "gross_interchange_bps": {"value": 130, "label": "A"},
+      "programme_split_bps": {"value": 40, "label": "A"},
+      "scheme_fee_bps": {"value": 12, "label": "A"},
+      "processing_bps": {"value": 10, "label": "A"},
+      "fraud_bps": {"value": 8, "label": "A"},
+      "monthly_card_spend": {"value": 80000, "label": "A"},
+      "funding_rate_annual": {"value": 0.08, "label": "A"},
+      "offered_free_days": {"value": 20, "label": "A"},
+      "offered_cashback_pct": {"value": 0, "label": "F"},
+      "offered_fee_subsidy": {"value": 0, "label": "F"},
+      "lending_contribution": {"value": 0, "label": "A"}
+    },
+    "upside": {
+      "gross_interchange_bps": {"value": 170, "label": "A"},
+      "programme_split_bps": {"value": 45, "label": "A"},
+      "scheme_fee_bps": {"value": 15, "label": "A"},
+      "processing_bps": {"value": 10, "label": "A"},
+      "fraud_bps": {"value": 10, "label": "A"},
+      "monthly_card_spend": {"value": 150000, "label": "A"},
+      "funding_rate_annual": {"value": 0.08, "label": "A"},
+      "offered_free_days": {"value": 20, "label": "A"},
+      "offered_cashback_pct": {"value": 0, "label": "F"},
+      "offered_fee_subsidy": {"value": 0, "label": "F"},
+      "lending_contribution": {"value": 0, "label": "A"}
+    }
+  }
+}

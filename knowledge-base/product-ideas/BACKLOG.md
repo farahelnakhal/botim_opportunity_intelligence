@@ -20,7 +20,7 @@ Profiles for OPP-001..003 currently live in `opportunity-intelligence/test-cases
 
 | Req ID | For proposition | Evidence needed | Why it matters | Status |
 |---|---|---|---|---|
-| REQ-001 | All | Stable evidence-ID scheme (e.g. EV-###) in `knowledge-base/customer-evidence/` | Scorecards must cite evidence by ID | Open |
+| REQ-001 | All | Stable evidence-ID scheme (e.g. EV-###) in `knowledge-base/customer-evidence/` | Scorecards must cite evidence by ID | **Answered** — Workstream A published `EV-YYYY-Wnn-nnn` (weekly record files); our engine parses it (`opportunity-intelligence/tools/`) |
 | REQ-002 | OPP-001, OPP-005, OPP-008 | Working-capital pain: severity, frequency, current workaround and its cost (F&B/retail, 1–3 outlets, UAE) | 15 of 17 OPP-001 scores are assumption-based | Open |
 | REQ-003 | OPP-002, OPP-006 | How target merchants pay suppliers today: instrument, terms, card acceptance, surcharging | Decisive unknown for the supplier-card model | Open |
 | REQ-004 | OPP-004 | IBAN/business-account access pain for micro-merchants (rejection reasons, workarounds, costs) | Determines whether OPP-004 is a real proposition | Open |
@@ -39,3 +39,4 @@ Profiles for OPP-001..003 currently live in `opportunity-intelligence/test-cases
 - 2026-07-10 — OPP-001 full commercial model built (`knowledge-base/commercial-models/opp-001-revenue-linked-credit.md`): base case +137 AED/merchant/month contribution but break-even ≈1,100 merchants vs base 500; downside loss-making. Classification unchanged; VE-001 remains the gate.
 - 2026-07-10 — OPP-001 opportunity profile created (`opp-001-revenue-linked-credit.md`): value proposition (organic switching = credit access unavailable elsewhere + activity-linked limits) and 7-week concierge MVP with kill thresholds. OPP-001 package complete pending field validation; VE-001 gates the MVP.
 - 2026-07-10 — Meeting-ready recommendation issued for OPP-001 (`opp-001-revenue-linked-credit-recommendation-2026-07-10.md`). Ask: approve VE-001 now; concierge pilot pre-approved conditional on VE-001 pass; nudge REQ-001/REQ-002. Assumption-stage — not a build recommendation.
+- 2026-07-10 — Computation engine shipped (`opportunity-intelligence/tools/`, 21 tests): commercial + subsidy models, scorecard validation with caps/floors, and a read-only parser for Workstream A's now-published `EV-YYYY-Wnn-nnn` evidence format. REQ-001 marked Answered. Machine-readable inputs added for OPP-001 model/scorecard and OPP-002 subsidy package.

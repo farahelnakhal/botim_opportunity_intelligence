@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""CLI for the Opportunity Intelligence engine (Workstream B).
+
+Usage (from repo root):
+  python3 opportunity-intelligence/tools/run.py model   knowledge-base/commercial-models/opp-001-inputs.json
+  python3 opportunity-intelligence/tools/run.py subsidy knowledge-base/commercial-models/opp-002-subsidy-inputs.json
+  python3 opportunity-intelligence/tools/run.py score   knowledge-base/opportunity-scores/opp-001-scorecard.json
+  python3 opportunity-intelligence/tools/run.py evidence [--dir knowledge-base/customer-evidence]
+  python3 opportunity-intelligence/tools/run.py cite EV-2026-W28-001,EV-2026-W28-002 [--dir ...]
+
+Add --write <path> to also save the report as markdown (write only into
+Workstream B folders; the tool refuses Workstream A paths).
+"""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from opportunity_engine import commercial, evidence, scoring, subsidy  # noqa: E402
+
+FOREIGN_DIRS = (
+    "customer-intelligence",
+    "knowledge-base/customer-evidence",
+    "knowledge-base/competitors",
+    "knowledge-base/segments",
+    "knowledge-base/inflection-points",
+)
+
+
+def _load_json(path):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        sys.exit(f"error: file not found: {path}")
+    except json.JSONDecodeError as exc:
+        sys.exit(f"error: {path} is not valid JSON: {exc}")
+
+
+def _emit(report, write_path):
+    print(report, end="")
+    if write_path:
+        resolved = Path(write_path).resolve()
+        for fd in FOREIGN_DIRS:
+            if str(resolved).replace("\\", "/").find(f"/{fd}/") != -1 or str(resolved).endswith(fd):
+                sys.exit(f"error: refusing to write into Workstream A / shared path: {write_path}")
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        resolved.write_text(report, encoding="utf-8")
+        print(f"\n[written to {write_path}]", file=sys.stderr)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("model", help="compute a three-case commercial model")
+    p.add_argument("inputs")
+    p.add_argument("--write")
+
+    p = sub.add_parser("subsidy", help="compute an interchange subsidy model")
+    p.add_argument("inputs")
+    p.add_argument("--write")
+
+    p = sub.add_parser("score", help="validate a 17-dimension scorecard")
+    p.add_argument("scorecard")
+    p.add_argument("--write")
+
+    p = sub.add_parser("evidence", help="list Workstream A evidence records (read-only)")
+    p.add_argument("--dir", default="knowledge-base/customer-evidence")
+
+    p = sub.add_parser("cite", help="check EV-id citations against loaded records")
+    p.add_argument("ids", help="comma-separated EV ids")
+    p.add_argument("--dir", default="knowledge-base/customer-evidence")
+
+    args = ap.parse_args(argv)
+
+    try:
+        if args.cmd == "model":
+            model = _load_json(args.inputs)
+            _emit(commercial.render_markdown(model, commercial.compute_model(model)), args.write)
+        elif args.cmd == "subsidy":
+            model = _load_json(args.inputs)
+            _emit(subsidy.render_markdown(model, subsidy.compute_model(model)), args.write)
+        elif args.cmd == "score":
+            card = _load_json(args.scorecard)
+            ev = scoring.evaluate(card)
+            _emit(scoring.render_markdown(card, ev), args.write)
+            if ev["violations"]:
+                sys.exit(2)
+        elif args.cmd == "evidence":
+            print(evidence.render_markdown(evidence.load_records(args.dir)), end="")
+        elif args.cmd == "cite":
+            records = evidence.load_records(args.dir)
+            result = evidence.check_citations(args.ids.split(","), records)
+            print(json.dumps(result, indent=2))
+            if result["missing"] or result["malformed"]:
+                sys.exit(2)
+    except commercial.InputError as exc:
+        sys.exit(f"input error: {exc}")
+
+
+if __name__ == "__main__":
+    main()
