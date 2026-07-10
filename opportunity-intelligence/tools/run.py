@@ -20,7 +20,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from opportunity_engine import backlog, commercial, evidence, experiments, scoring, subsidy  # noqa: E402
+from opportunity_engine import (  # noqa: E402
+    backlog,
+    commercial,
+    evidence,
+    experiments,
+    results,
+    scoring,
+    sensitivity,
+    subsidy,
+)
 
 FOREIGN_DIRS = (
     "customer-intelligence",
@@ -75,7 +84,17 @@ def main(argv=None):
     p.add_argument("ids", help="comma-separated EV ids")
     p.add_argument("--dir", default="knowledge-base/customer-evidence")
 
-    p = sub.add_parser("check", help="sweep the whole knowledge base: models, scorecards, citations, VE specs, backlog")
+    p = sub.add_parser("sensitivity", help="tornado analysis: which input hurts contribution most")
+    p.add_argument("inputs")
+    p.add_argument("--case", default="base", choices=list(commercial.CASES))
+    p.add_argument("--degrade", type=float, default=0.5, help="perturbation factor (default 0.5 = ±50%%)")
+    p.add_argument("--write")
+
+    p = sub.add_parser("verdict", help="evaluate a VE result file against its pre-committed thresholds")
+    p.add_argument("result")
+    p.add_argument("--write")
+
+    p = sub.add_parser("check", help="sweep the whole knowledge base: models, scorecards, citations, VE specs, results, backlog")
     p.add_argument("--root", default=".", help="repo root (default: cwd)")
 
     args = ap.parse_args(argv)
@@ -101,6 +120,13 @@ def main(argv=None):
             print(json.dumps(result, indent=2))
             if result["missing"] or result["malformed"]:
                 sys.exit(2)
+        elif args.cmd == "sensitivity":
+            model = _load_json(args.inputs)
+            baseline, rows = sensitivity.analyse(model, args.case, args.degrade)
+            _emit(sensitivity.render_markdown(model, args.case, args.degrade, baseline, rows), args.write)
+        elif args.cmd == "verdict":
+            ev = results.evaluate(_load_json(args.result))
+            _emit(results.render_markdown(ev), args.write)
         elif args.cmd == "check":
             sys.exit(run_check(Path(args.root)))
     except commercial.InputError as exc:
@@ -174,6 +200,23 @@ def run_check(root):
             fail(f"{rel}: " + "; ".join(issues))
         else:
             ok(f"{rel} has all mandatory fields, quantified thresholds")
+
+    print("== experiment results ==")
+    for path in sorted((kb / "validation").glob("*-result.json")):
+        rel = path.relative_to(root)
+        try:
+            ev = results.evaluate(json.loads(path.read_text(encoding="utf-8")))
+        except (commercial.InputError, json.JSONDecodeError) as exc:
+            fail(f"{rel}: {exc}")
+            continue
+        ve_id = ev["experiment_id"]
+        if not list((kb / "validation").glob(f"{ve_id}-*.md")):
+            fail(f"{rel}: no spec file {ve_id}-*.md for this result")
+            continue
+        ok(f"{rel}: verdict {ev['verdict'].upper()} → {ev['action'][:60]}")
+        if ev["verdict"] in ("fail", "pass"):
+            notes.append(f"{rel}: conclusive verdict {ev['verdict'].upper()} — "
+                         f"ensure BACKLOG.md reflects the pre-committed action")
 
     print("== backlog ==")
     backlog_path = kb / "product-ideas" / "BACKLOG.md"
