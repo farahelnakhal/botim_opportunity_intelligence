@@ -86,6 +86,60 @@ def analyse(model, case_name="base", degrade=0.5):
     return baseline, rows
 
 
+def grid(model, input_x, input_y, case_name="base", steps=7):
+    """Two-way stress grid: vary two inputs across their three-case span,
+    recompute contribution at every combination.
+
+    Returns (x_values, y_values, matrix) where matrix[i][j] is the
+    contribution at y_values[i], x_values[j].
+    """
+    for name in (input_x, input_y):
+        if name not in commercial.REQUIRED_INPUTS:
+            raise commercial.InputError(f"unknown input '{name}'")
+    if input_x == input_y:
+        raise commercial.InputError("grid needs two different inputs")
+    if steps < 3:
+        raise commercial.InputError("grid needs at least 3 steps")
+
+    def span(name):
+        values = [commercial._norm(model["cases"][c][name], name)[0] for c in commercial.CASES]
+        low, high = min(values), max(values)
+        if low == high:  # constant across cases: spread ±50% so the grid is informative
+            low, high = low * 0.5, high * 1.5
+        if name in FRACTION_INPUTS:
+            low, high = max(0.0, low), min(1.0, high)
+        return [low + (high - low) * i / (steps - 1) for i in range(steps)]
+
+    raw_case = model["cases"][case_name]
+    x_values, y_values = span(input_x), span(input_y)
+    matrix = []
+    for y in y_values:
+        row = []
+        for x in x_values:
+            shocked = _perturbed(_perturbed(raw_case, input_x, x), input_y, y)
+            row.append(commercial.compute_case(case_name, shocked).contribution)
+        matrix.append(row)
+    return x_values, y_values, matrix
+
+
+def render_grid_markdown(model, input_x, input_y, case_name, x_values, y_values, matrix):
+    lines = [
+        f"# Stress grid — {model['opportunity_id']}: {input_y} × {input_x}",
+        "",
+        f"Case: **{case_name}** · cell = contribution/merchant/month; negative cells bracketed. "
+        "The bracket boundary is the viability frontier.",
+        "",
+        "| {} \\ {} | ".format(input_y, input_x) + " | ".join(f"{x:g}" for x in x_values) + " |",
+        "|" + "---|" * (len(x_values) + 1),
+    ]
+    for y, row in zip(y_values, matrix):
+        cells = [f"({c:,.0f})" if c <= 0 else f"{c:,.0f}" for c in row]
+        lines.append(f"| **{y:g}** | " + " | ".join(cells) + " |")
+    n_neg = sum(1 for row in matrix for c in row if c <= 0)
+    lines += ["", f"{n_neg}/{len(matrix) * len(matrix[0])} combinations are loss-making."]
+    return "\n".join(lines) + "\n"
+
+
 def render_markdown(model, case_name, degrade, baseline, rows):
     lines = [
         f"# Sensitivity (tornado) — {model['opportunity_id']} {model['name']}",

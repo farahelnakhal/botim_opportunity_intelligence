@@ -25,9 +25,11 @@ from opportunity_engine import (  # noqa: E402
     commercial,
     evidence,
     experiments,
+    montecarlo,
     results,
     scoring,
     sensitivity,
+    stress,
     subsidy,
 )
 
@@ -94,6 +96,26 @@ def main(argv=None):
     p.add_argument("result")
     p.add_argument("--write")
 
+    p = sub.add_parser("simulate", help="Monte Carlo over the three-case model (distributions, P(loss))")
+    p.add_argument("inputs")
+    p.add_argument("--n", type=int, default=5000)
+    p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--write")
+
+    p = sub.add_parser("stress", help="run named adverse scenarios (credit-and-run, adverse selection, ...)")
+    p.add_argument("inputs")
+    p.add_argument("--case", default="base", choices=list(commercial.CASES))
+    p.add_argument("--scenarios", help="optional custom scenarios JSON (same shape as the built-in library)")
+    p.add_argument("--write")
+
+    p = sub.add_parser("grid", help="two-way stress grid: contribution across two inputs' ranges")
+    p.add_argument("inputs")
+    p.add_argument("--x", required=True, help="input for columns (e.g. routed_share)")
+    p.add_argument("--y", required=True, help="input for rows (e.g. ecl_rate_annual)")
+    p.add_argument("--case", default="base", choices=list(commercial.CASES))
+    p.add_argument("--steps", type=int, default=7)
+    p.add_argument("--write")
+
     p = sub.add_parser("check", help="sweep the whole knowledge base: models, scorecards, citations, VE specs, results, backlog")
     p.add_argument("--root", default=".", help="repo root (default: cwd)")
 
@@ -127,6 +149,19 @@ def main(argv=None):
         elif args.cmd == "verdict":
             ev = results.evaluate(_load_json(args.result))
             _emit(results.render_markdown(ev), args.write)
+        elif args.cmd == "simulate":
+            model = _load_json(args.inputs)
+            sim = montecarlo.simulate(model, n=args.n, seed=args.seed)
+            _emit(montecarlo.render_markdown(model, sim), args.write)
+        elif args.cmd == "stress":
+            model = _load_json(args.inputs)
+            custom = _load_json(args.scenarios) if args.scenarios else None
+            baseline, rows = stress.run(model, args.case, custom)
+            _emit(stress.render_markdown(model, args.case, baseline, rows), args.write)
+        elif args.cmd == "grid":
+            model = _load_json(args.inputs)
+            xs, ys, matrix = sensitivity.grid(model, args.x, args.y, args.case, args.steps)
+            _emit(sensitivity.render_grid_markdown(model, args.x, args.y, args.case, xs, ys, matrix), args.write)
         elif args.cmd == "check":
             sys.exit(run_check(Path(args.root)))
     except commercial.InputError as exc:
