@@ -1,0 +1,27 @@
+{
+  "opportunity_id": "OPP-001",
+  "name": "Revenue-linked revolving credit on BOTIM business wallet",
+  "is_lending_product": true,
+  "proposed_classification": "promising",
+  "evidence_confidence": "low",
+  "comment": "Machine-readable source for the scorecard in opportunity-intelligence/test-cases/01-revenue-linked-revolving-credit.md. Run: python3 opportunity-intelligence/tools/run.py score knowledge-base/opportunity-scores/opp-001-scorecard.json",
+  "scores": {
+    "pain_severity":                 {"score": 4, "assumption": true,  "basis": "Working-capital gap classic SME pain; needs REQ-002 evidence"},
+    "pain_frequency":                {"score": 4, "assumption": true,  "basis": "Monthly supplier/payroll cycles"},
+    "financial_impact":              {"score": 4, "assumption": true,  "basis": "Informal credit / missed stock assumed >3% of revenue"},
+    "workaround_cost":               {"score": 4, "assumption": true,  "basis": "Personal cards, supplier terms, informal lenders"},
+    "switching_intent":              {"score": 3, "assumption": true,  "basis": "Only at inflection points"},
+    "willingness_to_pay":            {"score": 4, "assumption": true,  "basis": "Pays more today for worse; unverified"},
+    "digital_readiness":             {"score": 3, "assumption": true,  "basis": "Mixed; cash-heavy F&B tail"},
+    "payment_volume":                {"score": 3, "assumption": true,  "basis": "Depends on wallet acceptance"},
+    "credit_need":                   {"score": 5, "assumption": true,  "basis": "Chronic working-capital need assumed for segment"},
+    "botim_distribution_advantage":  {"score": 4, "assumption": true,  "basis": "Assumed high BOTIM penetration among owners; needs data"},
+    "transaction_data_advantage":    {"score": 3, "assumption": true,  "basis": "Only if revenue routes into wallet first"},
+    "payment_revenue_potential":     {"score": 2, "assumption": true,  "basis": "Wallet-in flows earn little; no card spend in v1"},
+    "lending_revenue_potential":     {"score": 4, "assumption": true,  "basis": "Core AstraTech economics"},
+    "credit_risk_visibility":        {"score": 3, "assumption": true,  "basis": "Good only AFTER routing; cold-start blind"},
+    "competitive_defensibility":     {"score": 3, "assumption": true,  "basis": "Loop defensible once running; cold start copyable"},
+    "ease_of_validation":            {"score": 4, "assumption": false, "basis": "Interviews + waitlist + routing pilot all feasible (VE-001 designed)"},
+    "mvp_feasibility_7wk":           {"score": 3, "assumption": false, "basis": "Concierge lending on AstraTech licence feasible; auto-limits are not"}
+  }
+}
