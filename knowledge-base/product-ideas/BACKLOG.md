@@ -36,3 +36,4 @@ Profiles for OPP-001..003 currently live in `opportunity-intelligence/test-cases
 ## Changelog
 
 - 2026-07-10 — Backlog instantiated. OPP-001/002 logged from worked test cases; OPP-003 archived as Reject; OPP-004..008 seeded unscored from project-context idea list. Evidence-request queue opened (REQ-001..006).
+- 2026-07-10 — OPP-001 full commercial model built (`knowledge-base/commercial-models/opp-001-revenue-linked-credit.md`): base case +137 AED/merchant/month contribution but break-even ≈1,100 merchants vs base 500; downside loss-making. Classification unchanged; VE-001 remains the gate.
