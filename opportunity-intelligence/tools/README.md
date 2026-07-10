@@ -28,6 +28,19 @@ python3 opportunity-intelligence/tools/run.py sensitivity knowledge-base/commerc
 # pass / fail / inconclusive / pending; kill thresholds kill even mid-run)
 python3 opportunity-intelligence/tools/run.py verdict knowledge-base/validation/VE-001-result.json
 
+# Monte Carlo: 5,000+ draws from triangular distributions spanning the three cases;
+# contribution/break-even distributions, P(loss). Deterministic (seeded).
+python3 opportunity-intelligence/tools/run.py simulate knowledge-base/commercial-models/opp-001-inputs.json --n 10000
+
+# Named adverse scenarios (credit_and_run, adverse_selection, rate_compression,
+# perfect_storm, ...): correlated shocks that independent sampling can't produce.
+# Custom scenario files via --scenarios.
+python3 opportunity-intelligence/tools/run.py stress knowledge-base/commercial-models/opp-001-inputs.json
+
+# Two-way stress grid: contribution across two inputs' ranges; the negative-cell
+# boundary is the viability frontier
+python3 opportunity-intelligence/tools/run.py grid knowledge-base/commercial-models/opp-001-inputs.json --x routed_share --y ecl_rate_annual
+
 # CI-style sweep of the whole knowledge base: every model computes, every scorecard
 # passes caps, every VE spec has quantified pre-committed thresholds, every result
 # file evaluates, the backlog is internally consistent and its VE/REQ references
@@ -66,6 +79,8 @@ Every numeric input may be `{"value": n, "label": "F|E|A", "note": "..."}`; bare
 - **Backlog integrity:** duplicate OPP ids, `reject` rows outside the archive, live rows without a next action, and dangling VE-/REQ- references all fail `check` (`backlog.py`).
 - **No post-hoc verdicts:** experiment outcomes are computed from thresholds committed before the run (`results.py`); a breached kill threshold fails the experiment even while other metrics are pending.
 - **Mechanical sensitivity:** the harmful direction of each input is discovered by perturbation, not hand-labelled (`sensitivity.py`) — for OPP-001 it ranks `financing_rate_annual`, `monthly_revenue_per_merchant`, and `routed_share` as the top risks.
+- **Stated simulation limits:** Monte Carlo (`montecarlo.py`) samples inputs independently and says so in every report; correlated adversity is covered explicitly by the named scenarios (`stress.py`), where for OPP-001 `credit_and_run`, `adverse_selection`, and `perfect_storm` all kill unit economics.
+- **Reproducibility:** simulations are seeded and deterministic; the same command always yields the same report.
 
 ## Workstream A integration
 
@@ -77,4 +92,4 @@ Every numeric input may be `{"value": n, "label": "F|E|A", "note": "..."}`; bare
 python3 -m unittest discover -s opportunity-intelligence/tools/tests -v
 ```
 
-51 tests pin the engine to the published OPP-001/OPP-002 numbers and run the process validators against the repo's real knowledge-base files, so code, markdown, and process artefacts can't silently drift.
+75 tests pin the engine to the published OPP-001/OPP-002 numbers, run the process validators against the repo's real knowledge-base files, and fuzz the core engine with 300+ randomized input sets asserting accounting identities (contribution = revenue − cost, break-even defined iff economics positive, net ≤ gross free days) and monotonicity properties (raising a cost never raises contribution; raising a revenue line never lowers it). Code, markdown, and process artefacts can't silently drift.
