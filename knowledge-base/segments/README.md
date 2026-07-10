@@ -14,7 +14,8 @@ One profile per customer segment, using `customer-intelligence/templates/custome
 
 | Segment | File | Confidence | Last verified |
 |---|---|---|---|
-| — | — | — | — |
+| UAE micro/small online merchants on PSP gateways/payment links | `SEG-uae-online-sme-psp-merchants.md` | Medium | 2026-07-10 |
+| UAE marketplace sellers (Amazon.ae/Noon) | `SEG-uae-marketplace-sellers.md` | Low–Medium | 2026-07-10 |
 
 (Keep this index current as profiles are added.)
 

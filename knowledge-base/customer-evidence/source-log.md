@@ -1,0 +1,38 @@
+# Source Log
+
+Append-only. Per `customer-intelligence/templates/source-log.md`.
+
+| ID | Date added | Source (name + URL) | Type | Language | Access | Segments covered | Yield | Quality notes | Last checked |
+|---|---|---|---|---|---|---|---|---|---|
+| SRC-001 | 2026-07-10 | Trustpilot — Telr (trustpilot.com/review/www.telr.com) | review-store | en | search-snippet | uae-online-sme-psp-merchants | high | Direct fetch 403 (respected); snippets near-verbatim, reverify on page | 2026-07-10 |
+| SRC-002 | 2026-07-10 | Trustpilot — PayTabs (ca.trustpilot.com/review/paytabs.com) | review-store | en | search-snippet | uae-online-sme-psp-merchants | high | Direct fetch 403; snippets | 2026-07-10 |
+| SRC-003 | 2026-07-10 | Trustpilot — Ziina (trustpilot.com/review/ziina.com) | review-store | en | search-snippet | uae-online-sme-psp-merchants (micro) | high | Contains counter-evidence too (fast payouts when docs in order) | 2026-07-10 |
+| SRC-004 | 2026-07-10 | Trustpilot — Mamo (trustpilot.com/review/mamopay.com) | review-store | en | search-snippet | uae-online-sme-psp-merchants | high | 540-day hold complaint (Oct 2025), cross-corroborated on G2/Capterra | 2026-07-10 |
+| SRC-005 | 2026-07-10 | Trustpilot — Network International (trustpilot.com/review/network.ae) | review-store | en | search-snippet | uae-pos-merchants | medium | Only 14 reviews — directional | 2026-07-10 |
+| SRC-006 | 2026-07-10 | Trustpilot — Tap Payments (trustpilot.com/review/tap.company) | review-store | en | search-snippet | uae-online-sme-psp-merchants | high | Multiple distinct hold complaints | 2026-07-10 |
+| SRC-007 | 2026-07-10 | Trustpilot — tabby (trustpilot.com/review/tabby.ai) | review-store | en | search-snippet | — | dead-end | Consumer-side complaints only; no merchant settlement VoC | 2026-07-10 |
+| SRC-008 | 2026-07-10 | Hacker News — "Stripe closed my UAE business account" (news.ycombinator.com/item?id=47615145) | forum | en | direct | uae-online-sme-psp-merchants (micro/B2B) | high | First-person, dated ~Apr 2026 | 2026-07-10 |
+| SRC-009 | 2026-07-10 | Amazon.ae Seller Central forums (sellercentral.amazon.ae/seller-forums, 3 threads) | forum | en | direct | uae-marketplace-sellers | high | Verbatim, but ~2024-dated — staleness flag | 2026-07-10 |
+| SRC-010 | 2026-07-10 | Shopify Community — UAE gateway thread (community.shopify.com/t/397472) | forum | en | direct | uae-online-sme-psp-merchants | low | Context on gateway-access friction; no settlement complaints | 2026-07-10 |
+| SRC-011 | 2026-07-10 | Shopify Help — UAE payouts policy (help.shopify.com) | help-centre | en | direct | uae-online-sme-psp-merchants | medium | Baseline fact: 5-business-day minimum settlement UAE | 2026-07-10 |
+| SRC-012 | 2026-07-10 | Reddit (r/dubai, r/UAE etc.) | subreddit | en/ar | blocked-lawfully-inaccessible | multiple | dead-end | robots.txt blocks crawler; not bypassed. Alternative: manual review or indexed snippets — gap in candid community evidence | 2026-07-10 |
+| SRC-013 | 2026-07-10 | Internet Archive (web.archive.org) for Trustpilot pages | aggregator | en | blocked-lawfully-inaccessible | — | dead-end | Unreachable from this environment | 2026-07-10 |
+| SRC-014 | 2026-07-10 | Noon Seller Help — payments policy (support.noon.partners) | help-centre | en | direct | uae-marketplace-sellers | medium | Policy baseline: 14-day cycles, 7-day hold, AED 1,000 minimum; no VoC | 2026-07-10 |
+| SRC-015 | 2026-07-10 | Tamara merchant help (tamarapay.zendesk.com) | help-centre | en | direct | — | low | Baseline: weekly settlement, AED/SAR 2,500 threshold | 2026-07-10 |
+| SRC-016 | 2026-07-10 | Stripe support — UAE payouts (support.stripe.com/questions/payouts-for-uae-accounts) | help-centre | en | direct | uae-online-sme-psp-merchants | medium | Baseline fact: UAE payouts T+5 business days | 2026-07-10 |
+| SRC-017 | 2026-07-10 | Telr T&Cs (telr.com/terms-and-condition) | help-centre | en | direct | — | medium | Contract baseline: settlement T+7 business days | 2026-07-10 |
+| SRC-018 | 2026-07-10 | PayTabs FAQ (ai.paytabs.com/en/faq/) | help-centre | en | direct | — | medium | Confirms freeze-until-investigation policy | 2026-07-10 |
+| SRC-019 | 2026-07-10 | G2 + Capterra — Mamo Business reviews | review-store | en | search-snippet | uae-online-sme-psp-merchants | medium | Corroboration + counter-evidence (praise for expedited settlement, onboarding) | 2026-07-10 |
+| SRC-020 | 2026-07-10 | mamopay.com official pages (pricing, cards, payouts, payment-collection, legal/terms-business, press) | vendor-changelog | en | direct | — | high | Primary source for Mamo facts | 2026-07-10 |
+| SRC-021 | 2026-07-10 | help.mamopay.com (articles 7234173, 7912169, 8759566, 8908635 etc.) | help-centre | en | direct | — | high | Pricing detail, POS absence, suspension policy; one article 404 | 2026-07-10 |
+| SRC-022 | 2026-07-10 | wio.io/press (press index) | vendor-changelog | en | direct | — | high | Backbone for Wio launch/partnership timeline | 2026-07-10 |
+| SRC-023 | 2026-07-10 | The National — Wio coverage (thenationalnews.com 2025-11-14, 2026-03-17) | founder-interview/press | en | direct | — | high | CEO interviews, FY2025 results, Islamic platform plan | 2026-07-10 |
+| SRC-024 | 2026-07-10 | Zawya press releases (Wio Salary Plan, Wio Invest $1B, AED 50B deposits, FY2024, iShares; Mamo TPV) | press | en | direct/search-snippet | — | high | PR-sourced; vendor-favourable framing — facts only | 2026-07-10 |
+| SRC-025 | 2026-07-10 | Aggregators: genzone.com, gccbusinesswatch.com, intlbm.com, fintechnews.ae, thefintechtimes.com, finovate.com, ibsintelligence.com, fintechmagazine.com, agbi.com, mena.entrepreneur.com | press | en | direct | — | medium | Used with corroboration; genzone is an aggregator — cross-checked | 2026-07-10 |
+| SRC-026 | 2026-07-10 | DFSA public register — Mamo Limited (dfsa.ae/public-register) | licensed | en | blocked-lawfully-inaccessible | — | dead-end | HTTP 403; licence facts taken from Mamo terms + press instead | 2026-07-10 |
+| SRC-027 | 2026-07-10 | Scamadviser (telr.com), Rannkly (Network International) | complaint-site | en | direct | — | dead-end | Ratings only, no review text | 2026-07-10 |
+| SRC-028 | 2026-07-10 | GulfSaasReview — Tap fees UAE 2026 (gulfsaasreview.com) | aggregator | en | direct | — | low | Baseline: Tap T+3 standard, negotiable T+1 | 2026-07-10 |
+| SRC-029 | 2026-07-10 | Google Play — Ziina, Wio Business app pages | review-store | en | direct | — | dead-end | Reviews/changelog not server-rendered; use app-store APIs or manual collection | 2026-07-10 |
+| SRC-030 | 2026-07-10 | Wamda, MENAbytes, finsmes — Mamo funding coverage | press | en | direct | — | medium | Funding history 2021 + 2024 | 2026-07-10 |
+| SRC-031 | 2026-07-10 | Wio financial statements + PR PDFs (assets.ctfassets.net) | licensed | en | direct | — | high | Audited FY2024 statements | 2026-07-10 |
+| SRC-032 | 2026-07-10 | LinkedIn (Wio Bank, Wio Invest, CEO posts) | social | en | blocked-lawfully-inaccessible | — | dead-end | Login wall; snippets only — manual-collection-needed for exec posts | 2026-07-10 |
