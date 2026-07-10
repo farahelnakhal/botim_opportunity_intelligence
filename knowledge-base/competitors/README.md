@@ -8,11 +8,11 @@ Seed list — the agent must discover additional relevant competitors independen
 
 | Competitor | File | Category (initial guess) | Profile status |
 |---|---|---|---|
-| Mamo | `mamo.md` | SME payments & cards | not yet profiled |
+| Mamo | `mamo.md` | SME payments & cards | profiled (2026-07-10) |
 | Pemo | `pemo.md` | Spend management & cards | not yet profiled |
 | Alaan | `alaan.md` | Spend management & cards | not yet profiled |
 | Qashio | `qashio.md` | Spend management & cards | not yet profiled |
-| Wio | `wio.md` | SME digital bank | not yet profiled |
+| Wio | `wio.md` | Digital bank → merchant payments (IP-2026-001) | profiled (2026-07-10; VoC + Business pricing pending) |
 | Mashreq NEOBiz | `mashreq-neobiz.md` | SME digital banking | not yet profiled |
 | Emirates NBD | `emirates-nbd.md` | Incumbent bank (SME) | not yet profiled |
 | RAKBANK | `rakbank.md` | Incumbent bank (SME) | not yet profiled |
@@ -34,6 +34,11 @@ Seed list — the agent must discover additional relevant competitors independen
 
 | Date | Competitor | Why added | Source |
 |---|---|---|---|
-| — | — | — | — |
+| 2026-07-10 | Telr | UAE PSP; heavy settlement-hold complaints (EV-2026-W28-001) | SRC-001 |
+| 2026-07-10 | PayTabs | UAE/GCC PSP; disbursement-reliability complaints (EV-2026-W28-002) | SRC-002 |
+| 2026-07-10 | Ziina | UAE payment-links player for micro-SMEs; hold complaints + praise (EV-2026-W28-003) | SRC-003 |
+| 2026-07-10 | Tap Payments | GCC PSP; fund-hold complaints incl. 540-day (EV-2026-W28-005) | SRC-006 |
+| 2026-07-10 | Network International | Largest UAE acquirer; POS-merchant settlement complaints (EV-2026-W28-006) | SRC-005 |
+| 2026-07-10 | Geidea | Acquirer now distributing Wio SME credit through its merchant network (IP-2026-001) | SRC-025 |
 
 Owned by Workstream A. Workstream B reads these profiles but does not modify them.
