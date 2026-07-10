@@ -1,0 +1,27 @@
+{
+  "opportunity_id": "OPP-009",
+  "name": "F&B weekend-cycle credit (sector-specific ultra-short revolving)",
+  "is_lending_product": true,
+  "proposed_classification": "weak",
+  "evidence_confidence": "low",
+  "comment": "Dry-run evaluation: module acceptance test on a fresh idea. Thu stock purchase -> weekend receipts -> Mon repayment; 4-7 day credit cycles repaid from routed weekend wallet receipts.",
+  "scores": {
+    "pain_severity":                 {"score": 4, "assumption": true,  "basis": "Weekend stock crunch assumed acute for small F&B; needs REQ-002 evidence"},
+    "pain_frequency":                {"score": 5, "assumption": true,  "basis": "Weekly cycle by construction"},
+    "financial_impact":              {"score": 3, "assumption": true,  "basis": "Bounded: one weekend's stock, not payroll or expansion"},
+    "workaround_cost":               {"score": 3, "assumption": true,  "basis": "Produce suppliers often extend informal weekly terms; cost moderate"},
+    "switching_intent":              {"score": 3, "assumption": true,  "basis": "Same inflection points as OPP-001"},
+    "willingness_to_pay":            {"score": 4, "assumption": true,  "basis": "MCA-style per-cycle fees tolerated in sector; unverified locally"},
+    "digital_readiness":             {"score": 3, "assumption": true,  "basis": "Mixed; weekend receipts increasingly card/wallet"},
+    "payment_volume":                {"score": 4, "assumption": true,  "basis": "Receipts concentrated on weekends -> high routable share of flow"},
+    "credit_need":                   {"score": 4, "assumption": true,  "basis": "Recurring weekly but small-ticket"},
+    "botim_distribution_advantage":  {"score": 4, "assumption": true,  "basis": "Same as OPP-001; F&B assumed well-represented on BOTIM"},
+    "transaction_data_advantage":    {"score": 4, "assumption": true,  "basis": "Weekend receipts give fast, dense repayment signal if routed"},
+    "payment_revenue_potential":     {"score": 2, "assumption": true,  "basis": "Wallet take only; balances small"},
+    "lending_revenue_potential":     {"score": 2, "assumption": true,  "basis": "Short duration + small balances -> low absolute revenue per merchant"},
+    "credit_risk_visibility":        {"score": 4, "assumption": true,  "basis": "5-day feedback loop; default visible within a week"},
+    "competitive_defensibility":     {"score": 2, "assumption": true,  "basis": "Trivially copyable; is a parameterisation of OPP-001, not a moat"},
+    "ease_of_validation":            {"score": 4, "assumption": false, "basis": "Same instruments as VE-001; could ride along in its interviews"},
+    "mvp_feasibility_7wk":           {"score": 4, "assumption": false, "basis": "Simpler than OPP-001 concierge: smaller limits, faster cycles"}
+  }
+}
