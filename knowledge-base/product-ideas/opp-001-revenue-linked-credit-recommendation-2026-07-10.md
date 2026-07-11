@@ -39,9 +39,9 @@ Merchants take the credit but won't move their *receiving* rails — routing dec
 
 ## Appendices (by reference — single source of truth)
 
-- **A. Scorecard (all 17 scores):** `opportunity-intelligence/test-cases/01-revenue-linked-revolving-credit.md`
-- **B. Stress test & classification rationale:** same file — strongest case against is the routing chicken-and-egg; adverse selection offset by small growing limits; cash-recycling fraud flagged
-- **C. Commercial model (3 cases, break-even, sensitivity-ranked assumptions):** `knowledge-base/commercial-models/opp-001-revenue-linked-credit.md`
+- **A. Scorecard (all 17 scores):** `knowledge-base/opportunity-scores/opp-001-scorecard.json` (validate with `run.py score`)
+- **B. Stress test & classification rationale:** `knowledge-base/product-ideas/opp-001-revenue-linked-credit.md` — strongest case against is the routing chicken-and-egg; adverse selection offset by small growing limits; cash-recycling fraud flagged
+- **C. Commercial model (3 cases, break-even):** `knowledge-base/commercial-models/opp-001-computed.md` (engine-generated from `opp-001-inputs.json`; narrative in `opp-001-revenue-linked-credit.md`)
 - **D. Value proposition & loop:** `knowledge-base/product-ideas/opp-001-revenue-linked-credit.md`
 - **E. Validation plan (thresholds pre-committed):** `knowledge-base/validation/VE-001-revenue-routing-commitment.md`
 - **F. Seven-week MVP (week-by-week, kill thresholds):** profile file, MVP section

@@ -2,6 +2,8 @@
 
 Use for every payment-and-credit proposition. **All figures are ranges (downside / base / upside), in AED unless noted.** Every input is labelled Fact (F), Estimate (E), or Assumption (A) with its source.
 
+**Numbers come from the engine** (`opportunity-intelligence/tools/run.py model`): fill a `*-inputs.json`, generate the computed report with `--write`, and keep this template's structure for the narrative around it. Online/offline mix, acquiring revenue, and average credit duration are supported as optional engine inputs (see `tools/README.md`).
+
 ## 1. Volume drivers
 
 | Input | Downside | Base | Upside | F/E/A | Source |

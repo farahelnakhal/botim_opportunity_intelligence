@@ -68,6 +68,19 @@ For every scored proposition also record:
 - **Assumption load:** if more than 6 of 17 scores are `(A)`, classification cannot exceed "Promising but unvalidated".
 - Composite (optional, shown last): simple mean, displayed to one decimal, labelled "indicative only".
 
+## Canonical labels (prose ↔ engine)
+
+To avoid vocabulary drift between documents and the engine (`tools/opportunity_engine/scoring.py`):
+
+| Prose (documents, backlog) | Engine enum (JSON, exit codes) |
+|---|---|
+| Strong opportunity | `strong` |
+| Promising but unvalidated (qualifiers allowed, e.g. "borderline Weak") | `promising` |
+| Weak (qualifiers allowed, e.g. "standalone") | `weak` |
+| Reject (archive only — never a live backlog row) | `reject` |
+
+Evidence confidence: Title case in prose ("Low"), lowercase in JSON (`"low"`). The backlog checker matches classification by substring: a live-row label must contain at least one enum word and must not be reject-only; when a qualifier mentions a second enum word ("Promising but unvalidated (borderline Weak)"), the first word stated is the classification.
+
 ## Output format
 
 Store completed scorecards in `knowledge-base/opportunity-scores/<idea-slug>.md` using this table:

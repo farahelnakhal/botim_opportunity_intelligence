@@ -2,7 +2,7 @@
 
 Living document per `opportunity-intelligence/templates/opportunity-backlog.md`. Rows are never deleted — rejected/parked ideas move to the Archive with a reopen trigger.
 
-Profiles for OPP-001..003 currently live in `opportunity-intelligence/test-cases/` (they were built as worked examples); they migrate to this folder as evidence lands and scores are refreshed.
+Every proposition's canonical profile lives in this folder (`opp-nnn-*.md`); the files in `opportunity-intelligence/test-cases/` are worked illustrations that point here.
 
 ## Backlog
 
@@ -41,4 +41,5 @@ Profiles for OPP-001..003 currently live in `opportunity-intelligence/test-cases
 - 2026-07-10 — OPP-001 opportunity profile created (`opp-001-revenue-linked-credit.md`): value proposition (organic switching = credit access unavailable elsewhere + activity-linked limits) and 7-week concierge MVP with kill thresholds. OPP-001 package complete pending field validation; VE-001 gates the MVP.
 - 2026-07-10 — Meeting-ready recommendation issued for OPP-001 (`opp-001-revenue-linked-credit-recommendation-2026-07-10.md`). Ask: approve VE-001 now; concierge pilot pre-approved conditional on VE-001 pass; nudge REQ-001/REQ-002. Assumption-stage — not a build recommendation.
 - 2026-07-10 — Computation engine shipped (`opportunity-intelligence/tools/`, 21 tests): commercial + subsidy models, scorecard validation with caps/floors, and a read-only parser for Workstream A's now-published `EV-YYYY-Wnn-nnn` evidence format. REQ-001 marked Answered. Machine-readable inputs added for OPP-001 model/scorecard and OPP-002 subsidy package.
+- 2026-07-10 — Audit remediation: canonical-numbers rule adopted (engine-written reports only; OPP-001 hand-written tables retired for `opp-001-computed.md`); OPP-001/002/003 profiles migrated from test-cases/ into this folder (`opp-002-supplier-payment-card.md`, `opp-003-generic-cashback-wallet.md` created); consolidated `templates/opportunity-profile.md` added; classification-label mapping documented in the scoring framework.
 - 2026-07-10 — OPP-009 (F&B weekend-cycle credit) evaluated end-to-end as the module's dry-run acceptance test. Engine verdict: +70/merchant/month base but break-even ≈1,987 vs 300 merchants; classified Weak-standalone, valuable parameters folded into OPP-001. Full trail: `opp-009-fnb-weekend-cycle-credit.md`, `opportunity-scores/opp-009-scorecard.json`, `commercial-models/opp-009-{inputs.json,computed.md}`.

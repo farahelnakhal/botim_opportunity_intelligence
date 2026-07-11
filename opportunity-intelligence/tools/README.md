@@ -55,6 +55,8 @@ before the run — do not edit them), run `verdict`, and apply the pre-committed
 
 Run `check` before every commit that touches `knowledge-base/` — it is the module's regression test.
 
+**Canonical-numbers rule:** every numeric table in a knowledge-base document must be an engine-written report (`--write`) from a committed inputs JSON. Narrative markdown interprets the numbers; it never hand-authors them. (Audit remediation 2026-07-10: OPP-001's hand-written tables were retired in favour of `opp-001-computed.md`.)
+
 Add `--write <path>` to `model`/`subsidy`/`score` to save the report as markdown. The tool refuses to write into Workstream A or shared paths.
 
 ## Inputs
@@ -66,6 +68,8 @@ Machine-readable inputs live next to their markdown models in this module's know
 - `knowledge-base/opportunity-scores/<opp>-scorecard.json` — scorecard
 
 Every numeric input may be `{"value": n, "label": "F|E|A", "note": "..."}`; bare numbers default to label **A** (assumption). All three cases (downside/base/upside) are mandatory — the engine refuses single-case models.
+
+**Optional card/acquiring inputs** (backwards-compatible; omit for wallet products): `acquiring_revenue_monthly`; the online/offline blend trio `offline_share` + `payment_take_bps_offline` + `payment_take_bps_online` (all-or-nothing, and `payment_take_bps` must then be 0 — the engine rejects double counting); `avg_credit_duration_days` (reporting-only: derives monthly originations and credit turns; the balance model embeds duration in utilisation). Monte Carlo samples optional inputs but rejects them if present in only some cases; sensitivity perturbs them (except the reporting-only duration); scenarios may shock them only in models that use them.
 
 ## Discipline enforced in code, not just prose
 
@@ -92,4 +96,4 @@ Every numeric input may be `{"value": n, "label": "F|E|A", "note": "..."}`; bare
 python3 -m unittest discover -s opportunity-intelligence/tools/tests -v
 ```
 
-75 tests pin the engine to the published OPP-001/OPP-002 numbers, run the process validators against the repo's real knowledge-base files, and fuzz the core engine with 300+ randomized input sets asserting accounting identities (contribution = revenue − cost, break-even defined iff economics positive, net ≤ gross free days) and monotonicity properties (raising a cost never raises contribution; raising a revenue line never lowers it). Code, markdown, and process artefacts can't silently drift.
+89 tests pin the engine to the published OPP-001/OPP-002 numbers, run the process validators against the repo's real knowledge-base files, and fuzz the core engine with 300+ randomized input sets asserting accounting identities (contribution = revenue − cost, break-even defined iff economics positive, net ≤ gross free days) and monotonicity properties (raising a cost never raises contribution; raising a revenue line never lowers it). Code, markdown, and process artefacts can't silently drift.

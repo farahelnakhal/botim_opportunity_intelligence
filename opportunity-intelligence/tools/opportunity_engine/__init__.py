@@ -13,6 +13,7 @@ Computation layer for the markdown frameworks in opportunity-intelligence/:
 - results: verdict engine for experiment results vs pre-committed thresholds
 - montecarlo: seeded Monte Carlo over the three-case model
 - stress: named correlated adverse scenarios (credit-and-run, ...)
+- journal: calibrated decision journal (Brier-scored predictions)
 
 Pure standard library. Inputs are JSON files kept in the module's own
 knowledge-base folders; Workstream A files are never written.
@@ -21,5 +22,5 @@ knowledge-base folders; Workstream A files are never written.
 __all__ = [
     "commercial", "subsidy", "scoring", "evidence",
     "experiments", "backlog", "sensitivity", "results",
-    "montecarlo", "stress",
+    "montecarlo", "stress", "journal",
 ]

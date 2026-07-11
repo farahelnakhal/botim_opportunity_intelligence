@@ -33,7 +33,9 @@ REQUIRED_INPUTS = (
     "limit_multiple_of_routed_flow", # credit limit as multiple of monthly routed flow
     "utilisation",                   # fraction of limit drawn on average
     "financing_rate_annual",
-    "payment_take_bps",              # net wallet P2M take on routed flow (NOT card interchange)
+    "payment_take_bps",              # net take on routed flow (wallet fee OR net interchange —
+                                     # never gross MDR); must be 0 when the online/offline
+                                     # blend inputs are used instead
     "subscription_revenue_monthly",
     "other_revenue_monthly",         # transfers / FX / supplier commissions
     "funding_rate_annual",
@@ -46,6 +48,19 @@ REQUIRED_INPUTS = (
     "cac_amortised_monthly",
     "fixed_costs_monthly",           # programme-level, not per merchant
 )
+
+# Optional inputs (card/acquiring products). Absent => defaults; fully
+# backwards-compatible with wallet-product models that omit them.
+OPTIONAL_INPUTS = (
+    "acquiring_revenue_monthly",     # net acquiring margin if BOTIM also acquires (default 0)
+    "offline_share",                 # fraction of routed flow that is in-person (blend trio)
+    "payment_take_bps_offline",      # net take on offline flow (blend trio)
+    "payment_take_bps_online",       # net take on online flow (blend trio)
+    "avg_credit_duration_days",      # avg days a drawn dirham stays out; reporting/derived only —
+                                     # the balance model already embeds duration in utilisation
+)
+
+_BLEND_TRIO = ("offline_share", "payment_take_bps_offline", "payment_take_bps_online")
 
 
 class InputError(ValueError):
@@ -79,7 +94,12 @@ class CaseResult:
     # per-merchant monthly revenue
     financing_revenue: float = 0.0
     payment_revenue: float = 0.0
+    acquiring_revenue: float = 0.0
     total_revenue: float = 0.0
+    effective_payment_take_bps: float = 0.0
+    # duration-derived (None unless avg_credit_duration_days provided)
+    monthly_originations: float = None
+    credit_turns_per_year: float = None
     # per-merchant monthly cost
     cost_of_capital: float = 0.0
     expected_credit_loss: float = 0.0
@@ -103,11 +123,14 @@ def compute_case(case_name, raw_inputs):
     missing = [k for k in REQUIRED_INPUTS if k not in raw_inputs]
     if missing:
         raise InputError(f"case '{case_name}': missing inputs: {', '.join(missing)}")
-    unknown = [k for k in raw_inputs if k not in REQUIRED_INPUTS]
+    unknown = [k for k in raw_inputs if k not in REQUIRED_INPUTS + OPTIONAL_INPUTS]
     if unknown:
         raise InputError(f"case '{case_name}': unknown inputs: {', '.join(unknown)}")
 
     inputs = {k: _norm(raw_inputs[k], k) for k in REQUIRED_INPUTS}
+    for k in OPTIONAL_INPUTS:
+        if k in raw_inputs:
+            inputs[k] = _norm(raw_inputs[k], k)
     r = CaseResult(case=case_name, inputs=inputs)
     r.assumption_labels = {k: lab for k, (_, lab, _) in inputs.items()}
 
@@ -115,17 +138,49 @@ def compute_case(case_name, raw_inputs):
         if not 0 <= r.v(frac) <= 1:
             raise InputError(f"case '{case_name}': {frac} must be a fraction 0..1, got {r.v(frac)}")
 
+    # online/offline blend: all-or-nothing trio, replaces the flat take
+    blend_given = [k for k in _BLEND_TRIO if k in inputs]
+    if blend_given:
+        if len(blend_given) != len(_BLEND_TRIO):
+            raise InputError(
+                f"case '{case_name}': blend inputs are all-or-nothing; missing "
+                f"{', '.join(k for k in _BLEND_TRIO if k not in inputs)}"
+            )
+        if not 0 <= r.v("offline_share") <= 1:
+            raise InputError(f"case '{case_name}': offline_share must be a fraction 0..1")
+        if r.v("payment_take_bps") != 0:
+            raise InputError(
+                f"case '{case_name}': set payment_take_bps to 0 when using the "
+                "online/offline blend — providing both double-counts payment revenue"
+            )
+        off = r.v("offline_share")
+        r.effective_payment_take_bps = (
+            off * r.v("payment_take_bps_offline") + (1 - off) * r.v("payment_take_bps_online")
+        )
+    else:
+        r.effective_payment_take_bps = r.v("payment_take_bps")
+
     # volumes
     r.routed_flow = r.v("monthly_revenue_per_merchant") * r.v("routed_share")
     r.credit_limit = r.routed_flow * r.v("limit_multiple_of_routed_flow")
     r.drawn_balance = r.credit_limit * r.v("utilisation")
 
+    # duration-derived reporting (balance model already embeds duration in utilisation)
+    if "avg_credit_duration_days" in inputs:
+        duration = r.v("avg_credit_duration_days")
+        if duration <= 0:
+            raise InputError(f"case '{case_name}': avg_credit_duration_days must be > 0")
+        r.monthly_originations = r.drawn_balance * 30 / duration
+        r.credit_turns_per_year = 365 / duration
+
     # revenue (per merchant / month)
     r.financing_revenue = r.drawn_balance * r.v("financing_rate_annual") / 12
-    r.payment_revenue = r.routed_flow * r.v("payment_take_bps") / 10_000
+    r.payment_revenue = r.routed_flow * r.effective_payment_take_bps / 10_000
+    r.acquiring_revenue = r.v("acquiring_revenue_monthly") if "acquiring_revenue_monthly" in inputs else 0.0
     r.total_revenue = (
         r.financing_revenue
         + r.payment_revenue
+        + r.acquiring_revenue
         + r.v("subscription_revenue_monthly")
         + r.v("other_revenue_monthly")
     )
@@ -193,7 +248,9 @@ def render_markdown(model, results):
         row("Credit limit", lambda r: r.credit_limit),
         row("Average drawn balance", lambda r: r.drawn_balance),
         row("Financing revenue", lambda r: r.financing_revenue),
-        row("Payment revenue (wallet take, not interchange)", lambda r: r.payment_revenue),
+        row("Payment revenue (net take/interchange, never gross MDR)", lambda r: r.payment_revenue),
+        row("Effective payment take (bps)", lambda r: r.effective_payment_take_bps, "{:.1f}"),
+        row("Acquiring revenue", lambda r: r.acquiring_revenue),
         row("Total revenue", lambda r: r.total_revenue),
         row("Cost of capital", lambda r: r.cost_of_capital),
         row("Expected credit loss", lambda r: r.expected_credit_loss),
@@ -208,6 +265,13 @@ def render_markdown(model, results):
         row("Max free-credit days (net of fraud+processing)", lambda r: r.max_free_days_net, "{:.1f}"),
         row("Max cashback (% of routed flow)", lambda r: r.max_cashback_pct, "{:.2f}%"),
         row("Max fee subsidy (from contribution)", lambda r: r.max_fee_subsidy),
+    ]
+    if b.monthly_originations is not None:
+        lines += [
+            row("Monthly originations (duration-derived)", lambda r: r.monthly_originations or 0),
+            row("Credit turns per year", lambda r: r.credit_turns_per_year or 0, "{:.1f}"),
+        ]
+    lines += [
         "",
         "## Assumption labels",
         "",

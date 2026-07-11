@@ -1,0 +1,59 @@
+{
+  "predictions": [
+    {
+      "id": "PRED-001",
+      "statement": "VE-001 reaches a conclusive verdict (pass or fail, not inconclusive) on its pre-committed thresholds by 2026-08-31",
+      "p": 0.5,
+      "made": "2026-07-11",
+      "resolve_by": "2026-08-31",
+      "links": ["VE-001"],
+      "outcome": null,
+      "resolved_on": null,
+      "resolution_note": "RC-8: waitlist conversions typically 5-15%; our 40/15 thresholds leave a wide inconclusive zone"
+    },
+    {
+      "id": "PRED-002",
+      "statement": "VE-001 passes: >=40% of qualified merchants complete the waitlist including the >=30% routing condition",
+      "p": 0.25,
+      "made": "2026-07-11",
+      "resolve_by": "2026-08-31",
+      "links": ["VE-001", "OPP-001"],
+      "outcome": null,
+      "resolved_on": null,
+      "resolution_note": "RC-2 (10-30% sustain new rails) and RC-8 both argue the routing ask is hard; 0.25 reflects deliberate above-class threshold"
+    },
+    {
+      "id": "PRED-003",
+      "statement": "VE-002 finds >=20% of mapped supplier relationships card-payable without surcharge",
+      "p": 0.35,
+      "made": "2026-07-11",
+      "resolve_by": "2026-08-31",
+      "links": ["VE-002", "OPP-002"],
+      "outcome": null,
+      "resolved_on": null,
+      "resolution_note": "RC-7 range 10-35%; UAE wholesale skews transfer-on-terms, so below class midpoint"
+    },
+    {
+      "id": "PRED-004",
+      "statement": "Desk research confirms AstraTech can price SME revolving credit at >=18% APR-equivalent without being uncompetitive",
+      "p": 0.6,
+      "made": "2026-07-11",
+      "resolve_by": "2026-08-15",
+      "links": ["OPP-001"],
+      "outcome": null,
+      "resolved_on": null,
+      "resolution_note": "RC-4 says merchants accept 25-50% APR-equiv for revenue-linked products; risk is bank competition for the best credits"
+    },
+    {
+      "id": "PRED-005",
+      "statement": "Workstream A commits at least 10 evidence records to knowledge-base/customer-evidence/records/ by 2026-07-31",
+      "p": 0.65,
+      "made": "2026-07-11",
+      "resolve_by": "2026-07-31",
+      "links": ["REQ-002"],
+      "outcome": null,
+      "resolved_on": null,
+      "resolution_note": "Their module and templates shipped 2026-07-10; execution cadence unknown"
+    }
+  ]
+}

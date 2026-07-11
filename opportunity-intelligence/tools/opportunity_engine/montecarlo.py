@@ -48,9 +48,27 @@ def _percentile(sorted_values, pct):
 
 
 def input_ranges(model):
-    """Per input: (low, mode, high) across the three cases, mode clamped."""
+    """Per input: (low, mode, high) across the three cases, mode clamped.
+
+    Optional inputs are sampled too, but must appear in all three cases or
+    none — a half-specified optional input silently changes model shape
+    between draws, so it is rejected instead. avg_credit_duration_days is
+    excluded (reporting-only; no economic effect).
+    """
     ranges = {}
-    for name in commercial.REQUIRED_INPUTS:
+    sampled_names = list(commercial.REQUIRED_INPUTS)
+    for name in commercial.OPTIONAL_INPUTS:
+        if name == "avg_credit_duration_days":
+            continue
+        present = [c for c in CASES if name in model["cases"][c]]
+        if present and len(present) != len(CASES):
+            raise InputError(
+                f"optional input '{name}' present in {present} but not all cases — "
+                "provide it in all three cases or none"
+            )
+        if present:
+            sampled_names.append(name)
+    for name in sampled_names:
         values = [commercial._norm(model["cases"][c][name], name)[0] for c in CASES]
         base = values[1]
         low, high = min(values), max(values)
@@ -81,7 +99,7 @@ def simulate(model, n=5000, seed=42):
                 sampled[name] = low
             else:
                 value = rng.triangular(low, high, mode)
-                if name in ("routed_share", "utilisation"):
+                if name in ("routed_share", "utilisation", "offline_share"):
                     value = min(1.0, max(0.0, value))
                 sampled[name] = value
         result = commercial.compute_case("simulation", sampled)
