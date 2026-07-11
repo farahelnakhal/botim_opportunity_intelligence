@@ -19,6 +19,7 @@ Every proposition's canonical profile lives in this folder (`opp-nnn-*.md`); the
 | OPP-010 | Settlement assurance + hold underwriting (acceptance with priced holds; from Workstream A handoff #1/#2) | SEG-uae-online-sme-psp-merchants | Promising but unvalidated | 3.9 | Medium (10/17 dims evidenced) | Held merchants are high-risk categories we'd also hold | VE-003 + regulatory review of settlement guarantees | Workstream B | 2026-07-11 |
 | OPP-011 | Standalone paid instant-settlement advance (merchant keeps PSP; we advance receivables) | Online SMEs on any PSP | Unscored (candidate; from handoff #2 — largely OPP-010's concierge MVP as a product) | — | Medium (mamo.md priced WTP) | May be a feature of OPP-010, not a product (OPP-009 lesson) | Score after VE-003; assess as OPP-010 MVP first | Workstream B | 2026-07-11 |
 | OPP-012 | Marketplace-seller disbursement advances (Amazon.ae et al) | SEG-uae-marketplace-sellers | Unscored (candidate; from handoff #3) | — | Low-Medium (EV-2026-W28-008, 2024-dated) | Platform-risk: marketplaces can change disbursement policy or self-serve financing | Needs refreshed EV-008 evidence (Workstream A verification queue) before scoring | Workstream B | 2026-07-11 |
+| OPP-013 | Import payment + working-capital account (cross-border supplier T/T + cycle financing, below the AED 1M fintech floor) | SEG-uae-importers-upfront-pay | Promising but unvalidated (borderline Weak — switching_intent flag) | 3.2 | Medium (9/17 evidenced; segment itself Low) | Fee-switching weak (cheap rails exist) + funded competitors (IP-2026-002) + own-rail quality (EV-2026-W28-018) | VE-004 (also A's segment-upgrade instrument); EV-018 rail fix is a hard pilot gate | Workstream B | 2026-07-11 |
 
 ## Evidence-request queue (to Customer & Market Intelligence — recorded here, never written into their folders)
 
@@ -30,6 +31,7 @@ Every proposition's canonical profile lives in this folder (`opp-nnn-*.md`); the
 | REQ-004 | OPP-004 | IBAN/business-account access pain for micro-merchants (rejection reasons, workarounds, costs) | Determines whether OPP-004 is a real proposition | Open |
 | REQ-005 | All | Segment definitions in `knowledge-base/segments/` referenceable by name | Consistent segment naming across modules | Open |
 | REQ-006 | All | Inflection-point catalogue (bank rejection, expansion, VAT deadlines, big orders) | Experiment recruitment targeting | Open |
+| REQ-007 | OPP-013 | First-person UAE importer accounts confirming the upfront-pay/collect-later pattern (SEG-uae-importers-upfront-pay upgrade condition) | Segment is Low confidence; VE-004 verbatims will be handed back to fulfil this jointly | Open — VE-004 designed as the shared instrument |
 
 ## Archive
 
@@ -38,6 +40,8 @@ Every proposition's canonical profile lives in this folder (`opp-nnn-*.md`); the
 | OPP-003 | Generic 2%-cashback business wallet + prepaid card | 2026-07-10 | Fails organic-switching test; 200 bps cashback vs 25–90 bps net payment margin loses money in all three cases (arithmetic, not assumption) | Board-approved loss-leader strategy with defined payback via a validated credit product — i.e. a different proposition |
 
 ## Changelog
+
+- 2026-07-11 — OPP-013 (import payment + working-capital account) evaluated end-to-end as the combined agent's full-scale test on Workstream A's EV-013..019 importer evidence: scorecard 3.2 with switching_intent critical flag (evidence-aligned, sync reports no divergence), base +468/merchant/month with knife-edge break-even (364 vs 350), credit_and_run kills, own_rail_failure (EV-018) worst custom scenario. VE-004 designed as a joint instrument (also A's segment-confidence upgrade); PRED-007 logged (p=0.40); REQ-007 opened.
 
 - 2026-07-11 — Desk-research calibration pass (`commercial-models/BENCHMARKS.md`): official Visa UAE interchange sourced — OPP-002 gross interchange re-based 90/130/170 (A) → 130/180/200 (E); net margin now 65/110/120 bps and the 20-free-day package affordable in ALL cases (was downside loss-leader). RC-3/4/8 sourced, RC-9/10 added. PRED-004 resolved TRUE (revenue-linked pricing ≥18% well inside market norms). OPP-002 remains gated on VE-002 — acceptance, not economics, is now clearly the only open question.
 - 2026-07-11 — Workstream A W28 handoffs ingested: OPP-010 created and fully evaluated (first majority-evidenced scorecard, 3.9, survives all 8 stress scenarios; VE-003 designed with pre-committed thresholds; PRED-006 logged); OPP-011/OPP-012 logged as unscored candidates; handoff #4 (IP-2026-001 Wio timing) noted in OPP-010 defensibility. REQ-002 marked partially answered.

@@ -80,6 +80,20 @@
       "outcome": null,
       "resolved_on": null,
       "resolution_note": ""
+    },
+    {
+      "id": "PRED-007",
+      "statement": "VE-004 passes both thresholds (>=8/15 gap confirmations AND >=25% term-sheet acceptance)",
+      "p": 0.4,
+      "made": "2026-07-11",
+      "resolve_by": "2026-10-15",
+      "links": [
+        "VE-004",
+        "OPP-013"
+      ],
+      "outcome": null,
+      "resolved_on": null,
+      "resolution_note": ""
     }
   ]
 }

@@ -1,0 +1,24 @@
+{
+  "experiment_id": "VE-004",
+  "proposition": "OPP-013",
+  "comment": "Thresholds pre-committed from VE-004-importer-cycle-financing.md BEFORE the run. Fill 'observed' after field work, then: python3 opportunity-intelligence/tools/run.py verdict knowledge-base/validation/VE-004-result.json",
+  "metrics": [
+    {
+      "name": "gap_confirmed_interviews",
+      "description": "of 15 interviews: first-person confirmation of upfront-pay/collect-later gap",
+      "observed": null,
+      "success": {"op": ">=", "value": 8},
+      "failure": {"op": "<=", "value": 4}
+    },
+    {
+      "name": "term_sheet_acceptance_pct",
+      "description": "% of >=40 qualified importers accepting the priced, routing-conditional term sheet",
+      "observed": null,
+      "success": {"op": ">=", "value": 25},
+      "failure": {"op": "<=", "value": 8}
+    }
+  ],
+  "on_pass": "Design OPP-013 concierge MVP (manual FX transfer + manual financing on AstraTech licence, gated on EV-018 rail-quality fix); hand verbatims to Workstream A for SEG upgrade",
+  "on_fail": "Reclassify OPP-013 as Weak in BACKLOG.md; if gap confirmations failed, flag SEG-uae-importers-upfront-pay thesis to Workstream A",
+  "on_inconclusive": "One metric passed: extend offers by 20 or re-segment by corridor (China vs India vs Turkey) before deciding"
+}

@@ -1,0 +1,22 @@
+{
+  "fx_margin_compression": {
+    "description": "Pricing war on transfer rails: Wise-level transparent pricing forces our net take to 40% of plan (EV-2026-W28-013 contradictory evidence: cheap rails already exist).",
+    "shocks": {"payment_take_bps": {"mul": 0.4}}
+  },
+  "own_rail_failure": {
+    "description": "EV-2026-W28-018 materialises at business scale: BOTIM's own transfer execution fails (12-day delays, no-refund loops); merchants route away and support load spikes.",
+    "shocks": {"routed_share": {"mul": 0.4}, "servicing_cost_monthly": {"mul": 1.8}}
+  },
+  "transit_and_invoice_fraud": {
+    "description": "Goods never ship / collusive supplier invoicing: financed payments to fake or failing suppliers. ECL 2.5x, fraud 2x.",
+    "shocks": {"ecl_rate_annual": {"mul": 2.5}, "fraud_loss_monthly": {"mul": 2.0}}
+  },
+  "funded_competitor_capture": {
+    "description": "IP-2026-002: CredibleX/Comfi deploy their capital into the same importers first; our CAC quadruples and routed share erodes.",
+    "shocks": {"cac_amortised_monthly": {"mul": 4.0}, "routed_share": {"mul": 0.7}}
+  },
+  "compliance_throttle": {
+    "description": "EV-2026-W28-019-style corporate-compliance loops throttle cross-border volume and add manual review cost.",
+    "shocks": {"monthly_revenue_per_merchant": {"mul": 0.6}, "servicing_cost_monthly": {"mul": 1.5}}
+  }
+}

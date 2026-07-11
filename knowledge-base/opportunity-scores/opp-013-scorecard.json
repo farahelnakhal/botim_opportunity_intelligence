@@ -1,0 +1,27 @@
+{
+  "opportunity_id": "OPP-013",
+  "name": "Import payment + working-capital account (cross-border supplier T/T + cycle financing)",
+  "is_lending_product": true,
+  "proposed_classification": "promising",
+  "evidence_confidence": "medium",
+  "comment": "Full-scale combined-agent test. Demand scores deliberately aligned to cited evidence axis values (sync-bridge discipline); segment confidence is Low per SEG-uae-importers-upfront-pay upgrade condition.",
+  "scores": {
+    "pain_severity":                 {"score": 3, "assumption": false, "basis": "EV-2026-W28-013 (sev 3, fee/FX opacity), EV-2026-W28-015 (sev 4, financing cost), EV-2026-W28-014 (sev 3) — real but not existential"},
+    "pain_frequency":                {"score": 3, "assumption": false, "basis": "Per-shipment recurring; EV-2026-W28-013/014/015 frequency axes 3-4"},
+    "financial_impact":              {"score": 4, "assumption": false, "basis": "EV-2026-W28-013 (AED ~105-130/transfer + 1.5-2.8% FX spread), EV-2026-W28-015 (LATR 8-15% p.a. or self-funding the 30-90d gap)"},
+    "workaround_cost":               {"score": 3, "assumption": false, "basis": "EV-2026-W28-013 provider-hopping, EV-2026-W28-014 escrow/wire adaptations, EV-2026-W28-015 LATR gated by collateral"},
+    "switching_intent":              {"score": 2, "assumption": false, "basis": "EV-2026-W28-013/014/015 switching axes 3/2/2 — searching-for-alternatives on fees only; cheap rails already exist (Wio, Wise, exchange houses). Transfer-cost switching alone is weak; the credit must carry the wedge"},
+    "willingness_to_pay":            {"score": 3, "assumption": false, "basis": "Fees paid today (revealed, EV-2026-W28-013); LATR 8-15% paid at mechanism level (EV-2026-W28-015) — but UAE-importer-level WTP explicitly unverified in EV-015"},
+    "digital_readiness":             {"score": 4, "assumption": true,  "basis": "Digital by trade necessity (platform escrow, T/T); segment marked mixed"},
+    "payment_volume":                {"score": 4, "assumption": true,  "basis": "Typical orders exceed card caps ($12-15k) per EV-2026-W28-014 — volume band per merchant unverified"},
+    "credit_need":                   {"score": 4, "assumption": true,  "basis": "Pay-upfront/collect-30-90d gap is the segment definition — but SEG-uae-importers-upfront-pay is Low confidence pending first-person accounts"},
+    "botim_distribution_advantage":  {"score": 3, "assumption": true,  "basis": "BOTIM already operates consumer remittance corridors (incl. the rails EV-2026-W28-018 criticises); business-user overlap unknown"},
+    "transaction_data_advantage":    {"score": 3, "assumption": true,  "basis": "Sees supplier-payment flow if routed; goods-in-transit and money-in side invisible without account adoption"},
+    "payment_revenue_potential":     {"score": 3, "assumption": true,  "basis": "FX margin real but competed down (Wise from 0.31%, Wio AED 35-40) — transparent-pricing wedge caps the take"},
+    "lending_revenue_potential":     {"score": 4, "assumption": true,  "basis": "60-75 day cycles, real balances, priced against LATR 8-15% and MCA class (RC-4)"},
+    "credit_risk_visibility":        {"score": 3, "assumption": true,  "basis": "Outbound flow visible; repayment depends on money-in we may not see; goods-in-transit risk structural"},
+    "competitive_defensibility":     {"score": 2, "assumption": false, "basis": "IP-2026-002: CredibleX ($100M facility) and Comfi ($65M) deploying capital NOW; banks own LATR. BOTIM edge is below-the-floor reach + owned corridor rails - narrow"},
+    "ease_of_validation":            {"score": 4, "assumption": false, "basis": "Importers reachable via trade communities; VE-004 doubles as Workstream A's segment-confidence upgrade instrument"},
+    "mvp_feasibility_7wk":           {"score": 3, "assumption": false, "basis": "Concierge feasible: manual FX transfer on existing BOTIM rails + manual financing on AstraTech licence — but EV-2026-W28-018 shows our own transfer execution must be fixed first"}
+  }
+}
