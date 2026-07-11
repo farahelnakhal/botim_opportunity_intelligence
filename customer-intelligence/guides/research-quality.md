@@ -5,7 +5,9 @@ Rules every workflow applies before a conclusion enters the knowledge base.
 ## For every important conclusion
 
 1. **Search for supporting evidence** — at least two independent sources for any conclusion marked Medium confidence or above.
+   **Source-type rule:** Medium or High confidence normally requires evidence from **at least two independent source *types*** (e.g. a review site *and* a forum thread; a first-person post *and* an official policy document) — not just two reviews on the same platform, which share that platform's selection bias. Exception allowed only where explicitly documented in the record's `Evidence confidence` cell (e.g. "single source type: dated first-person account corroborated by the provider's own published policy"), stating why one type suffices in this case.
 2. **Search for contradictory evidence** — run the mirror-image query (e.g. if concluding "merchants are leaving provider X over settlement delays", also search for merchants praising X's settlement speed, and for the same complaint about X's competitors — the pain may be industry-wide, not X-specific).
+   **Query-logging rule:** record the *actual* counter-search queries in the record's `Contradictory evidence` field — both when contradiction is found (which queries surfaced it) and when it is not ("none found (searched: `<provider> fast payout`, `<provider> same day settlement review`)"). "None found" without the queries is unverifiable and does not count as a completed counter-search.
 3. **Separate fact from inference.** Facts are quoted, dated, sourced. Inferences are labelled `Inference:` and tied to the facts they rest on.
 4. **Mark confidence** explicitly:
    - **High** — multiple independent, recent, behavioural sources; no unresolved contradiction.
@@ -23,6 +25,8 @@ Rules every workflow applies before a conclusion enters the knowledge base.
 | One complaint ≠ demand | A single merchant's pain is a lead to investigate, not evidence of broad demand. Frequency scoring (axis 1) must reflect how many distinct merchants exhibit it. |
 | Survivorship | Communities over-represent the angry and the digital-savvy. Note when a segment (e.g. cash-heavy, Arabic-first merchants) is under-observed rather than pain-free. |
 | Stale conclusions | Every record carries a `Last verified` date. Weekly updates re-verify anything load-bearing that is >90 days old. |
+
+**Definition — load-bearing record:** a record is *load-bearing* if any of the following cites it: (a) a headline in a weekly update, (b) a segment profile's "Main pain points", (c) an inflection-point record's evidence, or (d) a Workstream B scorecard or opportunity profile. Load-bearing records get priority in the verification queue and must not sit below Medium confidence without an explicit `needs-more-evidence` status.
 
 ## Evidence-strength ladder (strong → weak)
 

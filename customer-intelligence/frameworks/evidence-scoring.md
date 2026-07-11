@@ -17,6 +17,15 @@ Every pain point is scored 1–5 on ten axes. **All ten scores are always shown 
 | 9 | **BOTIM relevance** | Outside BOTIM/AstraTech's plausible scope | Adjacent; needs new capability | Squarely addressable via BOTIM reach, payments, wallets, cards, IBANs, or AstraTech lending |
 | 10 | **Evidence strength** | Stated interest / single weak source | One strong behavioural source or several weak aligned ones | Multiple independent, recent, behavioural sources |
 
+## Scoring 2 and 4 (interpolation rule)
+
+The table anchors 1, 3, and 5. The even scores are interpolations, applied the same way on every axis:
+
+- **2** = clearly beyond the 1 anchor, but does not yet meet the 3 anchor. Example (Frequency): two distinct merchants — more than "seen once", not yet "a handful".
+- **4** = fully meets the 3 anchor **and** shows part of the 5 anchor, without meeting it completely. Example (Frequency): recurs across many distinct merchants but only on one platform — breadth of the 5 anchor ("across many sources") is missing.
+
+If you cannot say which anchor a case exceeds, score the lower value — even scores must be argued from the anchors, never used as a hedge between them.
+
 ## Scoring rules
 
 - Score from evidence, not intuition; each score of 4–5 must be justifiable by cited evidence IDs.

@@ -12,7 +12,7 @@ Seed list — the agent must discover additional relevant competitors independen
 | Pemo | `pemo.md` | Spend management & cards | not yet profiled |
 | Alaan | `alaan.md` | Spend management & cards | not yet profiled |
 | Qashio | `qashio.md` | Spend management & cards | not yet profiled |
-| Wio | `wio.md` | Digital bank → merchant payments (IP-2026-001) | profiled (2026-07-10; VoC + Business pricing pending) |
+| Wio | `wio.md` | Digital bank → merchant payments (IP-2026-001) | profiled (2026-07-10) |
 | Mashreq NEOBiz | `mashreq-neobiz.md` | SME digital banking | not yet profiled |
 | Emirates NBD | `emirates-nbd.md` | Incumbent bank (SME) | not yet profiled |
 | RAKBANK | `rakbank.md` | Incumbent bank (SME) | not yet profiled |
