@@ -2,6 +2,8 @@
 
 Five worked examples of how to invoke this module. Each command implies: read the existing knowledge base first, follow `SYSTEM_PROMPT.md`, use the templates, log sources, and update — don't duplicate — existing records.
 
+**Every command's output ends with the 14-point research-run synthesis** (`guides/reasoning-chain.md`), traversing customer → job → pain → behaviour → workaround → evidence → contradiction → competitor → competitor failure → inflection point → implication → uncertainty → next action. A run that returns only collected sources or records without the synthesis is incomplete.
+
 ---
 
 ## 1. Pain-point deep-dive

@@ -18,6 +18,10 @@ How the agent finds evidence sources autonomously. The starting list below is a 
 
 **Local-language communities** in Arabic, Hindi, Urdu, Malayalam, and Tagalog.
 
+## Queries come from the chain, not the provider list
+
+Search queries are generated from reasoning-chain steps 1–2 and 5 (`guides/reasoning-chain.md`): who the merchant is, what job is failing, and what the workaround involves — *what would this merchant type when this job breaks?* Provider-anchored queries ("<provider> alternative", "<provider> payout delay") are the correct primary tool **for explicit competitor-research tasks and chain steps 9–10**; for pain discovery they are secondary, because they only find pain where a provider is already blamed and miss merchants who haven't named a culprit.
+
 ## How to infer new sources
 
 Work backwards from the customer, not forwards from a source list. For the segment under study, ask:

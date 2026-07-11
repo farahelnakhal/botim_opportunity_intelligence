@@ -39,6 +39,21 @@ Rules every workflow applies before a conclusion enters the knowledge base.
 
 Levels 1–4 are behavioural and can support High confidence. Levels 5–6 alone cap a conclusion at Low.
 
+## The six evidence classes (controlled vocabulary)
+
+Every signal cited in a record narrative or research synthesis names exactly one class. The classes map onto the ladder:
+
+| Class | What it is | Ladder level | Demand signal |
+|---|---|---|---|
+| **actual switching** | Merchant moved provider (voluntarily or forced — say which; forced switching signals provider failure, not preference) | 1 | Strongest |
+| **switching intent** | Concrete plan or active trialling of alternatives, not yet moved | 1–3 | Strong |
+| **workaround spending** | Money/risk already spent on an imperfect substitute (fees tolerated, tools stacked, personal cards, informal borrowing, paid consultants) | 2 | Strong — the price they already pay is revealed demand |
+| **observed behaviour** | Any other verifiable action (escalated to a regulator, asked unprompted for alternatives, padded balances) | 2–3 | Moderate–strong |
+| **stated interest** | "That would be useful" / "I'd pay for that" — hypotheticals | 5 | Weak alone |
+| **complaint** | Expression of dissatisfaction with no action attached | 4–6 by specificity | Weak alone — volume of complaints is never, by itself, demand |
+
+Use these class names in the `Switching signal`, `Willingness-to-pay signal`, and `Current workaround` cell values (e.g. "workaround spending: pays +0.75% for same-day settlement") — vocabulary inside existing fields, not new fields.
+
 ## Contradiction handling
 
 When new evidence contradicts an existing record:
