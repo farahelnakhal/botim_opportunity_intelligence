@@ -66,6 +66,20 @@
       "outcome": true,
       "resolved_on": "2026-07-11",
       "resolution_note": "12 records landed 2026-07-11, well before deadline"
+    },
+    {
+      "id": "PRED-006",
+      "statement": "VE-003 passes: >=30% waitlist completion among hold-affected merchants with pricing stated up front",
+      "p": 0.45,
+      "made": "2026-07-11",
+      "resolve_by": "2026-09-30",
+      "links": [
+        "VE-003",
+        "OPP-010"
+      ],
+      "outcome": null,
+      "resolved_on": null,
+      "resolution_note": ""
     }
   ]
 }

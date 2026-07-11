@@ -1,0 +1,31 @@
+{
+  "experiment_id": "VE-003",
+  "proposition": "OPP-010",
+  "comment": "Thresholds pre-committed from VE-003-hold-underwriting-demand.md BEFORE the run. Fill 'observed' after field work, then: python3 opportunity-intelligence/tools/run.py verdict knowledge-base/validation/VE-003-result.json",
+  "metrics": [
+    {
+      "name": "waitlist_completion_pct",
+      "description": "% of qualified hold-affected merchants completing the waitlist with pricing stated",
+      "observed": null,
+      "success": {"op": ">=", "value": 30},
+      "failure": {"op": "<=", "value": 10}
+    },
+    {
+      "name": "switching_trigger_interviews",
+      "description": "of 12 interviews: hold described as switching trigger unprompted",
+      "observed": null,
+      "success": {"op": ">=", "value": 7},
+      "failure": null
+    },
+    {
+      "name": "own_policy_would_hold_interviews",
+      "description": "of 12 interviews: merchant in a category our own risk policy would also hold (kill signal)",
+      "observed": null,
+      "success": null,
+      "failure": {"op": ">=", "value": 7}
+    }
+  ],
+  "on_pass": "Design concierge advance-against-receivables pilot + start regulatory review of settlement guarantees; re-score OPP-010 with interview evidence",
+  "on_fail": "Reclassify OPP-010 as Weak (niche wedge) in BACKLOG.md; hand verbatims to Workstream A",
+  "on_inconclusive": "Between thresholds: extend waitlist offers by 20 before deciding; do not soften pricing disclosure"
+}

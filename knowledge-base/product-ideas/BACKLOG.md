@@ -16,13 +16,16 @@ Every proposition's canonical profile lives in this folder (`opp-nnn-*.md`); the
 | OPP-007 | Cash-to-digital conversion play (cash-heavy merchants onboarded via cash-in network + wallet) | Cash-heavy micro/small merchants | Unscored | — | Low | Cash-in infrastructure cost; behaviour change is hardest here | Score after REQ-005 segment definitions | Workstream B | 2026-07-10 |
 | OPP-008 | Free SME account with paid lending (account free; monetise via AstraTech credit only) | Broad SME | Unscored | — | Low | Free account alone fails organic-switching test without a credit hook | Score after OPP-001 validation (overlapping hypothesis) | Workstream B | 2026-07-10 |
 | OPP-009 | F&B weekend-cycle credit (ultra-short revolving matched to weekly cash cycle) | F&B, 1–2 outlets | Weak (standalone) — fold into OPP-001 as segment config | 3.5 | Low | Weekend receipts don't route (shared with OPP-001) | Fold cycle-matched limits/sweeps into OPP-001 MVP design; no separate experiment | Workstream B | 2026-07-10 |
+| OPP-010 | Settlement assurance + hold underwriting (acceptance with priced holds; from Workstream A handoff #1/#2) | SEG-uae-online-sme-psp-merchants | Promising but unvalidated | 3.9 | Medium (10/17 dims evidenced) | Held merchants are high-risk categories we'd also hold | VE-003 + regulatory review of settlement guarantees | Workstream B | 2026-07-11 |
+| OPP-011 | Standalone paid instant-settlement advance (merchant keeps PSP; we advance receivables) | Online SMEs on any PSP | Unscored (candidate; from handoff #2 — largely OPP-010's concierge MVP as a product) | — | Medium (mamo.md priced WTP) | May be a feature of OPP-010, not a product (OPP-009 lesson) | Score after VE-003; assess as OPP-010 MVP first | Workstream B | 2026-07-11 |
+| OPP-012 | Marketplace-seller disbursement advances (Amazon.ae et al) | SEG-uae-marketplace-sellers | Unscored (candidate; from handoff #3) | — | Low-Medium (EV-2026-W28-008, 2024-dated) | Platform-risk: marketplaces can change disbursement policy or self-serve financing | Needs refreshed EV-008 evidence (Workstream A verification queue) before scoring | Workstream B | 2026-07-11 |
 
 ## Evidence-request queue (to Customer & Market Intelligence — recorded here, never written into their folders)
 
 | Req ID | For proposition | Evidence needed | Why it matters | Status |
 |---|---|---|---|---|
 | REQ-001 | All | Stable evidence-ID scheme (e.g. EV-###) in `knowledge-base/customer-evidence/` | Scorecards must cite evidence by ID | **Answered** — Workstream A published `EV-YYYY-Wnn-nnn` (weekly record files); our engine parses it (`opportunity-intelligence/tools/`) |
-| REQ-002 | OPP-001, OPP-005, OPP-008 | Working-capital pain: severity, frequency, current workaround and its cost (F&B/retail, 1–3 outlets, UAE) | 15 of 17 OPP-001 scores are assumption-based | Open |
+| REQ-002 | OPP-001, OPP-005, OPP-008 | Working-capital pain: severity, frequency, current workaround and its cost (F&B/retail, 1–3 outlets, UAE) | 15 of 17 OPP-001 scores are assumption-based | Partially answered — W28 records cover PSP-hold/banking-access pain (consumed by OPP-010); F&B/retail working-capital voice still open (their next-week focus includes it) |
 | REQ-003 | OPP-002, OPP-006 | How target merchants pay suppliers today: instrument, terms, card acceptance, surcharging | Decisive unknown for the supplier-card model | Open |
 | REQ-004 | OPP-004 | IBAN/business-account access pain for micro-merchants (rejection reasons, workarounds, costs) | Determines whether OPP-004 is a real proposition | Open |
 | REQ-005 | All | Segment definitions in `knowledge-base/segments/` referenceable by name | Consistent segment naming across modules | Open |
@@ -35,6 +38,8 @@ Every proposition's canonical profile lives in this folder (`opp-nnn-*.md`); the
 | OPP-003 | Generic 2%-cashback business wallet + prepaid card | 2026-07-10 | Fails organic-switching test; 200 bps cashback vs 25–90 bps net payment margin loses money in all three cases (arithmetic, not assumption) | Board-approved loss-leader strategy with defined payback via a validated credit product — i.e. a different proposition |
 
 ## Changelog
+
+- 2026-07-11 — Workstream A W28 handoffs ingested: OPP-010 created and fully evaluated (first majority-evidenced scorecard, 3.9, survives all 8 stress scenarios; VE-003 designed with pre-committed thresholds; PRED-006 logged); OPP-011/OPP-012 logged as unscored candidates; handoff #4 (IP-2026-001 Wio timing) noted in OPP-010 defensibility. REQ-002 marked partially answered.
 
 - 2026-07-10 — Backlog instantiated. OPP-001/002 logged from worked test cases; OPP-003 archived as Reject; OPP-004..008 seeded unscored from project-context idea list. Evidence-request queue opened (REQ-001..006).
 - 2026-07-10 — OPP-001 full commercial model built (`knowledge-base/commercial-models/opp-001-revenue-linked-credit.md`): base case +137 AED/merchant/month contribution but break-even ≈1,100 merchants vs base 500; downside loss-making. Classification unchanged; VE-001 remains the gate.
