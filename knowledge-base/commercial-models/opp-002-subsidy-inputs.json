@@ -4,43 +4,146 @@
   "comment": "Offered package under test: 20 free days, no cashback, no fee subsidy, no lending top-up. Gated: full commercial model waits for VE-002. 2026-07-11 refinement: gross interchange re-based to official Visa UAE domestic commercial rates (2.00-2.10% general segments; segment programs and large-ticket lower) per BENCHMARKS.md - was 90/130/170 (A), now 130/180/200 (E). Run: python3 opportunity-intelligence/tools/run.py subsidy knowledge-base/commercial-models/opp-002-subsidy-inputs.json",
   "cases": {
     "downside": {
-      "gross_interchange_bps": {"value": 130, "label": "E", "note": "heavy segment-program/large-ticket/downgrade mix; Mastercard blend unknown"},
-      "programme_split_bps": {"value": 40, "label": "A"},
-      "scheme_fee_bps": {"value": 10, "label": "A"},
-      "processing_bps": {"value": 10, "label": "A"},
-      "fraud_bps": {"value": 5, "label": "A"},
-      "monthly_card_spend": {"value": 30000, "label": "A"},
-      "funding_rate_annual": {"value": 0.08, "label": "A"},
-      "offered_free_days": {"value": 20, "label": "A"},
-      "offered_cashback_pct": {"value": 0, "label": "F"},
-      "offered_fee_subsidy": {"value": 0, "label": "F"},
-      "lending_contribution": {"value": 0, "label": "A", "note": "no top-up until lending model proven positive after risk"}
+      "gross_interchange_bps": {
+        "value": 130,
+        "label": "E",
+        "note": "BENCHMARKS.md \u00a71: heavy segment-program/large-ticket/downgrade mix below the 200bps rack rate; Mastercard blend unknown"
+      },
+      "programme_split_bps": {
+        "value": 40,
+        "label": "A"
+      },
+      "scheme_fee_bps": {
+        "value": 10,
+        "label": "A"
+      },
+      "processing_bps": {
+        "value": 10,
+        "label": "A"
+      },
+      "fraud_bps": {
+        "value": 5,
+        "label": "A"
+      },
+      "monthly_card_spend": {
+        "value": 30000,
+        "label": "A"
+      },
+      "funding_rate_annual": {
+        "value": 0.08,
+        "label": "A"
+      },
+      "offered_free_days": {
+        "value": 20,
+        "label": "A"
+      },
+      "offered_cashback_pct": {
+        "value": 0,
+        "label": "F"
+      },
+      "offered_fee_subsidy": {
+        "value": 0,
+        "label": "F"
+      },
+      "lending_contribution": {
+        "value": 0,
+        "label": "A",
+        "note": "no top-up until lending model proven positive after risk"
+      }
     },
     "base": {
-      "gross_interchange_bps": {"value": 180, "label": "E", "note": "blend of 200bps general-segment rack rate with some segment/large-ticket volume"},
-      "programme_split_bps": {"value": 40, "label": "A"},
-      "scheme_fee_bps": {"value": 12, "label": "A"},
-      "processing_bps": {"value": 10, "label": "A"},
-      "fraud_bps": {"value": 8, "label": "A"},
-      "monthly_card_spend": {"value": 80000, "label": "A"},
-      "funding_rate_annual": {"value": 0.08, "label": "A"},
-      "offered_free_days": {"value": 20, "label": "A"},
-      "offered_cashback_pct": {"value": 0, "label": "F"},
-      "offered_fee_subsidy": {"value": 0, "label": "F"},
-      "lending_contribution": {"value": 0, "label": "A"}
+      "gross_interchange_bps": {
+        "value": 180,
+        "label": "E",
+        "note": "BENCHMARKS.md \u00a71: blend of 200bps Visa UAE general-segment rack rate with some segment/large-ticket volume"
+      },
+      "programme_split_bps": {
+        "value": 40,
+        "label": "A"
+      },
+      "scheme_fee_bps": {
+        "value": 12,
+        "label": "A"
+      },
+      "processing_bps": {
+        "value": 10,
+        "label": "A"
+      },
+      "fraud_bps": {
+        "value": 8,
+        "label": "A"
+      },
+      "monthly_card_spend": {
+        "value": 80000,
+        "label": "A"
+      },
+      "funding_rate_annual": {
+        "value": 0.08,
+        "label": "A"
+      },
+      "offered_free_days": {
+        "value": 20,
+        "label": "A"
+      },
+      "offered_cashback_pct": {
+        "value": 0,
+        "label": "F"
+      },
+      "offered_fee_subsidy": {
+        "value": 0,
+        "label": "F"
+      },
+      "lending_contribution": {
+        "value": 0,
+        "label": "A"
+      }
     },
     "upside": {
-      "gross_interchange_bps": {"value": 200, "label": "E", "note": "Visa Business/Corporate/Purchasing product rate, general merchant segments"},
-      "programme_split_bps": {"value": 45, "label": "A"},
-      "scheme_fee_bps": {"value": 15, "label": "A"},
-      "processing_bps": {"value": 10, "label": "A"},
-      "fraud_bps": {"value": 10, "label": "A"},
-      "monthly_card_spend": {"value": 150000, "label": "A"},
-      "funding_rate_annual": {"value": 0.08, "label": "A"},
-      "offered_free_days": {"value": 20, "label": "A"},
-      "offered_cashback_pct": {"value": 0, "label": "F"},
-      "offered_fee_subsidy": {"value": 0, "label": "F"},
-      "lending_contribution": {"value": 0, "label": "A"}
+      "gross_interchange_bps": {
+        "value": 200,
+        "label": "E",
+        "note": "BENCHMARKS.md \u00a71: Visa Business/Corporate/Purchasing product rate, general merchant segments (official schedule)"
+      },
+      "programme_split_bps": {
+        "value": 45,
+        "label": "A"
+      },
+      "scheme_fee_bps": {
+        "value": 15,
+        "label": "A"
+      },
+      "processing_bps": {
+        "value": 10,
+        "label": "A"
+      },
+      "fraud_bps": {
+        "value": 10,
+        "label": "A"
+      },
+      "monthly_card_spend": {
+        "value": 150000,
+        "label": "A"
+      },
+      "funding_rate_annual": {
+        "value": 0.08,
+        "label": "A"
+      },
+      "offered_free_days": {
+        "value": 20,
+        "label": "A"
+      },
+      "offered_cashback_pct": {
+        "value": 0,
+        "label": "F"
+      },
+      "offered_fee_subsidy": {
+        "value": 0,
+        "label": "F"
+      },
+      "lending_contribution": {
+        "value": 0,
+        "label": "A"
+      }
     }
   }
 }

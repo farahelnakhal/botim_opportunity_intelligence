@@ -28,6 +28,10 @@ python3 opportunity-intelligence/tools/run.py cite EV-2026-W28-001,EV-2026-W28-0
 # contribution damage — the assumption register's "if 50% worse" column, computed
 python3 opportunity-intelligence/tools/run.py sensitivity knowledge-base/commercial-models/opp-001-inputs.json --case base --degrade 0.5
 
+# Time-phased break-even (audit D-1): months to positive monthly/cumulative cash and
+# PEAK FUNDING NEED under a stated linear merchant ramp — the question a board asks first
+python3 opportunity-intelligence/tools/run.py ramp knowledge-base/commercial-models/opp-001-inputs.json --months 36 --ramp-months 12
+
 # Evaluate experiment results against their PRE-COMMITTED thresholds (verdict:
 # pass / fail / inconclusive / pending; kill thresholds kill even mid-run)
 python3 opportunity-intelligence/tools/run.py verdict knowledge-base/validation/VE-001-result.json
@@ -85,7 +89,12 @@ Every numeric input may be `{"value": n, "label": "F|E|A", "note": "..."}`; bare
 - **Evidence honesty:** citations are checked against real records; records with evidence strength ≤2 or status `needs-more-evidence` are flagged as leads, not findings.
 - **No unfalsifiable experiments:** VE specs missing any mandatory field, or with hypotheses/thresholds that contain no number, fail `check` (`experiments.py`).
 - **Backlog integrity:** duplicate OPP ids, `reject` rows outside the archive, live rows without a next action, and dangling VE-/REQ- references all fail `check` (`backlog.py`).
-- **No post-hoc verdicts:** experiment outcomes are computed from thresholds committed before the run (`results.py`); a breached kill threshold fails the experiment even while other metrics are pending.
+- **No post-hoc verdicts:** experiment outcomes are computed from thresholds committed before the run (`results.py`); a breached kill threshold fails the experiment even while other metrics are pending; overlapping success/failure regions are rejected at evaluation time (audit S-3).
+- **No calibration contamination:** predictions cannot be resolved on/before the day they were logged; contaminated entries are excluded from the Brier score and fail `check` until explicitly excluded with a reason (audit R-1).
+- **No silent typos:** negative inputs hard-fail; implausible rates (>100% financing/funding, >50% ECL) and inverted cases produce visible warnings in reports and `check` (audit S-1/S-2/S-4).
+- **No incommensurable headlines:** the commercial model reports "days of drawn-balance funding"; the subsidy model reports "grace days on card spend" — different quantities, now labelled differently (audit C-1). Subsidy reports without ECL/servicing inputs carry an explicit PRE-CREDIT-COST caption (audit C-3).
+- **No unearned (E) labels:** `check` fails any (E)-labelled input whose note doesn't cite a benchmark source (audit H-1).
+- **One classification, everywhere:** first-enum-word-wins canonicalisation, enforced across profile/scorecard/backlog by `check` (audit D-2).
 - **Mechanical sensitivity:** the harmful direction of each input is discovered by perturbation, not hand-labelled (`sensitivity.py`) — for OPP-001 it ranks `financing_rate_annual`, `monthly_revenue_per_merchant`, and `routed_share` as the top risks.
 - **Stated simulation limits:** Monte Carlo (`montecarlo.py`) samples inputs independently and says so in every report; correlated adversity is covered explicitly by the named scenarios (`stress.py`), where for OPP-001 `credit_and_run`, `adverse_selection`, and `perfect_storm` all kill unit economics.
 - **Reproducibility:** simulations are seeded and deterministic; the same command always yields the same report.
@@ -100,4 +109,4 @@ Every numeric input may be `{"value": n, "label": "F|E|A", "note": "..."}`; bare
 python3 -m unittest discover -s opportunity-intelligence/tools/tests -v
 ```
 
-89 tests pin the engine to the published OPP-001/OPP-002 numbers, run the process validators against the repo's real knowledge-base files, and fuzz the core engine with 300+ randomized input sets asserting accounting identities (contribution = revenue − cost, break-even defined iff economics positive, net ≤ gross free days) and monotonicity properties (raising a cost never raises contribution; raising a revenue line never lowers it). Code, markdown, and process artefacts can't silently drift.
+133 tests pin the engine to the published OPP-001/OPP-002 numbers, run the process validators against the repo's real knowledge-base files, and fuzz the core engine with 300+ randomized input sets asserting accounting identities (contribution = revenue − cost, break-even defined iff economics positive, net ≤ gross free days) and monotonicity properties (raising a cost never raises contribution; raising a revenue line never lowers it). Code, markdown, and process artefacts can't silently drift.

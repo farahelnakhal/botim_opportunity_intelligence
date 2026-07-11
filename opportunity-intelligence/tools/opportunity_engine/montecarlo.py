@@ -148,7 +148,7 @@ def render_markdown(model, sim):
         f"| P5 / P25 / P50 / P75 / P95 | {fmt(c[5])} / {fmt(c[25])} / {fmt(c[50])} / {fmt(c[75])} / {fmt(c[95])} |",
         f"| Worst / best draw | {sim.worst_draw:,.0f} / {sim.best_draw:,.0f} |",
         f"| Deterministic base case (for reference) | {sim.base_contribution:,.0f} |",
-        f"| **P(loss-making unit economics)** | **{sim.p_loss:.1%}** |",
+        f"| **P(loss-making unit economics)** | **{_fmt_prob(sim.p_loss)}** |",
         f"| P(at or above base case) | {sim.p_beats_base:.1%} |",
         "",
         "## Break-even merchants (among profitable draws)",
@@ -156,6 +156,15 @@ def render_markdown(model, sim):
         "| Statistic | Value |",
         "|---|---|",
         f"| P5 / P50 / P95 | {fmt(b[5])} / {fmt(b[50])} / {fmt(b[95])} |",
-        f"| **P(never breaks even at unit level)** | **{sim.p_never_breakeven:.1%}** |",
+        f"| **P(never breaks even at unit level)** | **{_fmt_prob(sim.p_never_breakeven)}** |",
     ]
     return "\n".join(lines) + "\n"
+
+
+def _fmt_prob(p):
+    """Never display a hard 0% from independent sampling (audit R-3): a small
+    tail probability is a sampling statement, not a guarantee, and the named
+    correlated scenarios routinely contradict it."""
+    if p < 0.01:
+        return "<1.0% under independent draws — see named scenarios for correlated risk"
+    return f"{p:.1%}"

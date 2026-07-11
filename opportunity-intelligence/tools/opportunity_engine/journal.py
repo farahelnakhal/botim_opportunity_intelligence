@@ -71,9 +71,11 @@ def validate(data):
             raise InputError(f"{where}: outcome must be null, true, or false")
         if outcome is not None and not DATE_RE.match(str(p.get("resolved_on") or "")):
             raise InputError(f"{where}: resolved prediction needs resolved_on date")
+        if p.get("excluded_from_calibration") and not str(p.get("exclusion_reason", "")).strip():
+            raise InputError(f"{where}: excluded_from_calibration requires exclusion_reason")
 
 
-def add(data, statement, p, made, resolve_by, links=None):
+def add(data, statement, p, made, resolve_by, links=None, rationale=""):
     next_n = 1 + max((int(x["id"][5:]) for x in data["predictions"]), default=0)
     entry = {
         "id": f"PRED-{next_n:03d}",
@@ -82,6 +84,7 @@ def add(data, statement, p, made, resolve_by, links=None):
         "made": made,
         "resolve_by": resolve_by,
         "links": links or [],
+        "rationale": rationale,   # pre-registration reasoning (RC ids etc.) — set at logging time
         "outcome": None,
         "resolved_on": None,
         "resolution_note": "",
@@ -96,6 +99,11 @@ def resolve(data, pred_id, outcome, resolved_on, note=""):
         if p["id"] == pred_id:
             if p.get("outcome") is not None:
                 raise InputError(f"{pred_id} already resolved — outcomes are never edited; log a new prediction")
+            if str(resolved_on) <= str(p["made"]):
+                raise InputError(
+                    f"{pred_id}: resolution on/before the logging date ({p['made']}) contaminates "
+                    "calibration — if the outcome was already knowable, it was not a prediction (audit R-1)"
+                )
             p["outcome"] = bool(outcome)
             p["resolved_on"] = resolved_on
             p["resolution_note"] = note
@@ -105,9 +113,19 @@ def resolve(data, pred_id, outcome, resolved_on, note=""):
 
 
 def calibration(data, today=None):
-    """Brier score + per-bucket calibration over resolved predictions;
-    open/overdue listings for the report."""
-    resolved = [p for p in data["predictions"] if p.get("outcome") is not None]
+    """Brier score + per-bucket calibration over resolved, non-excluded
+    predictions; open/overdue/excluded/contaminated listings for the report.
+
+    Contaminated = resolved on/before its logging date and NOT explicitly
+    excluded — such entries must never enter the Brier score (audit R-1);
+    they are excluded here and flagged so `check` can fail on them.
+    """
+    all_resolved = [p for p in data["predictions"] if p.get("outcome") is not None]
+    excluded = [p for p in all_resolved if p.get("excluded_from_calibration")]
+    contaminated = [p for p in all_resolved
+                    if not p.get("excluded_from_calibration")
+                    and str(p.get("resolved_on") or "") <= str(p["made"])]
+    resolved = [p for p in all_resolved if p not in excluded and p not in contaminated]
     open_ = [p for p in data["predictions"] if p.get("outcome") is None]
     overdue = [p for p in open_ if today and str(p["resolve_by"]) < today]
 
@@ -125,7 +143,8 @@ def calibration(data, today=None):
             "observed": sum(1 for p in members if p["outcome"]) / len(members) if members else None,
         })
     return {"brier": brier, "n_resolved": len(resolved), "buckets": buckets,
-            "open": open_, "overdue": overdue}
+            "open": open_, "overdue": overdue,
+            "excluded": excluded, "contaminated": contaminated}
 
 
 def render_markdown(cal):
@@ -143,6 +162,12 @@ def render_markdown(cal):
                 "—" if b["mean_p"] is None else f"{b['mean_p']:.0%}",
                 "—" if b["observed"] is None else f"{b['observed']:.0%}",
             ))
+    if cal["excluded"]:
+        lines += ["", f"Excluded from calibration ({len(cal['excluded'])}): "
+                  + ", ".join(f"{p['id']} ({p.get('exclusion_reason', '')[:60]})" for p in cal["excluded"])]
+    if cal["contaminated"]:
+        lines += ["", "**CONTAMINATED (resolved on/before logging date, not excluded — fix required):** "
+                  + ", ".join(p["id"] for p in cal["contaminated"])]
     lines += ["", f"## Open predictions ({len(cal['open'])})", ""]
     for p in cal["open"]:
         flag = " **OVERDUE**" if p in cal["overdue"] else ""

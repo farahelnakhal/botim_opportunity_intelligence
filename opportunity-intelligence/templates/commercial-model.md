@@ -49,7 +49,8 @@ Use for every payment-and-credit proposition. **All figures are ranges (downside
 |---|---|---|---|
 | Contribution margin (AED / merchant / month) | | | |
 | Contribution margin (% of revenue) | | | |
-| **Break-even point** (merchants and months, at base-case unit economics) | | | |
+| **Break-even point** (merchants, at that case's unit economics) | | | |
+| **Time to break-even & peak funding need** (from `run.py ramp` — months to positive monthly/cumulative cash, deepest cumulative hole) | | | |
 | Maximum affordable free-credit period (days) | | | |
 | Maximum affordable cashback (% of spend) | | | |
 | Maximum affordable fee subsidy (AED / merchant / month) | | | |

@@ -42,7 +42,7 @@ Writes: stress-test section in `knowledge-base/product-ideas/<slug>.md`, updates
 ## 4. Design a validation experiment
 
 ```
-The riskiest assumption for OPP-003 is that merchants will route ≥50% of supplier
+The riskiest assumption for OPP-002 is that merchants will route ≥50% of supplier
 spend through a BOTIM card to keep their credit limit growing. Design the cheapest
 experiment that can falsify this, using templates/validation-experiment.md, with
 pre-committed success and failure thresholds and non-leading interview questions.

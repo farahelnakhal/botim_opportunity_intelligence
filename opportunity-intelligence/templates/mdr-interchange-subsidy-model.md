@@ -18,6 +18,8 @@ Tests the hypothesis that card transaction economics can subsidise free-credit d
 | − Scheme fees borne by issuer side | | | | |
 | − Processing cost | | | | |
 | − Fraud loss (bps) | | | | |
+| − Expected credit loss (bps of spend, `ecl_bps`) | | | | Omitting it makes every figure below PRE-CREDIT-COST — the engine captions reports accordingly |
+| − Servicing (bps of spend, `servicing_bps`) | | | | |
 | **= BOTIM net payment margin (bps)** | | | | This is the subsidy budget per AED of spend |
 
 ## 3. The subsidy budget

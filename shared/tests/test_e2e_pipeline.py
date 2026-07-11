@@ -163,10 +163,13 @@ class TestFullLifecycle(unittest.TestCase):
         self.assertIn("pilot", verdict["action"])
         (self.kb / "validation/VE-999-result.json").write_text(json.dumps(result))
 
-        # 6. Journal: resolve the prediction on the outcome
+        # 6. Journal: resolve the prediction on the outcome (later than `made` —
+        # same-day resolution is contamination and is rejected, audit R-1)
         jpath = self.kb / "product-ideas/decision-journal.json"
         data = journal.load(jpath)
-        journal.resolve(data, "PRED-001", True, "2026-07-11", "sandbox pass")
+        with self.assertRaises(Exception):
+            journal.resolve(data, "PRED-001", True, "2026-07-11", "same-day must fail")
+        journal.resolve(data, "PRED-001", True, "2026-08-01", "sandbox pass")
         journal.save(data, jpath)
         cal = journal.calibration(data)
         self.assertEqual(cal["n_resolved"], 1)

@@ -11,11 +11,9 @@ Rules (agreed at the 2026-07-11 merge session):
   Workstream A's own rule that weak records are leads, not findings.
 - Only records the scorecard already cites are used (segment-fuzzy matching
   is a human job); uncited-but-relevant records surface via `evidence` list.
-- Unmapped axes are unmapped on purpose:
-    urgency          -> feeds switching_intent qualitatively, no 1:1 scale
-    dissatisfaction  -> informs competitor-failure narrative, not a dimension
-    botim relevance  -> a routing gate, not an opportunity dimension
-    evidence strength-> controls WHETHER to suggest, never WHAT to suggest
+- Unmapped axes are unmapped on purpose (see UNMAPPED_AXES inline notes) —
+  notably A's "frequency" (breadth across merchants) is NOT B's
+  pain_frequency (temporal recurrence per merchant): audit finding C-2.
 """
 
 import json
@@ -25,16 +23,33 @@ from pathlib import Path
 from . import evidence, scoring
 from .commercial import InputError
 
+# Each mapping carries a semantic note: the constructs must actually match,
+# not merely share a word (audit C-2).
 AXIS_TO_DIMENSION = {
+    # A: how badly it hurts the merchant <-> B: how badly it hurts the merchant
     "severity": "pain_severity",
-    "frequency": "pain_frequency",
+    # A: money lost to the pain <-> B: financial impact of the pain
     "financial cost": "financial_impact",
+    # A: cost of today's workaround <-> B: workaround cost
     "workaround cost": "workaround_cost",
+    # A: observed switching behaviour <-> B: switching intent
     "switching intent": "switching_intent",
+    # A: revealed/stated WTP <-> B: willingness to pay
     "willingness to pay": "willingness_to_pay",
 }
 
-UNMAPPED_AXES = ("urgency", "dissatisfaction", "botim relevance", "evidence strength")
+UNMAPPED_AXES = (
+    # A's "frequency" counts BREADTH across distinct merchants; B's
+    # pain_frequency measures TEMPORAL recurrence per merchant. Different
+    # constructs — a pain hitting 500 merchants once a year is high on A's
+    # axis and low on B's dimension. Unmapped on purpose (audit C-2);
+    # breadth informs demand sizing, not per-merchant frequency.
+    "frequency",
+    "urgency",           # feeds switching_intent qualitatively, no 1:1 scale
+    "dissatisfaction",   # informs competitor-failure narrative, not a dimension
+    "botim relevance",   # a routing gate, not an opportunity dimension
+    "evidence strength", # controls WHETHER to suggest, never WHAT to suggest
+)
 
 MIN_STRENGTH = 3
 

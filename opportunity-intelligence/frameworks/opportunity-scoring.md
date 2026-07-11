@@ -78,6 +78,7 @@ To avoid vocabulary drift between documents and the engine (`tools/opportunity_e
 | Promising but unvalidated (qualifiers allowed, e.g. "borderline Weak") | `promising` |
 | Weak (qualifiers allowed, e.g. "standalone") | `weak` |
 | Reject (archive only — never a live backlog row) | `reject` |
+| Unscored (live backlog candidates awaiting evidence/scoring) | `unscored` |
 
 Evidence confidence: Title case in prose ("Low"), lowercase in JSON (`"low"`). The backlog checker matches classification by substring: a live-row label must contain at least one enum word and must not be reject-only; when a qualifier mentions a second enum word ("Promising but unvalidated (borderline Weak)"), the first word stated is the classification.
 

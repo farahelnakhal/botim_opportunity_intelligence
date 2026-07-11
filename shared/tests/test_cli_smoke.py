@@ -103,18 +103,28 @@ class TestDeterminism(unittest.TestCase):
 
 
 class TestJournalCliLifecycle(unittest.TestCase):
-    def test_predict_then_resolve_on_temp_journal(self):
+    def test_same_day_resolution_refused_then_backdated_lifecycle(self):
         with tempfile.TemporaryDirectory() as tmp:
             jpath = Path(tmp) / "j.json"
             p1 = run_cli(["predict", "sandbox thing happens", "--p", "0.4",
                           "--resolve-by", "2027-01-01", "--journal", str(jpath)])
             self.assertEqual(p1.returncode, 0)
             self.assertIn("PRED-001", p1.stdout)
+            # adversarial test 7 (audit R-1): resolving a prediction the day it
+            # was logged is calibration contamination and must be refused
             p2 = run_cli(["resolve", "PRED-001", "true", "--journal", str(jpath)])
-            self.assertEqual(p2.returncode, 0)
+            self.assertNotEqual(p2.returncode, 0)
+            self.assertIn("contaminat", p2.stdout + p2.stderr)
+            # backdate `made` (as a past prediction would be) — then the
+            # lifecycle works and Brier computes
+            data = json.loads(jpath.read_text())
+            data["predictions"][0]["made"] = "2026-01-01"
+            jpath.write_text(json.dumps(data))
+            p3 = run_cli(["resolve", "PRED-001", "true", "--journal", str(jpath)])
+            self.assertEqual(p3.returncode, 0)
             # double-resolve must fail: outcomes are immutable
-            p3 = run_cli(["resolve", "PRED-001", "false", "--journal", str(jpath)])
-            self.assertNotEqual(p3.returncode, 0)
+            p4 = run_cli(["resolve", "PRED-001", "false", "--journal", str(jpath)])
+            self.assertNotEqual(p4.returncode, 0)
             cal = run_cli(["calibration", "--journal", str(jpath)])
             self.assertIn("Brier score: 0.360", cal.stdout)  # (0.4-1)^2
 

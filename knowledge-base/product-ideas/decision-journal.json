@@ -9,9 +9,10 @@
       "links": [
         "VE-001"
       ],
+      "rationale": "RC-8: waitlist conversions typically 5-15%; our 40/15 thresholds leave a wide inconclusive zone",
       "outcome": null,
       "resolved_on": null,
-      "resolution_note": "RC-8: waitlist conversions typically 5-15%; our 40/15 thresholds leave a wide inconclusive zone"
+      "resolution_note": ""
     },
     {
       "id": "PRED-002",
@@ -23,9 +24,10 @@
         "VE-001",
         "OPP-001"
       ],
+      "rationale": "RC-2 (10-30% sustain new rails) and RC-8 both argue the routing ask is hard; 0.25 reflects deliberate above-class threshold",
       "outcome": null,
       "resolved_on": null,
-      "resolution_note": "RC-2 (10-30% sustain new rails) and RC-8 both argue the routing ask is hard; 0.25 reflects deliberate above-class threshold"
+      "resolution_note": ""
     },
     {
       "id": "PRED-003",
@@ -37,9 +39,10 @@
         "VE-002",
         "OPP-002"
       ],
+      "rationale": "RC-7 range 10-35%; UAE wholesale skews transfer-on-terms, so below class midpoint",
       "outcome": null,
       "resolved_on": null,
-      "resolution_note": "RC-7 range 10-35%; UAE wholesale skews transfer-on-terms, so below class midpoint"
+      "resolution_note": ""
     },
     {
       "id": "PRED-004",
@@ -50,9 +53,12 @@
       "links": [
         "OPP-001"
       ],
+      "rationale": "",
       "outcome": true,
       "resolved_on": "2026-07-11",
-      "resolution_note": "MCA APR-equiv 40-350%, RBF 10-40%; 18-24% for revenue-linked sits well inside market acceptance (BENCHMARKS.md). Residual risk is bank competition for prime credits, not merchant acceptance"
+      "resolution_note": "MCA APR-equiv 40-350%, RBF 10-40%; 18-24% for revenue-linked sits well inside market acceptance (BENCHMARKS.md). Residual risk is bank competition for prime credits, not merchant acceptance",
+      "excluded_from_calibration": true,
+      "exclusion_reason": "Audit R-1: logged and resolved the same day by the same desk-research pass; outcome partially knowable at logging time. Kept as a record, never scored"
     },
     {
       "id": "PRED-005",
@@ -63,9 +69,12 @@
       "links": [
         "REQ-002"
       ],
+      "rationale": "",
       "outcome": true,
       "resolved_on": "2026-07-11",
-      "resolution_note": "12 records landed 2026-07-11, well before deadline"
+      "resolution_note": "12 records landed 2026-07-11, well before deadline",
+      "excluded_from_calibration": true,
+      "exclusion_reason": "Audit R-1: resolved same day as logged; the records were landing as the prediction was written. Kept as a record, never scored"
     },
     {
       "id": "PRED-006",
@@ -77,6 +86,7 @@
         "VE-003",
         "OPP-010"
       ],
+      "rationale": "RC-8 base rates argue low, but the recruited population is pre-qualified by a lived hold event (self-generating inflection point); priced disclosure pulls down",
       "outcome": null,
       "resolved_on": null,
       "resolution_note": ""
@@ -91,6 +101,7 @@
         "VE-004",
         "OPP-013"
       ],
+      "rationale": "SEG-uae-importers-upfront-pay is Low confidence (pulls down); IP-2026-002 funded-competitor existence implies real demand (pulls up); RC-4 supports the pricing",
       "outcome": null,
       "resolved_on": null,
       "resolution_note": ""

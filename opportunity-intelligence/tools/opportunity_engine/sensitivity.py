@@ -99,8 +99,14 @@ def grid(model, input_x, input_y, case_name="base", steps=7):
     contribution at y_values[i], x_values[j].
     """
     for name in (input_x, input_y):
-        if name not in commercial.REQUIRED_INPUTS:
+        if name not in commercial.REQUIRED_INPUTS + commercial.OPTIONAL_INPUTS:
             raise commercial.InputError(f"unknown input '{name}'")
+        if name in commercial.OPTIONAL_INPUTS:
+            absent = [c for c in commercial.CASES if name not in model["cases"][c]]
+            if absent:
+                raise commercial.InputError(
+                    f"optional input '{name}' not present in cases {absent} — provide it in all cases to grid it"
+                )
     if input_x == input_y:
         raise commercial.InputError("grid needs two different inputs")
     if steps < 3:

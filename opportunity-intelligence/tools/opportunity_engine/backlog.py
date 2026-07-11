@@ -25,6 +25,15 @@ SECTION_HEADERS = {
 }
 
 
+def classification_enum(label):
+    """Canonical enum for a prose classification label: FIRST enum word stated
+    wins (audit D-2/AG-2) — 'Promising but unvalidated (borderline Weak)' is
+    'promising'. Returns None if no enum word appears."""
+    low = label.lower()
+    hits = [(low.find(c), c) for c in CLASSIFICATIONS if c in low]
+    return min(hits)[1] if hits else None
+
+
 def _cells(line):
     """'| a | b |' -> ['a', 'b'] (None if not a table row)."""
     s = line.strip()
@@ -111,13 +120,13 @@ def check(path):
             issues.append(f"requests: {row['id']} has no status")
 
     for row in data["backlog"]:
-        cls = row["classification"].lower()
-        markers = [c for c in CLASSIFICATIONS if c in cls]
-        if not markers:
+        enum = classification_enum(row["classification"])
+        row["classification_enum"] = enum
+        if enum is None:
             issues.append(
                 f"{row['id']}: unrecognised classification {row['classification']!r}"
             )
-        elif markers == ["reject"]:
+        elif enum == "reject":
             issues.append(
                 f"{row['id']}: classification 'reject' belongs in the archive, not the live backlog"
             )

@@ -2,7 +2,7 @@
 
 The module of the BOTIM Opportunity Intelligence agent that turns customer evidence into scored, stress-tested, commercially modelled SME payment and lending opportunities — and meeting-ready recommendations. It is explicitly willing to reject weak ideas, including the current favourite.
 
-Ownership, branches, and collaboration rules: see the root workstreams document (`README.md` at repo root). This module owns `opportunity-intelligence/` and `knowledge-base/{product-ideas, commercial-models, validation, opportunity-scores}/` only.
+Ownership and collaboration rules: see `WORKSTREAMS.md` at repo root; the combined agent is defined in `MASTER_PROMPT.md`. This module owns `opportunity-intelligence/` and `knowledge-base/{product-ideas, commercial-models, validation, opportunity-scores}/` only.
 
 ## What this module does / does not do
 
@@ -58,14 +58,6 @@ Evidence in → opportunity framework → scorecard → stress test → commerci
 6. Classifications apply to propositions, not the company launch decision.
 7. Assumption-heavy scorecards (>6 of 17 `(A)`) cap out at "Promising but unvalidated".
 
-## Cross-module notes (recorded here, not in Workstream A's files)
+## Cross-module requests
 
-Suggested inputs this module needs from Customer & Market Intelligence, in priority order:
-
-1. A stable **evidence ID scheme** (e.g. `EV-###`) in `knowledge-base/customer-evidence/` so scorecards can cite entries — happy to adopt whatever scheme Workstream A chooses.
-2. Evidence on **working-capital pain** (severity, frequency, current workaround and its cost) for F&B/retail SMEs, 1–3 outlets, UAE.
-3. Evidence on **how merchants pay suppliers today** (instrument, terms, card acceptance/surcharging) — decisive for the supplier-card proposition.
-4. **Segment definitions** in `knowledge-base/segments/` this module can reference by name.
-5. **Inflection-point catalogue** (bank rejection, expansion, VAT deadlines) for experiment recruitment targeting.
-
-No shared files (`MASTER_PROMPT.md`, root `README.md`, `context/`, `shared/`, root `templates/`) were modified or created by this module. If a shared-file change becomes necessary, it will be documented here and raised at the merge session.
+The **single source of truth for evidence requests is the REQ queue in `knowledge-base/product-ideas/BACKLOG.md`** (REQ-001 answered — Workstream A's `EV-YYYY-Wnn-nnn` scheme is adopted and parsed by `tools/`; REQ-002 partially answered; REQ-003..007 tracked there with statuses). Do not maintain request lists anywhere else, including here.

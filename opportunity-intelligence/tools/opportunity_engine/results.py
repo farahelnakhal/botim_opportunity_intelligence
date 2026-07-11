@@ -55,6 +55,26 @@ def _met(cond, observed):
     return OPS[cond["op"]](observed, cond["value"])
 
 
+def _check_regions_disjoint(success, failure, where):
+    """Reject specs where some observable satisfies BOTH success and failure —
+    an authoring slip there breaks the pre-commitment mechanism itself
+    (audit S-3: success >=40 with failure >=45 made observed=50 a FAIL)."""
+    if success is None or failure is None:
+        return
+    eps = 1e-9
+    probes = set()
+    for v in (success["value"], failure["value"]):
+        probes.update((v, v - eps, v + eps, v - 1e12, v + 1e12))
+    probes.add((success["value"] + failure["value"]) / 2)
+    for x in probes:
+        if _met(success, x) and _met(failure, x):
+            raise InputError(
+                f"{where}: success ({success['op']} {success['value']}) and failure "
+                f"({failure['op']} {failure['value']}) regions overlap at observed={x:g} — "
+                "thresholds must be disjoint or the verdict is author-dependent"
+            )
+
+
 def evaluate(result):
     """Evaluate a result dict. Returns an evaluation dict with per-metric detail."""
     for key in ("experiment_id", "proposition", "metrics", "on_pass", "on_fail", "on_inconclusive"):
@@ -78,6 +98,7 @@ def evaluate(result):
         _check_condition(m.get("failure"), where + " failure")
         if m.get("success") is None and m.get("failure") is None:
             raise InputError(f"{where}: needs at least one of success/failure thresholds")
+        _check_regions_disjoint(m.get("success"), m.get("failure"), where)
 
         observed = m["observed"]
         if observed is None:

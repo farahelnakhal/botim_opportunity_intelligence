@@ -114,6 +114,7 @@ class CaseResult:
     max_cashback_pct: float = 0.0          # of routed flow, net budget fully allocated
     max_fee_subsidy: float = 0.0           # AED/merchant/month, from total contribution
     assumption_labels: dict = field(default_factory=dict)
+    warnings: list = field(default_factory=list)   # plausibility warnings (audit S-2)
 
     def v(self, name):
         return self.inputs[name][0]
@@ -133,6 +134,24 @@ def compute_case(case_name, raw_inputs):
             inputs[k] = _norm(raw_inputs[k], k)
     r = CaseResult(case=case_name, inputs=inputs)
     r.assumption_labels = {k: lab for k, (_, lab, _) in inputs.items()}
+
+    # plausibility validation (audit S-1/S-2): a one-character typo must not
+    # flip economics silently through model -> MC -> stress -> recommendation
+    for name, (value, _, _) in inputs.items():
+        if value < 0:
+            raise InputError(
+                f"case '{case_name}': {name} is negative ({value}) — no input in this "
+                "model is legitimately negative; fix the typo"
+            )
+    for name, ceiling, what in (
+        ("financing_rate_annual", 1.0, "a >100% annual financing rate"),
+        ("funding_rate_annual", 1.0, "a >100% annual funding rate"),
+        ("ecl_rate_annual", 0.5, "a >50% annualised expected credit loss"),
+    ):
+        if r.v(name) > ceiling:
+            r.warnings.append(
+                f"{name} = {r.v(name)} implies {what} — accepted, but verify this is intended"
+            )
 
     for frac in ("routed_share", "utilisation"):
         if not 0 <= r.v(frac) <= 1:
@@ -225,7 +244,14 @@ def compute_model(model):
     missing = [c for c in CASES if c not in model["cases"]]
     if missing:
         raise InputError(f"model is missing cases: {', '.join(missing)} (downside/base/upside are all mandatory)")
-    return {c: compute_case(c, model["cases"][c]) for c in CASES}
+    results = {c: compute_case(c, model["cases"][c]) for c in CASES}
+    # inverted-cases sanity (audit S-4): downside outperforming upside is
+    # almost always a data-entry error
+    if results["downside"].contribution > results["upside"].contribution:
+        results["upside"].warnings.append(
+            "downside contribution exceeds upside — case columns are probably inverted"
+        )
+    return results
 
 
 def render_markdown(model, results):
@@ -261,8 +287,8 @@ def render_markdown(model, results):
         "| Break-even merchants | {} | {} | {} |".format(
             *("never" if r.breakeven_merchants is None else f"{r.breakeven_merchants:,.0f}" for r in (d, b, u))
         ),
-        row("Max free-credit days (payment margin, gross)", lambda r: r.max_free_days_gross, "{:.1f}"),
-        row("Max free-credit days (net of fraud+processing)", lambda r: r.max_free_days_net, "{:.1f}"),
+        row("Days of drawn-balance funding covered by payment margin (gross)", lambda r: r.max_free_days_gross, "{:.1f}"),
+        row("… net of fraud+processing (NOT comparable to subsidy-model grace days)", lambda r: r.max_free_days_net, "{:.1f}"),
         row("Max cashback (% of routed flow)", lambda r: r.max_cashback_pct, "{:.2f}%"),
         row("Max fee subsidy (from contribution)", lambda r: r.max_fee_subsidy),
     ]
@@ -271,6 +297,10 @@ def render_markdown(model, results):
             row("Monthly originations (duration-derived)", lambda r: r.monthly_originations or 0),
             row("Credit turns per year", lambda r: r.credit_turns_per_year or 0, "{:.1f}"),
         ]
+    all_warnings = [w for r in (d, b, u) for w in r.warnings]
+    if all_warnings:
+        lines += ["", "## ⚠ Plausibility warnings", ""]
+        lines += [f"- {w}" for w in sorted(set(all_warnings))]
     lines += [
         "",
         "## Assumption labels",

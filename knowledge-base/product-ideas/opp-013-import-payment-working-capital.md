@@ -24,7 +24,7 @@ One account for small UAE importers: **pay overseas suppliers by T/T through BOT
 |---|---|
 | Scorecard | Composite 3.2 · 8/17 (A) → capped at promising · **critical flag: switching_intent ≤ 2** |
 | Model (base) | **+468/merchant/month** (52% margin) · break-even **364 vs 350 base merchants** · downside −40 · upside +2,852 · credit turns 5.6×/yr |
-| Monte Carlo (20k draws) | P50 +461 · P5 +183 · **P(loss) 0.0%** (independence caveat as always) |
+| Monte Carlo (20k draws) | P50 +461 · P5 +183 · P(loss) <1% under independent draws — and the very next row shows a correlated scenario killing it (audit R-3 phrasing) |
 | Built-in scenarios | 7/8 survive · **credit_and_run kills (−26)** · perfect_storm barely survives (+40) |
 | Custom scenarios | 5/5 survive · worst: **own_rail_failure +115** (the EV-018 scenario) · fx_margin_compression +180 |
 | Sync bridge | **No divergence** — demand scores were written to the cited evidence's own axis values |

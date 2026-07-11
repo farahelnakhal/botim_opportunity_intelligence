@@ -27,6 +27,7 @@ from opportunity_engine import (  # noqa: E402
     experiments,
     journal,
     montecarlo,
+    ramp,
     results,
     scoring,
     sensitivity,
@@ -37,13 +38,10 @@ from opportunity_engine import (  # noqa: E402
 
 JOURNAL_PATH = "knowledge-base/product-ideas/decision-journal.json"
 
-FOREIGN_DIRS = (
-    "customer-intelligence",
-    "knowledge-base/customer-evidence",
-    "knowledge-base/competitors",
-    "knowledge-base/segments",
-    "knowledge-base/inflection-points",
-)
+# Workstream B's only writable knowledge-base folders (audit A-1: whitelist,
+# not substring blacklist — 'customer-evidence-2' style paths must be refused)
+B_OWNED_KB = ("product-ideas", "commercial-models", "validation", "opportunity-scores")
+
 
 
 def _load_json(path):
@@ -55,13 +53,25 @@ def _load_json(path):
         sys.exit(f"error: {path} is not valid JSON: {exc}")
 
 
+def _write_allowed(resolved):
+    """Whitelist write policy (audit A-1): inside knowledge-base/, ONLY the four
+    B-owned folders are writable; customer-intelligence/ and shared/ are never
+    writable; anything matching by path segments, not substrings."""
+    parts = resolved.parts
+    if "customer-intelligence" in parts or "shared" in parts:
+        return False
+    if "knowledge-base" in parts:
+        idx = parts.index("knowledge-base")
+        return len(parts) > idx + 1 and parts[idx + 1] in B_OWNED_KB
+    return True
+
+
 def _emit(report, write_path):
     print(report, end="")
     if write_path:
         resolved = Path(write_path).resolve()
-        for fd in FOREIGN_DIRS:
-            if str(resolved).replace("\\", "/").find(f"/{fd}/") != -1 or str(resolved).endswith(fd):
-                sys.exit(f"error: refusing to write into Workstream A / shared path: {write_path}")
+        if not _write_allowed(resolved):
+            sys.exit(f"error: refusing to write outside Workstream B's owned paths: {write_path}")
         resolved.parent.mkdir(parents=True, exist_ok=True)
         resolved.write_text(report, encoding="utf-8")
         print(f"\n[written to {write_path}]", file=sys.stderr)
@@ -125,7 +135,14 @@ def main(argv=None):
     p.add_argument("--p", type=float, required=True, help="probability strictly between 0 and 1")
     p.add_argument("--resolve-by", required=True, help="YYYY-MM-DD deadline")
     p.add_argument("--links", default="", help="comma-separated ids (VE-001, OPP-001, ...)")
+    p.add_argument("--rationale", default="", help="pre-registration reasoning, cite RC-… base rates")
     p.add_argument("--journal", default=JOURNAL_PATH)
+
+    p = sub.add_parser("ramp", help="time-phased break-even: months to positive cash, peak funding need")
+    p.add_argument("inputs")
+    p.add_argument("--months", type=int, default=36)
+    p.add_argument("--ramp-months", type=int, default=12)
+    p.add_argument("--write")
 
     p = sub.add_parser("resolve", help="resolve a prediction true/false (probabilities are never edited)")
     p.add_argument("id")
@@ -194,6 +211,7 @@ def main(argv=None):
                 data, args.statement, args.p,
                 datetime.date.today().isoformat(), args.resolve_by,
                 [x.strip() for x in args.links.split(",") if x.strip()],
+                rationale=args.rationale,
             )
             journal.save(data, args.journal)
             print(f"logged {entry['id']} (p={entry['p']:.0%}, resolve by {entry['resolve_by']})")
@@ -209,6 +227,9 @@ def main(argv=None):
             cal = journal.calibration(journal.load(args.journal),
                                       today=datetime.date.today().isoformat())
             _emit(journal.render_markdown(cal), args.write)
+        elif args.cmd == "ramp":
+            model = _load_json(args.inputs)
+            _emit(ramp.render_markdown(model, ramp.analyse(model, args.months, args.ramp_months)), args.write)
         elif args.cmd == "sync":
             _emit(sync.render_markdown(sync.analyse(args.root)), args.write)
         elif args.cmd == "check":
@@ -232,6 +253,20 @@ def run_check(root):
         failures.append(msg)
         print(f"  FAIL  {msg}")
 
+    benchmarks_path = kb / "commercial-models" / "BENCHMARKS.md"
+    benchmark_tokens = ("BENCHMARKS", "RC-", "EV-", "SRC-")
+
+    def check_e_labels(rel, data):
+        # audit H-1: an (E) label is a sourcing claim — its note must cite a
+        # benchmark/reference/evidence token, or the label is unearned
+        for case_name, case in data.get("cases", {}).items():
+            for name, raw in case.items():
+                if isinstance(raw, dict) and str(raw.get("label", "")).upper() == "E":
+                    note = str(raw.get("note", ""))
+                    if not any(t in note for t in benchmark_tokens):
+                        fail(f"{rel}: {case_name}.{name} is labelled (E) but its note cites no "
+                             f"benchmark source (need one of {benchmark_tokens}) — see {benchmarks_path.name}")
+
     print("== commercial & subsidy models ==")
     model_files = sorted((kb / "commercial-models").glob("*.json"))
     for path in model_files:
@@ -239,13 +274,20 @@ def run_check(root):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             if path.name.endswith("-subsidy-inputs.json"):
-                subsidy.compute_model(data)
+                model_results = subsidy.compute_model(data)
+                warnings = []
             elif path.name.endswith("-inputs.json"):
-                commercial.compute_model(data)
+                model_results = commercial.compute_model(data)
+                warnings = sorted({w for r in model_results.values() for w in r.warnings})
+            elif path.name.endswith("-scenarios.json"):
+                continue  # scenario libraries are validated when run
             else:
                 notes.append(f"skipped unrecognised json: {rel}")
                 continue
+            check_e_labels(rel, data)
             ok(f"{rel} computes across all three cases")
+            for w in warnings:
+                notes.append(f"{rel}: PLAUSIBILITY — {w}")
         except (commercial.InputError, json.JSONDecodeError) as exc:
             fail(f"{rel}: {exc}")
     if not model_files:
@@ -312,12 +354,51 @@ def run_check(root):
         except commercial.InputError as exc:
             fail(f"decision-journal.json: {exc}")
         else:
-            ok(f"decision-journal.json: {cal['n_resolved']} resolved, {len(cal['open'])} open"
+            ok(f"decision-journal.json: {cal['n_resolved']} scored, {len(cal['excluded'])} excluded, "
+               f"{len(cal['open'])} open"
                + (f", Brier {cal['brier']:.3f}" if cal["brier"] is not None else ""))
+            for p in cal["contaminated"]:
+                fail(f"decision-journal.json: {p['id']} resolved on/before its logging date and not "
+                     "excluded_from_calibration — calibration contamination (audit R-1)")
             for p in cal["overdue"]:
                 fail(f"decision-journal.json: {p['id']} overdue (resolve by {p['resolve_by']}) — resolve it or log why")
     else:
         notes.append("no decision journal yet")
+
+    print("== classification consistency ==")
+    ideas_dir = kb / "product-ideas"
+    backlog_path_cc = ideas_dir / "BACKLOG.md"
+    if backlog_path_cc.exists():
+        data_cc = backlog.parse(backlog_path_cc)
+        enum_by_id = {}
+        for row in data_cc["backlog"]:
+            enum_by_id[row["id"]] = backlog.classification_enum(row["classification"])
+        for row in data_cc["archive"]:
+            enum_by_id.setdefault(row["id"], "reject")
+        cls_line_re = re.compile(r"Classification:?\**\s*:?\**\s*([^\n|]+)")
+        mismatches = 0
+        for path in sorted(ideas_dir.glob("opp-*.md")):
+            opp_id = "OPP-" + path.name[4:7]
+            if opp_id not in enum_by_id:
+                continue
+            m = cls_line_re.search(path.read_text(encoding="utf-8"))
+            if not m:
+                continue
+            profile_enum = backlog.classification_enum(m.group(1))
+            if profile_enum and profile_enum != enum_by_id[opp_id]:
+                fail(f"{path.name}: profile says '{profile_enum}' but backlog says "
+                     f"'{enum_by_id[opp_id]}' for {opp_id} — one classification, everywhere")
+                mismatches += 1
+        for path in sorted((kb / "opportunity-scores").glob("*.json")):
+            card = json.loads(path.read_text(encoding="utf-8"))
+            proposed = card.get("proposed_classification")
+            opp_id = card.get("opportunity_id")
+            if proposed and opp_id in enum_by_id and proposed != enum_by_id[opp_id]:
+                fail(f"{path.name}: scorecard proposes '{proposed}' but backlog says "
+                     f"'{enum_by_id[opp_id]}' for {opp_id}")
+                mismatches += 1
+        if not mismatches:
+            ok(f"classification consistent across profiles, scorecards, backlog ({len(enum_by_id)} ids)")
 
     print("== backlog ==")
     backlog_path = kb / "product-ideas" / "BACKLOG.md"

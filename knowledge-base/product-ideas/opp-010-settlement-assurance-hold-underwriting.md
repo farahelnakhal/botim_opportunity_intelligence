@@ -35,7 +35,7 @@ PSPs hold funds because chargeback risk is a **credit risk they cannot price** �
 
 - **Model (base):** +342/merchant/month at 70% margin; break-even 526 merchants vs base 400; downside +3 (break-even effectively never); upside +1,545.
 - **Scenarios: survives all 8** — including perfect_storm (+112) and credit_and_run (+104) — because acquiring margin is independent of the lending book. Weakest to routing_decay (+159).
-- **Monte Carlo:** P50 +382, P5 +198, **P(loss) 0.0%** across 5k draws. Caveat honestly: economics inputs are still (A); robustness is conditional on the acquiring-margin assumption.
+- **Monte Carlo:** P50 +382, P5 +198, P(loss) <1% under independent draws (a sampling statement, not a guarantee — audit R-3). Caveat honestly: economics inputs are still (A); robustness is conditional on the acquiring-margin assumption.
 
 ## Execution reality check
 

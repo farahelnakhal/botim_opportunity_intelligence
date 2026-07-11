@@ -48,6 +48,12 @@ REQUIRED_INPUTS = (
     "lending_contribution",
 )
 
+# Optional credit-cost inputs (audit C-3): expected credit loss and servicing
+# expressed in bps of monthly card spend. Default 0 — but then every report
+# carries an explicit PRE-CREDIT-COST caption, because for a free-credit-days
+# product, affordability without ECL is structurally overstated.
+OPTIONAL_INPUTS = ("ecl_bps", "servicing_bps")
+
 
 @dataclass
 class SubsidyResult:
@@ -64,6 +70,9 @@ class SubsidyResult:
     package_affordable: bool = False
     max_free_days_alone: float = 0.0   # if M were spent only on free days
     max_cashback_alone_pct: float = 0.0
+    ecl_bps: float = 0.0
+    servicing_bps: float = 0.0
+    pre_credit_cost: bool = True       # True when ECL/servicing not modelled (audit C-3)
     assumption_labels: dict = field(default_factory=dict)
 
     def v(self, name):
@@ -74,20 +83,32 @@ def compute_case(case_name, raw_inputs):
     missing = [k for k in REQUIRED_INPUTS if k not in raw_inputs]
     if missing:
         raise InputError(f"case '{case_name}': missing inputs: {', '.join(missing)}")
-    unknown = [k for k in raw_inputs if k not in REQUIRED_INPUTS]
+    unknown = [k for k in raw_inputs if k not in REQUIRED_INPUTS + OPTIONAL_INPUTS]
     if unknown:
         raise InputError(f"case '{case_name}': unknown inputs: {', '.join(unknown)}")
 
     inputs = {k: _norm(raw_inputs[k], k) for k in REQUIRED_INPUTS}
+    for k in OPTIONAL_INPUTS:
+        if k in raw_inputs:
+            inputs[k] = _norm(raw_inputs[k], k)
     r = SubsidyResult(case=case_name, inputs=inputs)
     r.assumption_labels = {k: lab for k, (_, lab, _) in inputs.items()}
 
+    for name, (value, _, _) in inputs.items():
+        if value < 0:
+            raise InputError(f"case '{case_name}': {name} is negative ({value}) — fix the typo")
+
+    r.ecl_bps = r.v("ecl_bps") if "ecl_bps" in inputs else 0.0
+    r.servicing_bps = r.v("servicing_bps") if "servicing_bps" in inputs else 0.0
+    r.pre_credit_cost = ("ecl_bps" not in inputs and "servicing_bps" not in inputs)
     r.net_margin_bps = (
         r.v("gross_interchange_bps")
         - r.v("programme_split_bps")
         - r.v("scheme_fee_bps")
         - r.v("processing_bps")
         - r.v("fraud_bps")
+        - r.ecl_bps
+        - r.servicing_bps
     )
     spend = r.v("monthly_card_spend")
     r.monthly_budget = spend * r.net_margin_bps / 10_000
@@ -125,11 +146,22 @@ def render_markdown(model, results):
     def row(label, fn, fmt="{:,.1f}"):
         return "| {} | {} | {} | {} |".format(label, *(fmt.format(fn(x)) for x in (d, b, u)))
 
+    pre_credit = any(r.pre_credit_cost for r in (d, b, u))
     lines = [
         f"# Computed subsidy model — {model['opportunity_id']} {model['name']}",
         "",
         "Issuer-interchange/programme-share based; the accepting merchant's MDR is not BOTIM revenue "
         "and is not an input to this model.",
+    ]
+    if pre_credit:
+        lines += [
+            "",
+            "**⚠ PRE-CREDIT-COST FIGURES:** expected credit loss and servicing are not modelled "
+            "(ecl_bps/servicing_bps inputs omitted). For a free-credit-days product this "
+            "structurally overstates affordability — treat every 'affordable' verdict below as "
+            "an upper bound until credit costs are added.",
+        ]
+    lines += [
         "",
         "| Line | Downside | Base | Upside |",
         "|---|---|---|---|",
@@ -145,7 +177,8 @@ def render_markdown(model, results):
         "| Package affordable? | {} | {} | {} |".format(
             *("YES" if r.package_affordable else "NO — loss-leader, needs stated payback" for r in (d, b, u))
         ),
-        row("Ceiling: max free days if M spent on free days only", lambda r: r.max_free_days_alone),
+        row("Ceiling: GRACE DAYS on monthly card spend if M funds free days only "
+            "(not comparable to the commercial model's drawn-balance days)", lambda r: r.max_free_days_alone),
         row("Ceiling: max cashback % if M spent on cashback only", lambda r: r.max_cashback_alone_pct, "{:.2f}"),
         "",
         "Assumption-labelled inputs (base): "
