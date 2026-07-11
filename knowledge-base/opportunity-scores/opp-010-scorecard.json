@@ -1,0 +1,27 @@
+{
+  "opportunity_id": "OPP-010",
+  "name": "Settlement assurance + hold underwriting (acceptance with priced holds)",
+  "is_lending_product": true,
+  "proposed_classification": "promising",
+  "evidence_confidence": "medium",
+  "comment": "First evidence-backed scorecard: demand-side scores cite Workstream A W28 records. Source: their Handoffs to Workstream B #1/#2 (weekly-updates/2026-W28.md).",
+  "scores": {
+    "pain_severity":                 {"score": 5, "assumption": false, "basis": "EV-2026-W28-004 (540-day hold, DFSA escalation), EV-2026-W28-005, EV-2026-W28-003"},
+    "pain_frequency":                {"score": 4, "assumption": false, "basis": "8 of 12 W28 records are hold/freeze/settlement pain across 7+ providers"},
+    "financial_impact":              {"score": 5, "assumption": false, "basis": "EV-2026-W28-004 (all funds 540d), EV-2026-W28-005 (AED 65k/2wks), EV-2026-W28-007 ($3.5k withheld)"},
+    "workaround_cost":               {"score": 4, "assumption": false, "basis": "EV-2026-W28-002/EV-2026-W28-008 support loops; EV-2026-W28-010 personal-account workarounds; multi-PSP redundancy costs integration + reconciliation"},
+    "switching_intent":              {"score": 4, "assumption": false, "basis": "EV-2026-W28-011 explicit switch; EV-2026-W28-009 public escalations; hold events are inflection points by nature"},
+    "willingness_to_pay":            {"score": 5, "assumption": false, "basis": "mamo.md: merchants pay +0.5-0.75% for same-day settlement — priced, observed WTP for settlement speed"},
+    "digital_readiness":             {"score": 5, "assumption": false, "basis": "SEG-uae-online-sme-psp-merchants: online-acceptance merchants by definition"},
+    "payment_volume":                {"score": 4, "assumption": true,  "basis": "Acceptance volume bands unknown; needs segment sizing"},
+    "credit_need":                   {"score": 4, "assumption": false, "basis": "EV-2026-W28-008 receivables gap; mamo.md paid-settlement uptake is a working-capital-demand proxy"},
+    "botim_distribution_advantage":  {"score": 3, "assumption": true,  "basis": "BOTIM reach among online PSP merchants unknown; affected merchants are publicly identifiable, lowering CAC either way"},
+    "transaction_data_advantage":    {"score": 4, "assumption": true,  "basis": "As acquirer BOTIM sees full acceptance flow + chargebacks by construction — but adoption assumed"},
+    "payment_revenue_potential":     {"score": 4, "assumption": true,  "basis": "Acquiring margin real but competitive; net take after interchange paid away unknown"},
+    "lending_revenue_potential":     {"score": 3, "assumption": true,  "basis": "Hold advances are short-duration, episodic balances"},
+    "credit_risk_visibility":        {"score": 4, "assumption": true,  "basis": "Acquirer sees chargeback rates directly — the exact risk being underwritten; assumed pending build"},
+    "competitive_defensibility":     {"score": 3, "assumption": true,  "basis": "Requires lender+acquirer combination PSPs lack (their handoff #1 thesis); Wio payments launch (IP-2026-001) bounds the window"},
+    "ease_of_validation":            {"score": 4, "assumption": false, "basis": "Hold-affected merchants publicly identifiable on review platforms; interviews + waitlist feasible in weeks"},
+    "mvp_feasibility_7wk":           {"score": 2, "assumption": false, "basis": "Full acquiring stack (scheme membership, BIN sponsor) exceeds 7 weeks; only a concierge advance-against-existing-PSP-receivables variant fits"}
+  }
+}
