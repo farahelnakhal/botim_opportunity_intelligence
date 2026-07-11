@@ -106,8 +106,10 @@ def apply_scenario(raw_case, scenario):
     """Return a new raw case dict with the scenario's shocks applied."""
     shocked = dict(raw_case)
     for name, shock in scenario["shocks"].items():
-        if name not in commercial.REQUIRED_INPUTS:
+        if name not in commercial.REQUIRED_INPUTS + commercial.OPTIONAL_INPUTS:
             raise InputError(f"scenario shocks unknown input '{name}'")
+        if name in commercial.OPTIONAL_INPUTS and name not in raw_case:
+            raise InputError(f"scenario shocks optional input '{name}' that the case does not use")
         value, label, note = commercial._norm(raw_case[name], name)
         new_value = _apply_shock(value, shock, name)
         if name in ("routed_share", "utilisation"):

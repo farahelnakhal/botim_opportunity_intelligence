@@ -15,7 +15,10 @@ from dataclasses import dataclass
 
 from . import commercial
 
-FRACTION_INPUTS = ("routed_share", "utilisation")
+FRACTION_INPUTS = ("routed_share", "utilisation", "offline_share")
+
+# reporting-only inputs: no economic effect, pointless to perturb
+NON_ECONOMIC_INPUTS = ("avg_credit_duration_days",)
 
 
 @dataclass
@@ -49,7 +52,9 @@ def analyse(model, case_name="base", degrade=0.5):
     baseline = commercial.compute_case(case_name, raw_case)
 
     rows = []
-    for name in commercial.REQUIRED_INPUTS:
+    names = [n for n in commercial.REQUIRED_INPUTS + commercial.OPTIONAL_INPUTS
+             if n in baseline.inputs and n not in NON_ECONOMIC_INPUTS]
+    for name in names:
         base_value = baseline.v(name)
         candidates = [base_value * (1 - degrade), base_value * (1 + degrade)]
         if name in FRACTION_INPUTS:
