@@ -6,7 +6,9 @@
       "p": 0.5,
       "made": "2026-07-11",
       "resolve_by": "2026-08-31",
-      "links": ["VE-001"],
+      "links": [
+        "VE-001"
+      ],
       "outcome": null,
       "resolved_on": null,
       "resolution_note": "RC-8: waitlist conversions typically 5-15%; our 40/15 thresholds leave a wide inconclusive zone"
@@ -17,7 +19,10 @@
       "p": 0.25,
       "made": "2026-07-11",
       "resolve_by": "2026-08-31",
-      "links": ["VE-001", "OPP-001"],
+      "links": [
+        "VE-001",
+        "OPP-001"
+      ],
       "outcome": null,
       "resolved_on": null,
       "resolution_note": "RC-2 (10-30% sustain new rails) and RC-8 both argue the routing ask is hard; 0.25 reflects deliberate above-class threshold"
@@ -28,7 +33,10 @@
       "p": 0.35,
       "made": "2026-07-11",
       "resolve_by": "2026-08-31",
-      "links": ["VE-002", "OPP-002"],
+      "links": [
+        "VE-002",
+        "OPP-002"
+      ],
       "outcome": null,
       "resolved_on": null,
       "resolution_note": "RC-7 range 10-35%; UAE wholesale skews transfer-on-terms, so below class midpoint"
@@ -39,7 +47,9 @@
       "p": 0.6,
       "made": "2026-07-11",
       "resolve_by": "2026-08-15",
-      "links": ["OPP-001"],
+      "links": [
+        "OPP-001"
+      ],
       "outcome": null,
       "resolved_on": null,
       "resolution_note": "RC-4 says merchants accept 25-50% APR-equiv for revenue-linked products; risk is bank competition for the best credits"
@@ -50,10 +60,12 @@
       "p": 0.65,
       "made": "2026-07-11",
       "resolve_by": "2026-07-31",
-      "links": ["REQ-002"],
-      "outcome": null,
-      "resolved_on": null,
-      "resolution_note": "Their module and templates shipped 2026-07-10; execution cadence unknown"
+      "links": [
+        "REQ-002"
+      ],
+      "outcome": true,
+      "resolved_on": "2026-07-11",
+      "resolution_note": "12 records landed 2026-07-11, well before deadline"
     }
   ]
 }
