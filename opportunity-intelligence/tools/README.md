@@ -55,6 +55,8 @@ before the run — do not edit them), run `verdict`, and apply the pre-committed
 
 Run `check` before every commit that touches `knowledge-base/` — it is the module's regression test.
 
+**Canonical-numbers rule:** every numeric table in a knowledge-base document must be an engine-written report (`--write`) from a committed inputs JSON. Narrative markdown interprets the numbers; it never hand-authors them. (Audit remediation 2026-07-10: OPP-001's hand-written tables were retired in favour of `opp-001-computed.md`.)
+
 Add `--write <path>` to `model`/`subsidy`/`score` to save the report as markdown. The tool refuses to write into Workstream A or shared paths.
 
 ## Inputs

@@ -1,33 +1,16 @@
-# Test Case 3 — Generic Cashback Business Wallet ("Wallet + 2% Cashback")
+# Test Case 3 — Generic Cashback Business Wallet (worked illustration of a Reject)
 
-**Purpose of this file:** worked example proving the module will reject weak propositions. This idea is deliberately close to a plausible-sounding launch plan.
+**What this file is:** proof the module rejects weak propositions — deliberately an idea that sounds like a plausible launch plan. **The canonical rejected profile lives in the knowledge base** — this file shows why the machinery said no.
 
-## Proposition
+| Step | Canonical artefact |
+|---|---|
+| Rejected profile + reopen trigger | `knowledge-base/product-ideas/opp-003-generic-cashback-wallet.md` |
+| Archive row | `knowledge-base/product-ideas/BACKLOG.md` (Archive section) |
 
-A BOTIM business wallet with a prepaid Visa card offering 2% cashback on all business spend, free transfers, and a business IBAN — customer acquisition driven by the cashback offer.
+## What the walkthrough demonstrates
 
-## Why it looks attractive
+1. **The organic-switching test has teeth:** strip the 2% cashback and nothing qualifying remains ("another wallet with an IBAN") — automatic fail, whatever the scores say.
+2. **Arithmetic beats argument:** 200 bps cashback against 25–90 bps net payment margin loses money in **all three cases including upside**. The subsidy engine's one-budget stacking check fails it mechanically, and that exact case is a permanent regression test (`test_cashback_stacking_is_charged_to_same_budget` in `tools/tests/test_engine.py`).
+3. **Rejection is productive:** the idea's one defensible fragment (business IBAN for under-banked micro-merchants) was spun out as OPP-004 with its own evidence request, and the archive row carries a reopen trigger so the decision is revisitable on stated terms, not by amnesia.
 
-Simple to explain, fast to launch, cashback demonstrably acquires users, and it seeds the merchant base for later credit products.
-
-## Stress test (decisive sections)
-
-- **Organic-switching test — FAILED.** Strip the cashback: what remains is "another wallet with an IBAN". Free transfers and generic convenience are explicitly non-qualifying switching reasons. The IBAN alone may matter to under-banked micro-merchants, but that is a *different, narrower* proposition than this one.
-- **Economics — FAILED.** 2% cashback (200 bps) against a net payment margin of 25–90 bps (see Test Case 2 table) loses 110–175 bps on every dirham of spend, with no lending margin attached to offset it. The subsidy-stacking cross-check in `mdr-interchange-subsidy-model.md` fails in **all three cases including upside**.
-- **Adverse selection:** cashback-maximisers concentrate spend while it lasts and churn when it ends; the "seeded base" is the least loyal cohort available.
-- **Fraud:** cashback arbitrage via self-dealing (merchant pays own/friendly terminal, harvests 2%, reverses).
-- **Copyability:** total — any bank or wallet can outbid a cashback number; there is no data or distribution moat in the offer itself.
-- **Why hasn't it been built:** it has, repeatedly, in many markets; cashback-led wallets without an attached lending or software margin shrink when promotions end. Answer (c): the economics don't work.
-
-## Scorecard floors triggered
-
-Payment revenue potential 1, Competitive defensibility 1, and the proposition fails the organic-switching test outright — per the stress-test rubric this forces **Reject** regardless of the composite.
-
-## Classification: **REJECT**
-
-- **Decisive factor:** no organic switching reason survives removal of the subsidy, and the subsidy itself is unaffordable at any case in the interchange model.
-- **Evidence confidence:** High *for the rejection* — the economics are arithmetic, not assumption.
-- **Reopen trigger (archived in backlog, not deleted):** a strategic decision to buy market share at a stated, board-approved loss with a defined payback via a validated credit product — i.e. a different proposition.
-- **What survives:** the business-IBAN-for-underbanked-micro-merchants fragment may be worth evaluating as its own proposition (new backlog entry, needs Workstream A evidence on IBAN-access pain).
-
-*Note: this classification applies to the proposition only, not to any wider launch decision.*
+Classification: **REJECT** — evidence confidence High *for the rejection* (it's arithmetic).

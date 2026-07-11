@@ -1,6 +1,17 @@
 # OPP-001 — Revenue-Linked Revolving Credit on BOTIM Business Wallet
 
-Opportunity profile. Classification: **Promising but unvalidated** (capped by 15/17 assumption-based scores). Linked artefacts: scorecard & stress test (`opportunity-intelligence/test-cases/01-revenue-linked-revolving-credit.md`, migrating here after re-score), commercial model (`../commercial-models/opp-001-revenue-linked-credit.md`), experiment (`../validation/VE-001-revenue-routing-commitment.md`).
+Opportunity profile. Classification: **Promising but unvalidated** (capped by 15/17 assumption-based scores). Linked artefacts: scorecard (`../opportunity-scores/opp-001-scorecard.json`, engine-validated), commercial model (`../commercial-models/opp-001-inputs.json` + `opp-001-computed.md`; narrative in `opp-001-revenue-linked-credit.md`), experiment (`../validation/VE-001-revenue-routing-commitment.md`). Worked illustration: `opportunity-intelligence/test-cases/01-…`.
+
+---
+
+## Stress test (summary)
+
+- **Strongest case FOR:** activates the full loop — payments generate data, data grows limits, credit pulls more payments in; repayment is invisible to the merchant.
+- **Strongest case AGAINST:** chicken-and-egg. Revenue-linked everything requires the merchant to move their *receiving* rails to BOTIM first — the hardest behaviour change in payments. Merchants may take the credit and route revenue elsewhere afterwards (scenario `credit_and_run` kills unit economics; the MVP's >25% credit-and-run kill threshold is the early-warning metric).
+- **Adverse selection:** bank-rejected merchants first in line; offset by limits that start small and grow only with observed flow. Scenario `adverse_selection` (2.5× ECL) also kills — second early-warning metric.
+- **Fraud:** cash-in recycling to inflate "revenue" and limits — needs velocity/counterparty checks.
+- **Why hasn't it been built here:** local wallets lack a licensed SME lender attached (capability gap); demand realism is the untested leg.
+- **Disproof:** if merchants at inflection points won't commit to routing ≥30% of revenue for 90 days in exchange for a growing limit, the loop dies — VE-001's exact question.
 
 ---
 

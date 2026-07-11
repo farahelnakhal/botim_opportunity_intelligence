@@ -19,6 +19,7 @@ opportunity-intelligence/
 │   ├── opportunity-scoring.md          17-dimension 1–5 scoring model + companion fields
 │   └── product-stress-test.md          Kill-the-idea framework + classification rubric
 ├── templates/
+│   ├── opportunity-profile.md          Consolidated evaluation form (all framework fields)
 │   ├── commercial-model.md             Full unit-economics template (ranges, 3 cases, break-even)
 │   ├── mdr-interchange-subsidy-model.md  Net interchange math; max free days/cashback/subsidy
 │   ├── value-proposition.md            Organic-switching-first VP template + data loop
