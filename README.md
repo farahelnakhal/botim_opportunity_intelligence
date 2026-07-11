@@ -1,132 +1,54 @@
-# BOTIM Opportunity Intelligence — Workstreams
+# BOTIM Opportunity Intelligence
 
-This repository is being developed by two people simultaneously using Claude Code.
+An internal AI research and product-discovery agent for BOTIM/AstraTech: it discovers evidence of SME merchant pain in the UAE, converts that evidence into scored and stress-tested payment/lending product opportunities, models the commercial economics honestly, and produces meeting-ready recommendations — while remaining willing to reject weak ideas, including its own.
 
-## Shared objective
+The agent is defined in **`MASTER_PROMPT.md`** and composed of two modules over one shared knowledge base:
 
-Build an internal AI research and product-discovery agent for BOTIM/AstraTech focused on:
+| | Customer & Market Intelligence | Product & Opportunity Intelligence |
+|---|---|---|
+| Prompt | `customer-intelligence/SYSTEM_PROMPT.md` | `opportunity-intelligence/SYSTEM_PROMPT.md` |
+| Produces | Evidence records (EV-…), segments (SEG-…), competitor profiles, inflection points (IP-…), weekly updates with handoffs | Backlog (OPP-…), scorecards, commercial/subsidy models, stress tests, experiments (VE-…), recommendations, decision journal |
+| Tools | `customer-intelligence/tools/` (conformance checker) | `opportunity-intelligence/tools/` (computation engine, 10+ CLI commands) |
 
-- SME merchant pain points
-- Customer interest and behaviour
-- Competitor monitoring
-- Market changes
-- Product opportunities
-- Payment and lending propositions
-- Commercial models
-- Validation experiments
+Evidence flows A→B by ID; evidence *requests* flow B→A through the backlog's REQ queue. Ownership and collaboration rules: `WORKSTREAMS.md`.
 
-The agent should not restart research from scratch each time. It should maintain reusable knowledge and update what has changed.
+## Quickstart
 
----
+```bash
+# The integration gate — run before every push; must pass clean
+python3 shared/integration_check.py
 
-## Workstream A — Customer & Market Intelligence
+# Explore the current state
+python3 opportunity-intelligence/tools/run.py evidence      # parsed evidence records
+python3 opportunity-intelligence/tools/run.py check         # knowledge-base sweep
+python3 opportunity-intelligence/tools/run.py sync          # evidence → scorecard suggestions
+python3 opportunity-intelligence/tools/run.py calibration   # decision-journal Brier report
+python3 customer-intelligence/tools/conformance_check.py .  # evidence-format conformance
+```
 
-Owner: Person 1
+Pure Python 3 standard library throughout — nothing to install.
 
-Primary branch:
+## Repository map
 
-customer-intelligence
+```
+MASTER_PROMPT.md            The combined agent: routing, shared loop, non-negotiables
+WORKSTREAMS.md              Ownership, cross-module contract, git rules
+shared/                     Integration gate + cross-module tests
+customer-intelligence/      Workstream A module (prompts, frameworks, templates, tools)
+opportunity-intelligence/   Workstream B module (prompts, frameworks, templates, reasoning layer, engine)
+knowledge-base/             The cumulative shared memory
+├── customer-evidence/      A: scored EV records, source log, weekly updates
+├── segments/  competitors/  inflection-points/        A: reference entities
+├── product-ideas/          B: BACKLOG.md, opportunity profiles, recommendations, decision journal
+├── commercial-models/      B: model inputs (JSON) + engine-computed reports + BENCHMARKS.md
+├── opportunity-scores/     B: 17-dimension scorecards (JSON, engine-validated)
+└── validation/             B: experiment specs + pre-committed result files
+```
 
-Owned directories:
+## Operating principles (the short version)
 
-- customer-intelligence/
-- knowledge-base/customer-evidence/
-- knowledge-base/competitors/
-- knowledge-base/segments/
-- knowledge-base/inflection-points/
-
-Responsibilities:
-
-- Voice-of-customer research
-- Autonomous source discovery
-- Reddit, app reviews, forums and public communities
-- Merchant pain-point analysis
-- Customer-segment analysis
-- Competitor tracking
-- Market and product updates
-- Evidence scoring
-- Source logging
-- Contradiction checking
-- Weekly intelligence updates
-
-Do not directly modify:
-
-- opportunity-intelligence/
-- commercial-models/
-- product-scoring/
-- validation-experiments/
-
----
-
-## Workstream B — Product & Opportunity Intelligence
-
-Owner: Person 2
-
-Primary branch:
-
-opportunity-intelligence
-
-Owned directories:
-
-- opportunity-intelligence/
-- knowledge-base/product-ideas/
-- knowledge-base/commercial-models/
-- knowledge-base/validation/
-- knowledge-base/opportunity-scores/
-
-Responsibilities:
-
-- Product opportunity generation
-- Value propositions
-- Commercial-model analysis
-- MDR and interchange modelling
-- Product stress tests
-- Opportunity scoring
-- BOTIM strategic advantage
-- Seven-week MVP definition
-- Validation experiments
-- Product backlog
-- Meeting-ready recommendations
-
-Do not directly modify:
-
-- customer-intelligence/
-- source-discovery/
-- competitor-tracking/
-- customer-evidence/
-
----
-
-## Shared files
-
-The following files are shared and should not be modified without explicit agreement:
-
-- MASTER_PROMPT.md
-- README.md
-- WORKSTREAMS.md
-- context/
-- shared/
-- templates/
-
-If a shared-file change is required:
-
-1. Do not make it automatically.
-2. Document the suggested change.
-3. Continue working within the owned module.
-4. Raise the change during the merge session.
-
----
-
-## Git rules
-
-- Always work on the assigned branch.
-- Pull before starting work.
-- Inspect repository status before editing.
-- Stage only intentionally modified files.
-- Do not force-push.
-- Do not rewrite history.
-- Do not delete another contributor's work.
-- Do not modify files outside the assigned workstream without approval.
-- Commit focused changes.
-- Push the assigned branch after completing a coherent task.
-- If a merge conflict occurs, stop and explain it instead of guessing.
+1. Evidence before advocacy — assumptions are marked `(A)`, cited facts carry EV ids, and classifications are capped by assumption load.
+2. Numbers come from the engine — commercial figures are computed from committed inputs JSON, never hand-authored.
+3. Correct payment terminology — merchants pay MDR; issuers earn interchange or a programme share, never "the full MDR".
+4. Kill thresholds are pre-committed — experiments and predictions are logged before outcomes are knowable.
+5. The knowledge base is cumulative — update, link, and re-score; never restart.
