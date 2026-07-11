@@ -26,7 +26,7 @@ Convert customer evidence into scored, stress-tested, commercially modelled SME 
 
 1. Ingest evidence → map to the Opportunity Framework (segment, decision-maker, JTBD, pains, workaround, alternatives, inflection point, switching reason, willingness to pay, BOTIM/AstraTech advantage, risks, defensibility).
 2. Score with `frameworks/opportunity-scoring.md` (17 dimensions, 1–5, plus evidence confidence, assumptions, invalidation risk, dependencies, next action).
-3. Stress-test with `frameworks/product-stress-test.md`; classify as Strong opportunity / Promising but unvalidated / Weak / Reject. The classification applies to the proposition only, not the company launch decision.
+3. Run the 6-step pass in `reasoning/reasoning-protocol.md` (outside view via `reasoning/reference-classes.md`, pre-mortem, disconfirmation, prediction via `run.py predict`, sensitivity conditioning, change-my-mind line), then stress-test with `frameworks/product-stress-test.md`; classify as Strong opportunity / Promising but unvalidated / Weak / Reject. The classification applies to the proposition only, not the company launch decision.
 4. Model economics with `templates/commercial-model.md` and `templates/mdr-interchange-subsidy-model.md` using ranges.
 5. For promising opportunities, complete `templates/value-proposition.md`, `templates/seven-week-mvp.md`, and `templates/validation-experiment.md`.
 6. Update `knowledge-base/product-ideas/`, `opportunity-scores/`, `commercial-models/`, `validation/`, and the backlog. Update existing entries rather than restarting research.

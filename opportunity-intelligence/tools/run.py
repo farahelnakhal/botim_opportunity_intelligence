@@ -25,6 +25,7 @@ from opportunity_engine import (  # noqa: E402
     commercial,
     evidence,
     experiments,
+    journal,
     montecarlo,
     results,
     scoring,
@@ -32,6 +33,8 @@ from opportunity_engine import (  # noqa: E402
     stress,
     subsidy,
 )
+
+JOURNAL_PATH = "knowledge-base/product-ideas/decision-journal.json"
 
 FOREIGN_DIRS = (
     "customer-intelligence",
@@ -116,7 +119,24 @@ def main(argv=None):
     p.add_argument("--steps", type=int, default=7)
     p.add_argument("--write")
 
-    p = sub.add_parser("check", help="sweep the whole knowledge base: models, scorecards, citations, VE specs, results, backlog")
+    p = sub.add_parser("predict", help="log a dated, falsifiable prediction (reasoning-protocol step 4)")
+    p.add_argument("statement")
+    p.add_argument("--p", type=float, required=True, help="probability strictly between 0 and 1")
+    p.add_argument("--resolve-by", required=True, help="YYYY-MM-DD deadline")
+    p.add_argument("--links", default="", help="comma-separated ids (VE-001, OPP-001, ...)")
+    p.add_argument("--journal", default=JOURNAL_PATH)
+
+    p = sub.add_parser("resolve", help="resolve a prediction true/false (probabilities are never edited)")
+    p.add_argument("id")
+    p.add_argument("outcome", choices=["true", "false"])
+    p.add_argument("--note", default="")
+    p.add_argument("--journal", default=JOURNAL_PATH)
+
+    p = sub.add_parser("calibration", help="Brier score + calibration buckets + open/overdue predictions")
+    p.add_argument("--journal", default=JOURNAL_PATH)
+    p.add_argument("--write")
+
+    p = sub.add_parser("check", help="sweep the whole knowledge base: models, scorecards, citations, VE specs, results, backlog, journal")
     p.add_argument("--root", default=".", help="repo root (default: cwd)")
 
     args = ap.parse_args(argv)
@@ -162,6 +182,28 @@ def main(argv=None):
             model = _load_json(args.inputs)
             xs, ys, matrix = sensitivity.grid(model, args.x, args.y, args.case, args.steps)
             _emit(sensitivity.render_grid_markdown(model, args.x, args.y, args.case, xs, ys, matrix), args.write)
+        elif args.cmd == "predict":
+            import datetime
+            data = journal.load(args.journal)
+            entry = journal.add(
+                data, args.statement, args.p,
+                datetime.date.today().isoformat(), args.resolve_by,
+                [x.strip() for x in args.links.split(",") if x.strip()],
+            )
+            journal.save(data, args.journal)
+            print(f"logged {entry['id']} (p={entry['p']:.0%}, resolve by {entry['resolve_by']})")
+        elif args.cmd == "resolve":
+            import datetime
+            data = journal.load(args.journal)
+            entry = journal.resolve(data, args.id, args.outcome == "true",
+                                    datetime.date.today().isoformat(), args.note)
+            journal.save(data, args.journal)
+            print(f"{entry['id']} resolved {entry['outcome']} (was p={entry['p']:.0%})")
+        elif args.cmd == "calibration":
+            import datetime
+            cal = journal.calibration(journal.load(args.journal),
+                                      today=datetime.date.today().isoformat())
+            _emit(journal.render_markdown(cal), args.write)
         elif args.cmd == "check":
             sys.exit(run_check(Path(args.root)))
     except commercial.InputError as exc:
@@ -252,6 +294,23 @@ def run_check(root):
         if ev["verdict"] in ("fail", "pass"):
             notes.append(f"{rel}: conclusive verdict {ev['verdict'].upper()} — "
                          f"ensure BACKLOG.md reflects the pre-committed action")
+
+    print("== decision journal ==")
+    journal_path = kb / "product-ideas" / "decision-journal.json"
+    if journal_path.exists():
+        import datetime
+        try:
+            cal = journal.calibration(journal.load(journal_path),
+                                      today=datetime.date.today().isoformat())
+        except commercial.InputError as exc:
+            fail(f"decision-journal.json: {exc}")
+        else:
+            ok(f"decision-journal.json: {cal['n_resolved']} resolved, {len(cal['open'])} open"
+               + (f", Brier {cal['brier']:.3f}" if cal["brier"] is not None else ""))
+            for p in cal["overdue"]:
+                fail(f"decision-journal.json: {p['id']} overdue (resolve by {p['resolve_by']}) — resolve it or log why")
+    else:
+        notes.append("no decision journal yet")
 
     print("== backlog ==")
     backlog_path = kb / "product-ideas" / "BACKLOG.md"

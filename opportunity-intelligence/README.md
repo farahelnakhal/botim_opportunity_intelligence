@@ -18,6 +18,10 @@ opportunity-intelligence/
 ├── frameworks/
 │   ├── opportunity-scoring.md          17-dimension 1–5 scoring model + companion fields
 │   └── product-stress-test.md          Kill-the-idea framework + classification rubric
+├── reasoning/
+│   ├── README.md                       Reasoning layer: calibration, adversarial checks, base rates
+│   ├── reasoning-protocol.md           6-step pass run at every decision point
+│   └── reference-classes.md            Base rates consulted before classification (outside view)
 ├── templates/
 │   ├── opportunity-profile.md          Consolidated evaluation form (all framework fields)
 │   ├── commercial-model.md             Full unit-economics template (ranges, 3 cases, break-even)
