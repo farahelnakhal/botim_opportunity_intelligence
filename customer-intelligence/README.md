@@ -17,16 +17,20 @@ customer-intelligence/
 │   ├── evidence-scoring.md         ← 10-axis 1–5 scoring for every pain point
 │   └── pain-point-taxonomy.md      ← canonical pain categories
 ├── templates/
-│   ├── customer-evidence.md
+│   ├── customer-evidence.md        ← ⚠ format is a parsing contract with Workstream B
 │   ├── customer-segment.md
 │   ├── competitor-profile.md
 │   ├── inflection-point.md
 │   ├── weekly-market-update.md
-│   └── source-log.md
+│   ├── source-log.md
+│   └── customer-interview.md       ← interview → evidence pipeline (with confidence caps)
 ├── commands/
 │   └── example-commands.md         ← five worked example invocations
-└── test-cases/
-    └── test-cases.md               ← three realistic test scenarios
+├── test-cases/
+│   └── test-cases.md               ← three realistic test scenarios
+└── tools/
+    ├── conformance_check.py        ← read-only knowledge-base validator (stdlib only)
+    └── tests/test_conformance.py
 
 knowledge-base/                     (Workstream A owns only these four)
 ├── customer-evidence/              ← scored evidence records + weekly updates
@@ -62,6 +66,15 @@ Each workflow reads existing knowledge-base records first, then adds or updates 
 
 Workstream B may cite evidence by ID (e.g. an opportunity score referencing `EV-2026-W28-003`). IDs are never reused or renumbered.
 
+**ID-collision rule (concurrent runs).** This repo is worked on by two people and multiple agent runs. Before minting any new ID:
+
+1. `git pull` the latest branch state.
+2. Search the knowledge base for the highest existing ID of that type (e.g. `grep -ro "EV-2026-W[0-9]*-[0-9]*" knowledge-base/customer-evidence/`).
+3. Select the next unused ID **immediately before writing** the record — not at the start of a long research run.
+4. Re-run the search just before committing; if a collision appeared (someone else pushed), renumber your new records (never the pre-existing ones) and re-check.
+
+The same rule applies to `SRC-`, `IP-`, and any sequential ID. `customer-intelligence/tools/conformance_check.py` fails on duplicate IDs as a backstop.
+
 ## Boundaries
 
 Per the workstream rules in the root `README.md`, this module never modifies:
@@ -70,3 +83,14 @@ Per the workstream rules in the root `README.md`, this module never modifies:
 - Shared files (`README.md`, `MASTER_PROMPT.md`, root `templates/`, `context/`, `shared/`)
 
 Cross-module suggestions are recorded in weekly updates under "Handoffs to Workstream B", not implemented directly.
+
+## Conformance
+
+Evidence records are machine-consumed by Workstream B, so the record format is a compatibility contract (see the note at the top of `templates/customer-evidence.md`). Before committing knowledge-base changes:
+
+```
+python3 customer-intelligence/tools/conformance_check.py .          # validate live KB (exit 0 = pass)
+python3 -m unittest discover customer-intelligence/tools/tests -v   # run the checker's test suite
+```
+
+The checker is read-only and validates: unique EV IDs, High/Medium/Low confidence values, valid status tokens, all ten score axes, required fields, and that EV/SRC/SEG/IP references in structured fields resolve (example IDs in prose/documentation are deliberately ignored).

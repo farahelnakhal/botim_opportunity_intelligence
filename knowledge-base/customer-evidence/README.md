@@ -14,7 +14,7 @@ customer-evidence/
 
 ## Conventions
 
-- Evidence IDs: `EV-YYYY-Wnn-nnn`, sequential within the week, never reused or renumbered.
+- Evidence IDs: `EV-YYYY-Wnn-nnn`, sequential within the week, never reused or renumbered. Before minting a new ID, follow the ID-collision rule in `customer-intelligence/README.md` (pull → search existing IDs → mint immediately before writing → re-check before commit).
 - Each `records/YYYY-Wnn.md` file holds that week's records using `customer-intelligence/templates/customer-evidence.md`.
 - Updating an old record happens **in its original file** (status, scores, contradiction fields), with the score history appended — records don't move between weekly files.
 - Weekly updates follow `customer-intelligence/templates/weekly-market-update.md` and report deltas only.
