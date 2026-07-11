@@ -11,7 +11,7 @@
 ## What the walkthrough demonstrates
 
 1. **Correct card terminology by construction:** the supplier (accepting merchant) pays MDR to its acquirer; BOTIM models only issuer interchange / programme share. The subsidy engine has **no MDR input**, so the full-MDR error cannot be expressed. Run it: `python3 opportunity-intelligence/tools/run.py subsidy knowledge-base/commercial-models/opp-002-subsidy-inputs.json`.
-2. **Subsidy ceilings from net margin:** 25/60/90 bps net margin across cases supports at most ~11/27/41 fully-funded free-credit days; the offered 20-day package fails the downside case and must be flagged as a loss-leader there.
+2. **Subsidy ceilings from net margin:** 65/110/120 bps net margin (gross interchange sourced 2026-07-11 to official Visa UAE commercial rates — see `knowledge-base/commercial-models/BENCHMARKS.md`) supports ~30/50/55 fully-funded free-credit days; the offered 20-day package is affordable in all three cases. Before sourcing, assumed 90–170 bps gross made the downside a loss-leader — a live example of evidence moving a conclusion.
 3. **Model only what's modellable:** the decisive unknown (supplier card acceptance) is empirical — so the full commercial model is deliberately deferred until VE-002 reports, and the failure threshold (<20% surcharge-free acceptance → reclassify Weak) was committed in advance.
 
 Classification: **Promising but unvalidated (borderline Weak)** — gated on VE-002.
