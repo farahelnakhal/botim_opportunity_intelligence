@@ -32,6 +32,7 @@ from opportunity_engine import (  # noqa: E402
     sensitivity,
     stress,
     subsidy,
+    sync,
 )
 
 JOURNAL_PATH = "knowledge-base/product-ideas/decision-journal.json"
@@ -136,6 +137,10 @@ def main(argv=None):
     p.add_argument("--journal", default=JOURNAL_PATH)
     p.add_argument("--write")
 
+    p = sub.add_parser("sync", help="compare cited Workstream A evidence against scorecard scores (report-only)")
+    p.add_argument("--root", default=".")
+    p.add_argument("--write")
+
     p = sub.add_parser("check", help="sweep the whole knowledge base: models, scorecards, citations, VE specs, results, backlog, journal")
     p.add_argument("--root", default=".", help="repo root (default: cwd)")
 
@@ -204,6 +209,8 @@ def main(argv=None):
             cal = journal.calibration(journal.load(args.journal),
                                       today=datetime.date.today().isoformat())
             _emit(journal.render_markdown(cal), args.write)
+        elif args.cmd == "sync":
+            _emit(sync.render_markdown(sync.analyse(args.root)), args.write)
         elif args.cmd == "check":
             sys.exit(run_check(Path(args.root)))
     except commercial.InputError as exc:

@@ -42,6 +42,17 @@ PSPs hold funds because chargeback risk is a **credit risk they cannot price** �
 - **mvp_feasibility_7wk = 2:** a full acquiring stack (scheme membership, BIN sponsor, settlement rails) does NOT fit 7 weeks. The 7-week variant is **concierge advance-against-existing-PSP-receivables**: merchant keeps their PSP; AstraTech advances held/receivable funds at a priced fee — tests the demand and the risk pricing without building acquiring. Full acceptance product is the expansion path, not the MVP.
 - **Fixed costs (A) 180k/month** reflect the acquiring stack — the biggest structural bet.
 
+## Sync review (2026-07-11)
+
+`run.py sync` reports the cited records' axis means run ~1 below several demand scores. Reviewed per protocol step 1 (burden of proof on the divergence), decisions recorded:
+
+- **willingness_to_pay 5 stands:** the 5 rests on mamo.md's *priced* same-day-settlement uptake (a market fact), which the EV axis means don't capture — evidence type outranks axis average here.
+- **pain_severity 5 / financial_impact 5 stand:** axis means (4) blend milder records; the dimension anchors score the *segment's worst credible case* (540-day total fund loss), which is what a hold-underwriting product prices.
+- **pain_frequency 4 stands, weakly:** their frequency axis counts distinct merchants per record; cross-record breadth (8 of 12 records, 7+ providers) is the better frequency signal. Revisit if VE-003 interviews suggest holds are rarer than review platforms imply.
+- **workaround_cost / switching_intent:** divergence accepted as within-anchor noise; no change.
+
+Net: no score changes, every divergence argued in writing — which is the sync bridge doing its job.
+
 ## Status
 
 - **Main invalidation risk:** held merchants are high-risk categories we would also hold — the wedge is real but small.

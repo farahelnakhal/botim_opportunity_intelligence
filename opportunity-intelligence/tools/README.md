@@ -17,6 +17,10 @@ python3 opportunity-intelligence/tools/run.py score knowledge-base/opportunity-s
 # List Workstream A evidence records (read-only)
 python3 opportunity-intelligence/tools/run.py evidence
 
+# Evidence→scorecard sync: compare cited records' axis scores against scorecard
+# dimensions via the agreed mapping; suggests re-scores / (A)-flips. Report-only.
+python3 opportunity-intelligence/tools/run.py sync
+
 # Check EV-id citations before putting them in a scorecard; exit code 2 on missing/malformed
 python3 opportunity-intelligence/tools/run.py cite EV-2026-W28-001,EV-2026-W28-002
 
