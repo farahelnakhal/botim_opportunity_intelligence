@@ -103,14 +103,16 @@ class TestCalibration(unittest.TestCase):
 
 
 class TestSeededJournal(unittest.TestCase):
-    def test_repo_journal_valid_and_open(self):
+    def test_repo_journal_valid_and_linked(self):
+        # journal.load() runs full validation; resolved count grows over time,
+        # so assert structure, not a snapshot of it
         data = journal.load(REPO_ROOT / "knowledge-base/product-ideas/decision-journal.json")
         self.assertGreaterEqual(len(data["predictions"]), 5)
-        cal = journal.calibration(data)
-        self.assertEqual(cal["n_resolved"], 0)
-        # every seeded prediction links to a real artefact id
+        journal.calibration(data)  # must compute without error
         for p in data["predictions"]:
             self.assertTrue(p["links"], p["id"])
+            if p["outcome"] is not None:
+                self.assertTrue(p["resolved_on"], p["id"])
 
 
 if __name__ == "__main__":
