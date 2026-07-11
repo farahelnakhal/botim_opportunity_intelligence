@@ -19,6 +19,7 @@ A competitor shipping a routine feature is a change-log entry in their profile, 
 | ID | Title | Domain | Status | Last verified |
 |---|---|---|---|---|
 | IP-2026-001 | Wio pivots into merchant payments and partner-distributed SME credit | competitor entry | confirmed | 2026-07-10 |
+| IP-2026-002 | A possible UAE category-formation signal for financed supplier payments | embedded lending | emerging | 2026-07-11 |
 
 (Keep this index current as records are added.)
 

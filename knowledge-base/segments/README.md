@@ -17,6 +17,7 @@ One profile per customer segment, using `customer-intelligence/templates/custome
 | UAE micro/small online merchants on PSP gateways/payment links | `SEG-uae-online-sme-psp-merchants.md` | Medium | 2026-07-10 |
 | UAE marketplace sellers (Amazon.ae/Noon) | `SEG-uae-marketplace-sellers.md` | Low–Medium | 2026-07-10 |
 | UAE brick-and-mortar POS merchants | `SEG-uae-pos-merchants.md` | Low (stub) | 2026-07-11 |
+| Small UAE importers paying suppliers upfront, collecting at 30–90 days | `SEG-uae-importers-upfront-pay.md` | Low (upgrade condition stated in profile) | 2026-07-11 |
 
 (Keep this index current as profiles are added.)
 
