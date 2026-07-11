@@ -10,9 +10,9 @@ A BOTIM commercial Visa card (AstraTech credit behind it) that merchants use to 
 - **Organic switching reason:** free-credit days on spend that already exists + credit access without bank paperwork.
 - **Terminology check:** the supplier (accepting merchant) pays MDR to its acquirer; BOTIM earns issuer interchange / programme share only — the subsidy engine has no MDR input by construction.
 
-## What the engine says (subsidy model, all (A))
+## What the engine says (subsidy model — interchange now sourced (E))
 
-Net payment margin 25/60/90 bps across cases. The ceiling if the whole budget funds free days: ~11/27/41 days. A **20-free-day package survives base and upside but is a loss-leader in downside**; a 45-day offer is a loss-leader everywhere except upside and must be flagged as such or funded from proven lending margin.
+2026-07-11 refinement: gross interchange re-based from 90/130/170 (A) to **130/180/200 (E)** on the official Visa UAE schedule (domestic commercial cards 2.00–2.10% general segments; segment programs/large-ticket lower — `../commercial-models/BENCHMARKS.md`). Net payment margin is now **65/110/120 bps**; the free-day ceiling **~30/50/55 days**, and the 20-free-day package is **affordable in all three cases** (previously a downside loss-leader). Programme splits remain (A) — the next number to firm. UAE's uncapped domestic interchange makes the card-economics-fund-free-credit hypothesis materially stronger than first modelled; supplier acceptance (VE-002) remains the decisive gate.
 
 ## Stress test (summary)
 

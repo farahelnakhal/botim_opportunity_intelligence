@@ -91,23 +91,24 @@ class TestSubsidyModel(unittest.TestCase):
     def setUp(self):
         self.results = subsidy.compute_model(OPP002)
 
-    def test_net_margins_match_test_case_table(self):
-        # opportunity-intelligence/test-cases/02-supplier-payment-card.md: 25 / 60 / 90 bps
-        self.assertAlmostEqual(self.results["downside"].net_margin_bps, 25)
-        self.assertAlmostEqual(self.results["base"].net_margin_bps, 60)
-        self.assertAlmostEqual(self.results["upside"].net_margin_bps, 90)
+    def test_net_margins_match_published_inputs(self):
+        # 2026-07-11 re-based to official Visa UAE commercial interchange
+        # (BENCHMARKS.md): gross 130/180/200 (E) -> net 65/110/120 bps
+        self.assertAlmostEqual(self.results["downside"].net_margin_bps, 65)
+        self.assertAlmostEqual(self.results["base"].net_margin_bps, 110)
+        self.assertAlmostEqual(self.results["upside"].net_margin_bps, 120)
 
-    def test_max_free_days_match_test_case(self):
-        # test case: ~11 / ~27 / ~41 days at 8% funding
-        self.assertAlmostEqual(self.results["downside"].max_free_days_alone, 11.4, delta=0.3)
-        self.assertAlmostEqual(self.results["base"].max_free_days_alone, 27.4, delta=0.3)
-        self.assertAlmostEqual(self.results["upside"].max_free_days_alone, 41.1, delta=0.3)
+    def test_max_free_days_match_published_inputs(self):
+        # ~30 / ~50 / ~55 days at 8% funding
+        self.assertAlmostEqual(self.results["downside"].max_free_days_alone, 29.7, delta=0.3)
+        self.assertAlmostEqual(self.results["base"].max_free_days_alone, 50.2, delta=0.3)
+        self.assertAlmostEqual(self.results["upside"].max_free_days_alone, 54.7, delta=0.3)
 
     def test_offered_20_day_package(self):
-        # 20 free days: affordable at base/upside payment margin, not at downside
-        self.assertFalse(self.results["downside"].package_affordable)
-        self.assertTrue(self.results["base"].package_affordable)
-        self.assertTrue(self.results["upside"].package_affordable)
+        # 20 free days: affordable in all three cases at sourced interchange
+        # (pre-refinement it was a loss-leader in the downside case)
+        for case in ("downside", "base", "upside"):
+            self.assertTrue(self.results[case].package_affordable, case)
 
     def test_cashback_stacking_is_charged_to_same_budget(self):
         case = dict(OPP002["cases"]["base"])

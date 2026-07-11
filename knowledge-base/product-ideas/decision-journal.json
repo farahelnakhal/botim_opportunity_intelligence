@@ -50,9 +50,9 @@
       "links": [
         "OPP-001"
       ],
-      "outcome": null,
-      "resolved_on": null,
-      "resolution_note": "RC-4 says merchants accept 25-50% APR-equiv for revenue-linked products; risk is bank competition for the best credits"
+      "outcome": true,
+      "resolved_on": "2026-07-11",
+      "resolution_note": "MCA APR-equiv 40-350%, RBF 10-40%; 18-24% for revenue-linked sits well inside market acceptance (BENCHMARKS.md). Residual risk is bank competition for prime credits, not merchant acceptance"
     },
     {
       "id": "PRED-005",

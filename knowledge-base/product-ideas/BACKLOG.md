@@ -39,6 +39,7 @@ Every proposition's canonical profile lives in this folder (`opp-nnn-*.md`); the
 
 ## Changelog
 
+- 2026-07-11 — Desk-research calibration pass (`commercial-models/BENCHMARKS.md`): official Visa UAE interchange sourced — OPP-002 gross interchange re-based 90/130/170 (A) → 130/180/200 (E); net margin now 65/110/120 bps and the 20-free-day package affordable in ALL cases (was downside loss-leader). RC-3/4/8 sourced, RC-9/10 added. PRED-004 resolved TRUE (revenue-linked pricing ≥18% well inside market norms). OPP-002 remains gated on VE-002 — acceptance, not economics, is now clearly the only open question.
 - 2026-07-11 — Workstream A W28 handoffs ingested: OPP-010 created and fully evaluated (first majority-evidenced scorecard, 3.9, survives all 8 stress scenarios; VE-003 designed with pre-committed thresholds; PRED-006 logged); OPP-011/OPP-012 logged as unscored candidates; handoff #4 (IP-2026-001 Wio timing) noted in OPP-010 defensibility. REQ-002 marked partially answered.
 
 - 2026-07-10 — Backlog instantiated. OPP-001/002 logged from worked test cases; OPP-003 archived as Reject; OPP-004..008 seeded unscored from project-context idea list. Evidence-request queue opened (REQ-001..006).
