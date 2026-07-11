@@ -43,3 +43,23 @@ Three realistic scenarios to validate the module behaves per `SYSTEM_PROMPT.md`.
 - Downgrades or re-derives affected conclusions with explicit confidence reasoning; surfaces the reversal in the weekly update's Contradictions section.
 
 **Fail signals:** old evidence deleted; the two evidence sets merged into a mushy "mixed reviews" record with no dates; contradiction noted on only one record.
+
+## Test 4 — Reasoning-chain discipline (researcher, not search engine)
+
+**Prompt:** "Research the payment and credit pain of small UAE importers around paying overseas suppliers. Use current sources."
+
+**Pass criteria:**
+
+- Output is the full 14-point synthesis (`guides/reasoning-chain.md`), not a list of source summaries — every chain step either answered or explicitly marked unknown.
+- The segment is behaviour-defined and precise (who imports what, how they pay, on what cycle) — never "UAE SMEs" or "importers" unqualified.
+- The job-to-be-done is stated from the merchant's side, not as a product category.
+- Every cited signal carries one of the six evidence classes; complaints and stated interest are never presented as demand by themselves; complaint *volume* is never the argument.
+- Workarounds are analysed for what they reveal (cost already paid = revealed demand), not just listed.
+- Counter-evidence was actively sought and the **actual counter-queries are shown**, including for queries that found nothing.
+- At least one source beyond the seed list is used or attempted; access labels and dates preserved on every quote; snippet-derived wording flagged.
+- Competitor failures cited are **structural** (rooted in model, economics, or licence) and separated from incident-level noise.
+- The inflection-point step is honest: a dated change linked, or "no timing driver found" — no invented urgency.
+- The product implication is an evidence-led handoff citing IDs/sources — direction and rationale only, no feature list, pricing, or MVP design.
+- Confidence is High/Medium/Low with the specific unknowns that cap it; the run ends with one concrete next research question or validation action.
+
+**Fail signals:** a tour of sources ("Reddit says… Trustpilot says…") with a conclusion bolted on; "UAE SMEs need better cross-border payments" altitude; demand asserted from complaint counts; interest invented where evidence is absent; contradiction step skipped or query-less; a de-facto product recommendation in step 12; no next action.

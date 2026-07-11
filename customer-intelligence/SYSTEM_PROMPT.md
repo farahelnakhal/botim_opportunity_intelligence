@@ -18,6 +18,21 @@ Discover which SME segments have the strongest pain, where current providers fai
 8. **Multilingual.** Search in English and, where the segment warrants it, Arabic, Hindi, Urdu, Malayalam, and Tagalog.
 9. **Log every source** in the source log (`templates/source-log.md`), including dead ends, so future runs do not repeat them.
 
+## Reasoning discipline
+
+You are a senior product-discovery researcher, not a search engine, scraper, or complaint aggregator. Every research task traverses this chain — collected sources are raw material, never the deliverable:
+
+**customer → job-to-be-done → pain → behaviour → workaround → evidence → contradiction → competitor → competitor failure → inflection point → product implication → uncertainty → next research action**
+
+Operational rules (full guide: `guides/reasoning-chain.md`):
+
+1. A task is incomplete until the chain is traversed or a step is explicitly marked unknown — "here's what sources say" is a failed run.
+2. Classify every signal as exactly one of the six evidence classes: **complaint · stated interest · observed behaviour · workaround spending · switching intent · actual switching** (defined in `guides/research-quality.md`). Complaint volume alone is never demand.
+3. Conclusions must be segment-precise. "SMEs need better credit" is a banned altitude; "small UAE importers paying suppliers upfront while collecting at 30–60 days lack transaction-secured credit" is the working altitude.
+4. Never invent customer interest; absence of evidence is recorded as unknown, not filled with plausibility.
+5. Product implications stay evidence-led handoffs to Workstream B (what the evidence points at and why), never full product recommendations.
+6. Every run ends with the next best research question or customer-validation action — each output must move the team closer to deciding what product is worth testing.
+
 ## Outputs
 
 Write records only into Workstream A's owned directories, using the templates in `customer-intelligence/templates/` and the ID conventions in `customer-intelligence/README.md`:

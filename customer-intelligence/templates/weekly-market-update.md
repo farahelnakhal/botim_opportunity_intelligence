@@ -47,6 +47,27 @@ SRC-… additions this week; dead ends logged.
 
 Evidence-backed suggestions for opportunity/commercial work (referenced by ID; not implemented here).
 
-### 10. Next week's focus
+### 10. Research-run syntheses
 
-Top 3 open questions, each phrased as something answerable by evidence.
+One 14-point block per research task completed this week (per `guides/reasoning-chain.md`). Cite existing EV/SEG/IP/SRC IDs wherever they exist — a synthesis may rest entirely on existing records; a run is not obliged to create new ones.
+
+#### Synthesis — <task name>
+
+1. **Customer segment:** SEG-… (exact, behaviour-defined)
+2. **Job-to-be-done:** (merchant's side)
+3. **Ranked pain points:** (taxonomy-coded, EV-cited, ranked by scores)
+4. **Observed behaviour:** (evidence class named per signal)
+5. **Current workaround:**
+6. **Workaround cost / consequence:**
+7. **Evidence supporting:** EV-…, with class labels
+8. **Evidence contradicting:** EV-… / "none found (searched: <actual queries>)"
+9. **Competitors serving the segment:** (profile links)
+10. **Structural competitor failures:** (model/economics-rooted, not incidents)
+11. **Relevant inflection point:** IP-… / "no timing driver found"
+12. **Evidence-led product implication:** (handoff to Workstream B, IDs cited — direction, not a product spec)
+13. **Confidence & unknowns:** High/Medium/Low + the specific unknowns that cap it
+14. **Next best research action:** one concrete, evidence-answerable question or validation step
+
+### 11. Next week's focus
+
+Top 3 open questions, each phrased as something answerable by evidence (normally drawn from the syntheses' point 14).

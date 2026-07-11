@@ -11,8 +11,9 @@ customer-intelligence/
 ├── README.md                       ← this file
 ├── SYSTEM_PROMPT.md                ← the module's operating prompt
 ├── guides/
+│   ├── reasoning-chain.md          ← the 14-step operating loop every task traverses
 │   ├── source-discovery.md         ← how to find evidence sources autonomously
-│   └── research-quality.md         ← fact vs inference, contradiction checks, confidence
+│   └── research-quality.md         ← fact vs inference, contradiction checks, confidence, evidence classes
 ├── frameworks/
 │   ├── evidence-scoring.md         ← 10-axis 1–5 scoring for every pain point
 │   └── pain-point-taxonomy.md      ← canonical pain categories
@@ -52,7 +53,7 @@ knowledge-base/                     (Workstream A owns only these four)
 9. **Customer interview synthesis** — convert interview notes into scored evidence records.
 10. **Evidence contradiction checks** — actively search for evidence against a conclusion.
 
-Each workflow reads existing knowledge-base records first, then adds or updates records using the templates, then updates the relevant source log.
+Each workflow reads existing knowledge-base records first, then adds or updates records using the templates, then updates the relevant source log. All ten workflows are governed by the reasoning chain in `guides/reasoning-chain.md` — customer → job → pain → behaviour → workaround → evidence → contradiction → competitor → competitor failure → inflection point → implication → uncertainty → next action — and every research run ends with its 14-point synthesis.
 
 ## ID conventions
 
