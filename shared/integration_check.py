@@ -28,6 +28,10 @@ STEPS = (
      [sys.executable, "-m", "unittest", "discover", "-s", "opportunity-intelligence/tools/tests", "-q"]),
     ("B: knowledge-base sweep",
      [sys.executable, "opportunity-intelligence/tools/run.py", "check"]),
+    ("C: monitoring unit tests",
+     [sys.executable, "-m", "unittest", "discover", "-s", "intelligence-monitoring/tools/tests", "-q"]),
+    ("C: monitoring artefact check",
+     [sys.executable, "intelligence-monitoring/tools/monitor.py", "check"]),
     ("Cross-module integration tests",
      [sys.executable, "-m", "unittest", "discover", "-s", "shared/tests", "-q"]),
 )

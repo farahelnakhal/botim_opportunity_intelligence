@@ -1,0 +1,416 @@
+{
+  "backlog": {
+    "OPP-001": {
+      "enum": "promising"
+    },
+    "OPP-002": {
+      "enum": "promising"
+    },
+    "OPP-003": {
+      "enum": "reject"
+    },
+    "OPP-004": {
+      "enum": "unscored"
+    },
+    "OPP-005": {
+      "enum": "unscored"
+    },
+    "OPP-006": {
+      "enum": "unscored"
+    },
+    "OPP-007": {
+      "enum": "unscored"
+    },
+    "OPP-008": {
+      "enum": "unscored"
+    },
+    "OPP-009": {
+      "enum": "weak"
+    },
+    "OPP-010": {
+      "enum": "promising"
+    },
+    "OPP-011": {
+      "enum": "unscored"
+    },
+    "OPP-012": {
+      "enum": "unscored"
+    },
+    "OPP-013": {
+      "enum": "promising"
+    }
+  },
+  "evidence": {
+    "EV-2026-W28-001": {
+      "confidence": "Low",
+      "scores": {
+        "botim relevance": 5,
+        "dissatisfaction": 5,
+        "evidence strength": 2,
+        "financial cost": 4,
+        "frequency": 3,
+        "severity": 4,
+        "switching intent": 3,
+        "urgency": 4,
+        "willingness to pay": 3,
+        "workaround cost": 2
+      },
+      "status": "needs-more-evidence"
+    },
+    "EV-2026-W28-002": {
+      "confidence": "Low",
+      "scores": {
+        "botim relevance": 5,
+        "dissatisfaction": 4,
+        "evidence strength": 2,
+        "financial cost": 3,
+        "frequency": 3,
+        "severity": 4,
+        "switching intent": 2,
+        "urgency": 4,
+        "willingness to pay": 3,
+        "workaround cost": 3
+      },
+      "status": "needs-more-evidence"
+    },
+    "EV-2026-W28-003": {
+      "confidence": "Medium",
+      "scores": {
+        "botim relevance": 5,
+        "dissatisfaction": 4,
+        "evidence strength": 3,
+        "financial cost": 3,
+        "frequency": 3,
+        "severity": 4,
+        "switching intent": 3,
+        "urgency": 4,
+        "willingness to pay": 3,
+        "workaround cost": 2
+      },
+      "status": "active"
+    },
+    "EV-2026-W28-004": {
+      "confidence": "Medium",
+      "scores": {
+        "botim relevance": 5,
+        "dissatisfaction": 5,
+        "evidence strength": 3,
+        "financial cost": 5,
+        "frequency": 2,
+        "severity": 5,
+        "switching intent": 4,
+        "urgency": 4,
+        "willingness to pay": 2,
+        "workaround cost": 4
+      },
+      "status": "active"
+    },
+    "EV-2026-W28-005": {
+      "confidence": "Medium",
+      "scores": {
+        "botim relevance": 5,
+        "dissatisfaction": 5,
+        "evidence strength": 2,
+        "financial cost": 4,
+        "frequency": 3,
+        "severity": 5,
+        "switching intent": 3,
+        "urgency": 4,
+        "willingness to pay": 2,
+        "workaround cost": 3
+      },
+      "status": "active"
+    },
+    "EV-2026-W28-006": {
+      "confidence": "Low",
+      "scores": {
+        "botim relevance": 5,
+        "dissatisfaction": 4,
+        "evidence strength": 2,
+        "financial cost": 3,
+        "frequency": 2,
+        "severity": 3,
+        "switching intent": 2,
+        "urgency": 3,
+        "willingness to pay": 3,
+        "workaround cost": 2
+      },
+      "status": "needs-more-evidence"
+    },
+    "EV-2026-W28-007": {
+      "confidence": "Medium",
+      "scores": {
+        "botim relevance": 4,
+        "dissatisfaction": 5,
+        "evidence strength": 3,
+        "financial cost": 4,
+        "frequency": 2,
+        "severity": 4,
+        "switching intent": 4,
+        "urgency": 3,
+        "willingness to pay": 2,
+        "workaround cost": 3
+      },
+      "status": "active"
+    },
+    "EV-2026-W28-008": {
+      "confidence": "Medium",
+      "scores": {
+        "botim relevance": 4,
+        "dissatisfaction": 4,
+        "evidence strength": 3,
+        "financial cost": 3,
+        "frequency": 3,
+        "severity": 4,
+        "switching intent": 1,
+        "urgency": 3,
+        "willingness to pay": 3,
+        "workaround cost": 3
+      },
+      "status": "active"
+    },
+    "EV-2026-W28-009": {
+      "confidence": "Medium",
+      "scores": {
+        "botim relevance": 4,
+        "dissatisfaction": 5,
+        "evidence strength": 4,
+        "financial cost": 4,
+        "frequency": 3,
+        "severity": 5,
+        "switching intent": 3,
+        "urgency": 4,
+        "willingness to pay": 3,
+        "workaround cost": 3
+      },
+      "status": "active"
+    },
+    "EV-2026-W28-010": {
+      "confidence": "Medium",
+      "scores": {
+        "botim relevance": 5,
+        "dissatisfaction": 5,
+        "evidence strength": 3,
+        "financial cost": 4,
+        "frequency": 4,
+        "severity": 4,
+        "switching intent": 3,
+        "urgency": 4,
+        "willingness to pay": 3,
+        "workaround cost": 4
+      },
+      "status": "active"
+    },
+    "EV-2026-W28-011": {
+      "confidence": "Medium",
+      "scores": {
+        "botim relevance": 5,
+        "dissatisfaction": 4,
+        "evidence strength": 3,
+        "financial cost": 2,
+        "frequency": 2,
+        "severity": 3,
+        "switching intent": 5,
+        "urgency": 3,
+        "willingness to pay": 4,
+        "workaround cost": 2
+      },
+      "status": "active"
+    },
+    "EV-2026-W28-012": {
+      "confidence": "Low",
+      "scores": {
+        "botim relevance": 4,
+        "dissatisfaction": 2,
+        "evidence strength": 2,
+        "financial cost": 3,
+        "frequency": 3,
+        "severity": 2,
+        "switching intent": 3,
+        "urgency": 2,
+        "willingness to pay": 3,
+        "workaround cost": 3
+      },
+      "status": "needs-more-evidence"
+    },
+    "EV-2026-W28-013": {
+      "confidence": "Medium",
+      "scores": {
+        "botim relevance": 5,
+        "dissatisfaction": 4,
+        "evidence strength": 3,
+        "financial cost": 4,
+        "frequency": 3,
+        "severity": 3,
+        "switching intent": 3,
+        "urgency": 3,
+        "willingness to pay": 3,
+        "workaround cost": 3
+      },
+      "status": "active"
+    },
+    "EV-2026-W28-014": {
+      "confidence": "Medium",
+      "scores": {
+        "botim relevance": 5,
+        "dissatisfaction": 3,
+        "evidence strength": 3,
+        "financial cost": 3,
+        "frequency": 4,
+        "severity": 3,
+        "switching intent": 2,
+        "urgency": 2,
+        "willingness to pay": 3,
+        "workaround cost": 3
+      },
+      "status": "active"
+    },
+    "EV-2026-W28-015": {
+      "confidence": "Medium",
+      "scores": {
+        "botim relevance": 5,
+        "dissatisfaction": 3,
+        "evidence strength": 3,
+        "financial cost": 4,
+        "frequency": 3,
+        "severity": 4,
+        "switching intent": 2,
+        "urgency": 3,
+        "willingness to pay": 4,
+        "workaround cost": 4
+      },
+      "status": "active"
+    },
+    "EV-2026-W28-016": {
+      "confidence": "Low",
+      "scores": {
+        "botim relevance": 3,
+        "dissatisfaction": 3,
+        "evidence strength": 1,
+        "financial cost": 3,
+        "frequency": 2,
+        "severity": 3,
+        "switching intent": 2,
+        "urgency": 2,
+        "willingness to pay": 3,
+        "workaround cost": 4
+      },
+      "status": "needs-more-evidence"
+    },
+    "EV-2026-W28-017": {
+      "confidence": "Low",
+      "scores": {
+        "botim relevance": 4,
+        "dissatisfaction": 4,
+        "evidence strength": 2,
+        "financial cost": 3,
+        "frequency": 3,
+        "severity": 4,
+        "switching intent": 2,
+        "urgency": 3,
+        "willingness to pay": 2,
+        "workaround cost": 2
+      },
+      "status": "active"
+    },
+    "EV-2026-W28-018": {
+      "confidence": "Low",
+      "scores": {
+        "botim relevance": 5,
+        "dissatisfaction": 4,
+        "evidence strength": 2,
+        "financial cost": 2,
+        "frequency": 1,
+        "severity": 3,
+        "switching intent": 2,
+        "urgency": 2,
+        "willingness to pay": 2,
+        "workaround cost": 2
+      },
+      "status": "needs-more-evidence"
+    },
+    "EV-2026-W28-019": {
+      "confidence": "Medium",
+      "scores": {
+        "botim relevance": 4,
+        "dissatisfaction": 4,
+        "evidence strength": 3,
+        "financial cost": 2,
+        "frequency": 3,
+        "severity": 3,
+        "switching intent": 4,
+        "urgency": 3,
+        "willingness to pay": 3,
+        "workaround cost": 2
+      },
+      "status": "active"
+    }
+  },
+  "experiments": {
+    "VE-001": {
+      "n_metrics": 3,
+      "observed_filled": 0,
+      "verdict": "pending"
+    },
+    "VE-002": {
+      "n_metrics": 2,
+      "observed_filled": 0,
+      "verdict": "pending"
+    },
+    "VE-003": {
+      "n_metrics": 3,
+      "observed_filled": 0,
+      "verdict": "pending"
+    },
+    "VE-004": {
+      "n_metrics": 2,
+      "observed_filled": 0,
+      "verdict": "pending"
+    }
+  },
+  "inflection_points": {
+    "IP-2026-001": {
+      "status": "confirmed"
+    },
+    "IP-2026-002": {
+      "status": "emerging"
+    }
+  },
+  "predictions": {
+    "PRED-001": {
+      "outcome": null
+    },
+    "PRED-002": {
+      "outcome": null
+    },
+    "PRED-003": {
+      "outcome": null
+    },
+    "PRED-004": {
+      "outcome": true
+    },
+    "PRED-005": {
+      "outcome": true
+    },
+    "PRED-006": {
+      "outcome": null
+    },
+    "PRED-007": {
+      "outcome": null
+    }
+  },
+  "segments": {
+    "SEG-uae-importers-upfront-pay": {
+      "confidence": "Low"
+    },
+    "SEG-uae-marketplace-sellers": {
+      "confidence": "Low"
+    },
+    "SEG-uae-online-sme-psp-merchants": {
+      "confidence": "Medium"
+    },
+    "SEG-uae-pos-merchants": {
+      "confidence": "Low"
+    }
+  }
+}

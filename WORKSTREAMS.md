@@ -38,6 +38,22 @@ Build an internal AI research and product-discovery agent for BOTIM/AstraTech fo
 
 ---
 
+## Workstream C — Intelligence Monitoring & Alerting (jointly owned)
+
+Added 2026-07-11 at the repository owner's direction; jointly owned by both contributors pending Person 1's acknowledgement (like `shared/`). Design: `intelligence-monitoring/DESIGN.md`.
+
+**Owned directories:**
+- `intelligence-monitoring/`
+- `knowledge-base/monitoring/`
+
+**Responsibilities:** continuous knowledge-base watching (KB differ) · external competitor/source adapters · change detection and mechanical significance tiering · AI event summaries with the reasoning pass · alert routing, digests, notification preferences · evidence-candidate intake for Workstream A.
+
+**Prime directive:** detects and routes — **never authors evidence, scores, or classifications**. External detections become candidates in `knowledge-base/monitoring/evidence-candidates/` that Workstream A promotes under its own rules; rescore suggestions surface to Workstream B report-only, like the sync bridge.
+
+**Does not directly modify:** everything outside its two owned directories.
+
+---
+
 ## Cross-module contract
 
 - **A → B:** evidence by ID (`EV-YYYY-Wnn-nnn`), segments (`SEG-…`), inflection points (`IP-…`), and weekly-update §9 "Handoffs to Workstream B". B consumes read-only (`opportunity-intelligence/tools/` evidence parser + `sync`).

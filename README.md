@@ -19,6 +19,8 @@ Evidence flows A→B by ID; evidence *requests* flow B→A through the backlog's
 python3 shared/integration_check.py
 
 # Explore the current state
+python3 intelligence-monitoring/tools/monitor.py scan       # what changed since last look?
+python3 intelligence-monitoring/tools/monitor.py digest --period weekly
 python3 opportunity-intelligence/tools/run.py evidence      # parsed evidence records
 python3 opportunity-intelligence/tools/run.py check         # knowledge-base sweep
 python3 opportunity-intelligence/tools/run.py sync          # evidence → scorecard suggestions
@@ -36,13 +38,15 @@ WORKSTREAMS.md              Ownership, cross-module contract, git rules
 shared/                     Integration gate + cross-module tests
 customer-intelligence/      Workstream A module (prompts, frameworks, templates, tools)
 opportunity-intelligence/   Workstream B module (prompts, frameworks, templates, reasoning layer, engine)
+intelligence-monitoring/    Workstream C module (KB watcher, significance tiering, digests, adapters)
 knowledge-base/             The cumulative shared memory
 ├── customer-evidence/      A: scored EV records, source log, weekly updates
 ├── segments/  competitors/  inflection-points/        A: reference entities
 ├── product-ideas/          B: BACKLOG.md, opportunity profiles, recommendations, decision journal
 ├── commercial-models/      B: model inputs (JSON) + engine-computed reports + BENCHMARKS.md
 ├── opportunity-scores/     B: 17-dimension scorecards (JSON, engine-validated)
-└── validation/             B: experiment specs + pre-committed result files
+├── validation/             B: experiment specs + pre-committed result files
+└── monitoring/             C: entities, tiered events, digests, preferences, evidence-candidate intake
 ```
 
 ## Operating principles (the short version)

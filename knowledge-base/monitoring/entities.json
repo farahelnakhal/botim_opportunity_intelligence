@@ -1,0 +1,33 @@
+{
+  "comment": "Monitored entities (DESIGN.md §9.1). Competitor entities reference Workstream A's profile as the canonical dossier where one exists. Seeded from A's watchlist + IP-2026-002's funded competitors. External source rows are P1 — only the kb-watcher runs today.",
+  "entities": [
+    {"id": "ENT-wio", "kind": "competitor", "name": "Wio Bank (Business)", "region": "UAE",
+     "ref": "knowledge-base/competitors/wio.md",
+     "categories": ["banking-access", "getting-paid", "paying-out/cross-border-payments"],
+     "sources": [], "status": "active",
+     "notes": "IP-2026-001: 2026 payments launch bounds OPP-010's window — highest-priority watch"},
+    {"id": "ENT-mamo", "kind": "competitor", "name": "Mamo", "region": "UAE",
+     "ref": "knowledge-base/competitors/mamo.md",
+     "categories": ["getting-paid", "getting-paid/settlement-delay"],
+     "sources": [], "status": "active",
+     "notes": "Paid same-day settlement pricing is the WTP benchmark for OPP-010/011"},
+    {"id": "ENT-ziina", "kind": "competitor", "name": "Ziina", "region": "UAE",
+     "ref": null, "categories": ["getting-paid"], "sources": [], "status": "active",
+     "notes": "Evidence-rich (EV-2026-W28-003); profile pending on A's watchlist"},
+    {"id": "ENT-tap", "kind": "competitor", "name": "Tap Payments", "region": "UAE",
+     "ref": null, "categories": ["getting-paid"], "sources": [], "status": "active",
+     "notes": "EV-2026-W28-005 hold evidence"},
+    {"id": "ENT-crediblex", "kind": "competitor", "name": "CredibleX", "region": "UAE",
+     "ref": null, "categories": ["credit-access", "paying-out/supplier-terms"],
+     "sources": [], "status": "active",
+     "notes": "IP-2026-002: $100M facility + Mastercard partnership; direct OPP-013 adjacency"},
+    {"id": "ENT-comfi", "kind": "competitor", "name": "Comfi", "region": "UAE",
+     "ref": null, "categories": ["credit-access", "paying-out/supplier-terms"],
+     "sources": [], "status": "active",
+     "notes": "IP-2026-002: $65M pre-A; supplier-payment financing"},
+    {"id": "ENT-cbuae", "kind": "regulator", "name": "Central Bank of the UAE", "region": "UAE",
+     "ref": null, "categories": ["banking-access", "regulatory"],
+     "sources": [], "status": "active",
+     "notes": "Licences/regulatory announcements; highest-precision source class when P1 adapters land"}
+  ]
+}

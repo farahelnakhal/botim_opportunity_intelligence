@@ -1,0 +1,10 @@
+{
+  "user": "person1",
+  "email": "workstream-a@placeholder.local",
+  "channels": {"email": "daily", "in_app": "instant", "digest": "weekly"},
+  "min_tier": {"email": "important", "in_app": "informative", "digest": "informative"},
+  "fatigue_budget": 3,
+  "quiet_hours": null,
+  "subscriptions": {"entities": [], "segments": [], "regions": ["UAE"], "categories": [], "opp_watch": []},
+  "comment": "Placeholder for Workstream A's owner — update email when confirmed"
+}
