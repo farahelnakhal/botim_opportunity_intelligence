@@ -20,15 +20,25 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from monitoring_engine import adapters as adapters_mod  # noqa: E402
+from monitoring_engine import alerts as alerts_mod  # noqa: E402
 from monitoring_engine import digest as digest_mod  # noqa: E402
 from monitoring_engine import events as ev_mod  # noqa: E402
-from monitoring_engine import kbwatch, route  # noqa: E402
+from monitoring_engine import kbwatch, route, summaries  # noqa: E402
 from monitoring_engine.significance import AXES, MonitorError, TIERS, tier  # noqa: E402
 
 MON = Path("knowledge-base/monitoring")
 ENTITY_KINDS = ("competitor", "segment", "regulator", "platform")
-KNOWN_ADAPTERS = ("kb-watcher", "web-page-differ", "rss-newsroom", "regulator-watch",
-                  "app-store", "review-platforms", "jobs-boards", "social", "news-search")
+KNOWN_ADAPTERS = ("kb-watcher", "manual-intake", "web-page-differ", "rss-newsroom",
+                  "regulator-watch", "app-store", "review-platforms", "jobs-boards",
+                  "social", "news-search")
+
+
+def _entity_ids(root):
+    path = Path(root) / MON / "entities.json"
+    if not path.exists():
+        return set()
+    return {e["id"] for e in json.loads(path.read_text(encoding="utf-8"))["entities"]}
 
 
 def _week(date=None):
@@ -57,6 +67,15 @@ def cmd_scan(args):
     observations = kbwatch.diff_states(old_state, new_state)
     today = datetime.date.today().isoformat()
     created = kbwatch.observations_to_events(observations, existing, today, _week())
+
+    intake_events, candidate_stubs = adapters_mod.process_intake(
+        root / MON, existing + created, _week(), today, _entity_ids(root))
+    created += intake_events
+    for fname, md in candidate_stubs:
+        cand = root / MON / "evidence-candidates" / fname
+        cand.write_text(md, encoding="utf-8")
+        print(f"  evidence candidate filed for Workstream A: {cand}")
+
     if created:
         ev_mod.append_events(events_dir, _week(), created)
     state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -94,6 +113,46 @@ def cmd_digest(args):
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(report, encoding="utf-8")
         print(f"\n[written to {out}]", file=sys.stderr)
+    return 0
+
+
+def cmd_analyze(args):
+    root = Path(args.root)
+    all_events = {e["id"]: e for e in ev_mod.load_events(root / MON / "events")}
+    if args.event_id not in all_events:
+        sys.exit(f"monitor error: no event {args.event_id}")
+    out = root / MON / "summaries" / f"{args.event_id}.md"
+    if out.exists():
+        summaries.validate_summary_text(out.read_text(encoding="utf-8"), out.name)
+        print(f"{out} exists and validates")
+        return 0
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(summaries.skeleton(all_events[args.event_id]), encoding="utf-8")
+    print(f"skeleton written to {out} — fill all 12 sections + flags, then re-run analyze to validate")
+    return 0
+
+
+def cmd_alert(args):
+    root = Path(args.root)
+    week = args.week or _week()
+    evs = ev_mod.load_events(root / MON / "events")
+    prefs = route.load_preferences(root / MON / "preferences")
+    existing = alerts_mod.load_alerts(root / MON / "alerts")
+    summ = summaries.load_summaries(root / MON / "summaries")
+    today = datetime.date.today().isoformat()
+    new = alerts_mod.create_alerts(evs, prefs, existing, week, today, summ)
+    if new:
+        alerts_mod.append_alerts(root / MON / "alerts", week, new)
+    by_id = {e["id"]: e for e in evs}
+    for a in new:
+        instants = [d for d in a["deliveries"] if d["mode"] == "instant"]
+        if a["tier"] == "critical" and instants:
+            out = alerts_mod.write_outbox(root / MON / "outbox", by_id[a["event_ids"][0]], a,
+                                          a.get("summary_ref"))
+            print(f"  outbox: {out}")
+        print(f"  {a['id']} [{a['tier']}] {by_id[a['event_ids'][0]]['title']} → "
+              f"{len(a['deliveries'])} deliveries ({len(instants)} instant)")
+    print(f"alert: {len(new)} new alert(s) from {len(evs)} events")
     return 0
 
 
@@ -158,6 +217,46 @@ def cmd_check(args):
     except MonitorError as exc:
         fail(f"preferences: {exc}")
 
+    # summaries (validated; important/critical events without one are noted)
+    try:
+        summ = summaries.load_summaries(mon / "summaries")
+        evs_by_id = {e["id"]: e for e in ev_mod.load_events(mon / "events")}
+        for eid in summ:
+            if eid not in evs_by_id:
+                raise MonitorError(f"summary for unknown event {eid}")
+        ok(f"summaries: {len(summ)} valid")
+        missing = [e["id"] for e in evs_by_id.values()
+                   if e["tier"] in ("important", "critical") and e["id"] not in summ]
+        if missing:
+            print(f"  note  {len(missing)} important/critical event(s) without summaries yet")
+    except MonitorError as exc:
+        fail(f"summaries: {exc}")
+
+    # alerts (schema + event references resolve)
+    try:
+        alerts = alerts_mod.load_alerts(mon / "alerts")
+        evs_by_id = {e["id"]: e for e in ev_mod.load_events(mon / "events")}
+        for a in alerts:
+            for eid in a["event_ids"]:
+                if eid not in evs_by_id:
+                    raise MonitorError(f"{a['id']}: references unknown event {eid}")
+        ok(f"alerts: {len(alerts)} valid, all event references resolve")
+    except MonitorError as exc:
+        fail(f"alerts: {exc}")
+
+    # intake queue (unprocessed observations must at least parse/validate)
+    intake = mon / "intake"
+    if intake.is_dir():
+        pending = list(intake.glob("*.json"))
+        try:
+            for path in pending:
+                adapters_mod._validate_observation(
+                    json.loads(path.read_text(encoding="utf-8")), path.name, _entity_ids(root))
+            if pending:
+                print(f"  note  {len(pending)} intake observation(s) pending — run `monitor.py scan`")
+        except (MonitorError, json.JSONDecodeError) as exc:
+            fail(f"intake: {exc}")
+
     # state
     state_path = mon / "state" / "kb-state.json"
     if state_path.exists():
@@ -189,12 +288,19 @@ def main(argv=None):
     p.add_argument("--week", help="ISO week like 2026-W28 (default: current)")
     p.add_argument("--write", action="store_true")
 
+    p = sub.add_parser("analyze", help="write/validate the AI summary for an event")
+    p.add_argument("event_id")
+
+    p = sub.add_parser("alert", help="route un-alerted important/critical events into the alert ledger + outbox")
+    p.add_argument("--week", help="ISO week for alert ids (default: current)")
+
     sub.add_parser("entities", help="list monitored entities")
     sub.add_parser("check", help="validate all monitoring artefacts (part of the integration gate)")
 
     args = ap.parse_args(argv)
     try:
         return {"scan": cmd_scan, "events": cmd_events, "digest": cmd_digest,
+                "analyze": cmd_analyze, "alert": cmd_alert,
                 "entities": cmd_entities, "check": cmd_check}[args.cmd](args)
     except MonitorError as exc:
         sys.exit(f"monitor error: {exc}")

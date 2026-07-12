@@ -8,6 +8,9 @@ architecture of opportunity_engine:
 - kbwatch: the knowledge-base differ (state snapshots, git-ref baselines)
 - route: alert routing per user preferences + fatigue budgets
 - digest: daily/weekly digest compilation
+- alerts: alert ledger + instant-alert outbox (file-based transport)
+- summaries: AI-summary schema validation (12 sections + flags block)
+- adapters: adapter framework + the manual-intake adapter
 
 Pure standard library (kbwatch shells out to `git` for --from-ref baselines
 only). Writes ONLY under knowledge-base/monitoring/. Reads the other

@@ -329,13 +329,15 @@ Plus: schema round-trips, id-collision rules, tier math property tests, digest d
 
 ## 15. Implementation roadmap
 
-| Phase | Scope | Effort |
+| Phase | Scope | Status |
 |---|---|---|
-| **P0 — KB watcher + digest (highest value/effort ratio)** | events schema + `monitoring_engine` deterministic core (fingerprint/score/tier/route) + KB differ over git + weekly digest markdown + `monitor check` wired into gate; users = 2 contributors, file-based outbox | ~3–5 days |
-| **P1 — External adapters (precision-first order)** | regulator-watch → app-store → newsroom/RSS → pricing differ; entities seeded from A's watchlist; evidence-candidate intake | ~1–2 weeks incremental |
-| **P2 — AI analysis + instant alerts** | summary generation against schema; critical-tier gating; email rendering + send abstraction | ~1 week |
-| **P3 — Dashboard + preferences UI + broader users** | static-site dashboard from JSON (fits the stdlib ethos) or hosted app; user management integration | sized later |
-| **Continuous** | precision review: monthly audit of alert precision (alerts acted on / alerts sent) and fatigue metrics | — |
+| **P0 — KB watcher + digest** | events schema + `monitoring_engine` deterministic core (fingerprint/score/tier/route) + KB differ over git + weekly digest markdown + `monitor check` wired into the gate; users = 2 contributors, file-based outbox | ✅ DONE (2026-07-11) |
+| **P1 — External adapters** | adapter interface + registry + the **manual-intake adapter** (lawful transport for human/LLM-collected observations, with evidence-candidate filing) shipped; automated fetchers (regulator-watch → app-store → newsroom/RSS → pricing differ) remain to build, precision-first | ◑ FRAMEWORK DONE; fetchers pending |
+| **P2 — AI analysis + instant alerts** | summary schema validation (`summaries.py`, 12 sections + machine-consumable flags), critical-tier gating, alert ledger + file-based instant outbox (`alerts.py`), `analyze`/`alert` CLI | ✅ DONE (2026-07-11); real mail transport is deployment |
+| **P3 — Dashboard + preferences UI + broader users** | static-site dashboard from JSON or hosted app; user management integration; real email/SMTP transport | ○ DEPLOYMENT (out of repo scope) |
+| **Continuous** | precision review: monthly audit of alert precision (alerts acted on / alerts sent) and fatigue metrics | ○ operational |
+
+**In-repo scope is complete:** everything that can live as pure-stdlib code + committed artefacts is built and tested (P0, P2, P1 framework). What remains (P3, automated fetchers) is deployment infrastructure and per-source scrapers — additive, behind stable interfaces, no core changes.
 
 ---
 
