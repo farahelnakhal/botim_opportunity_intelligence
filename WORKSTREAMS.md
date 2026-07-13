@@ -54,6 +54,16 @@ Added 2026-07-11 at the repository owner's direction. **Shared ownership accepte
 
 ---
 
+## Evidence-Impact Workflow (jointly owned)
+
+Added 2026-07-13 at the repository owner's direction. **Shared ownership accepted by both contributors (Workstream A and Workstream B), 2026-07-13** — jointly owned like `shared/`; changes follow the shared-file rule (agreement between both contributors). A human-governed workflow: new/changed evidence → impact proposal → explicit human approval (`apply-impact --approver …`) → transactional application (lock + manifest + complete backups + staged validation + automatic recovery) → append-only score history → executive email preview; with rollback. It reuses, and never modifies, the Part B scoring engine and the Part A evidence parser; Part B scorecard changes flow only through an approved proposal.
+
+**Jointly owned paths:**
+- `impact/`
+- `knowledge-base/impact/`
+
+---
+
 ## Cross-module contract
 
 - **A → B:** evidence by ID (`EV-YYYY-Wnn-nnn`), segments (`SEG-…`), inflection points (`IP-…`), and weekly-update §9 "Handoffs to Workstream B". B consumes read-only (`opportunity-intelligence/tools/` evidence parser + `sync`).
