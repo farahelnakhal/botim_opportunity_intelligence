@@ -66,11 +66,19 @@ Added 2026-07-13 at the repository owner's direction. **Shared ownership accepte
 
 ## Executive UI — read-only presentation layer (jointly owned)
 
-Added 2026-07-11 on `feature/executive-ui`. A read-only, executive-facing static UI over all three workstreams' committed outputs. **Jointly owned** like `shared/` (changes by agreement).
+Added 2026-07-11. A read-only, executive-facing UI over all three workstreams' committed outputs. **Jointly owned** like `shared/` (changes by agreement).
 
 **Owned directory:** `executive-ui/`
 
-**Prime directive:** **read-only.** It reuses the existing engines as the single source of truth (no second scoring engine, no recomputation, no confidence reinterpretation), never writes to the knowledge base, and never implies a product has been validated or selected. Its only output is the gitignored `executive-ui/dist/`. It consumes the Evidence-Impact Workflow's read-only outputs (e.g. `impact/uicontract.py`) for its Intelligence Feed, Rescore/Impact Review, Brief, and Assumptions screens.
+Two front-ends share one read-only adapter (`executive-ui/adapter/collect.py`, the single source of truth):
+
+- **`executive-ui/web/`** — a React + TypeScript + Tailwind assistant (the primary UI): a chat-first, project-workspace interface matching the approved design mockup. Added 2026-07-13. It calls a live JSON API and falls back to a bundled snapshot of real engine output when the API is down. (Node/npm toolchain; `web/node_modules/` and `web/dist/` are gitignored.)
+- **`executive-ui/api/`** — a stdlib, **GET-only** JSON API (`api/server.py`) exposing the engines/impact read-models; no write routes, so it cannot mutate scorecards, evidence, the KB, or impact state. Includes the deterministic assistant intent-router (`api/router.py`).
+- **stdlib static site** (`build.py` + `render/`) — the original zero-dependency server-rendered export, retained as a Node-free fallback. Its only output is the gitignored `executive-ui/dist/`.
+
+**Prime directive:** **read-only.** Every front-end reuses the existing engines as the single source of truth (no second scoring engine, no recomputation, no confidence reinterpretation), never writes to the knowledge base, and never implies a product has been validated or selected. Score changes remain a governed CLI action (`apply-impact --approver`); the UI renders **no approval control**. It consumes the Evidence-Impact Workflow's read-only outputs (e.g. `impact/uicontract.py`).
+
+**Tests in the gate:** `executive-ui/tests` (adapter + static render) and `executive-ui/api/tests` (API + router + read-only server). The React app is type-checked/bundled via `npm run build` (not run in the stdlib gate, which stays Node-free).
 
 ---
 

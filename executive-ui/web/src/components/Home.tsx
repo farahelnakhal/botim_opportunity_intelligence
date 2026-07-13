@@ -1,0 +1,93 @@
+import { useState } from "react";
+import { useApp } from "../store";
+import { tagLabel } from "../lib/format";
+import Icon from "./Icon";
+
+const EXAMPLE_PROMPTS = [
+  "Why is OPP-010 the leading opportunity?",
+  "Show the commercial model for OPP-010",
+  "What validation experiments are planned?",
+  "Summarize this week's monitoring signals",
+  "Generate an executive brief",
+  "What are the weakest assumptions across the portfolio?",
+];
+
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
+}
+
+export default function Home() {
+  const { projects, openProject, send } = useApp();
+  const [val, setVal] = useState("");
+
+  const submit = (text?: string) => {
+    const t = (text ?? val).trim();
+    if (!t) return;
+    send(t);
+    setVal("");
+  };
+
+  return (
+    <section className="view" id="view-home">
+      <div className="home-wrap">
+        <div className="home-greeting">{greeting()}</div>
+        <div className="home-sub">What are we figuring out today?</div>
+
+        <div className="home-input-card">
+          <textarea
+            rows={1}
+            value={val}
+            placeholder="Ask about an opportunity, evaluate the commercial model, or generate a briefing…"
+            onChange={(e) => {
+              setVal(e.target.value);
+              e.target.style.height = "auto";
+              e.target.style.height = Math.min(e.target.scrollHeight, 160) + "px";
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+          />
+          <div className="home-input-actions">
+            <div className="input-tools">
+              <button className="icon-btn" title="Attach file"><Icon name="paperclip" /></button>
+            </div>
+            <button className="send-btn" disabled={!val.trim()} onClick={() => submit()}>
+              <Icon name="send" size={15} />
+            </button>
+          </div>
+        </div>
+
+        <div className="example-prompts">
+          {EXAMPLE_PROMPTS.map((p) => (
+            <button className="prompt-pill" key={p} onClick={() => submit(p)}>{p}</button>
+          ))}
+        </div>
+
+        {projects.length > 0 && (
+          <>
+            <div className="home-recent-label">Opportunities</div>
+            <div className="recent-grid">
+              {projects.map((p) => {
+                const dot = p.classification === "reject" ? "paused"
+                  : p.classification === "strong" || p.classification === "promising" ? "active" : "review";
+                return (
+                  <button className="recent-card" key={p.id} onClick={() => openProject(p.id)}>
+                    <div className="recent-card-top"><span className={`status-dot ${dot}`} /></div>
+                    <div className="recent-card-title">{p.name}</div>
+                    <div className="recent-card-meta">{p.id} · {tagLabel(p.classification)}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+    </section>
+  );
+}

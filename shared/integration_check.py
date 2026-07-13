@@ -36,6 +36,8 @@ STEPS = (
      [sys.executable, "-m", "unittest", "discover", "-s", "impact/tests", "-q"]),
     ("Executive UI: adapter + render tests",
      [sys.executable, "-m", "unittest", "discover", "-s", "executive-ui/tests", "-q"]),
+    ("Executive UI: read-only API tests",
+     [sys.executable, "-m", "unittest", "discover", "-s", "executive-ui/api/tests", "-q"]),
     ("Cross-module integration tests",
      [sys.executable, "-m", "unittest", "discover", "-s", "shared/tests", "-q"]),
 )
