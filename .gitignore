@@ -72,3 +72,6 @@ Testing/
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Executive UI generated output
+executive-ui/dist/

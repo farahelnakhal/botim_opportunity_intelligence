@@ -1,0 +1,92 @@
+/* BOTIM Product Discovery Copilot — executive UI. Clean internal fintech.
+   Colour REINFORCES state that is already carried by glyph + text. */
+:root {
+  --bg: #f6f7f9; --panel: #fff; --ink: #16202c; --muted: #667085; --line: #e4e8ee;
+  --accent: #1f5fa8; --accent-ink: #123a68;
+  --strong: #1a7f5a; --promising: #b5730f; --weak: #8a5a00; --reject: #9a3535;
+  --warn: #9a3535; --chip: #eef2f7;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: var(--sans); color: var(--ink); background: var(--bg); line-height: 1.5; }
+a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+
+.topbar { display: flex; align-items: center; gap: 2rem; background: var(--panel);
+  border-bottom: 1px solid var(--line); padding: 0.75rem 1.5rem; position: sticky; top: 0; z-index: 5; }
+.brand { font-weight: 700; font-size: 1.05rem; } .brand span { color: var(--muted); font-weight: 500; }
+.tabs { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.tabs a { padding: 0.35rem 0.7rem; border-radius: 6px; color: var(--ink); font-size: 0.9rem; }
+.tabs a.active { background: var(--accent); color: #fff; } .tabs a:hover { background: var(--chip); text-decoration: none; }
+.tabs a.active:hover { background: var(--accent-ink); }
+
+.decision-banner { background: #fff8e6; border-bottom: 1px solid #f0e2b8; color: #6b5310;
+  padding: 0.5rem 1.5rem; font-size: 0.9rem; font-weight: 600; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 1.5rem; }
+h1 { font-size: 1.6rem; margin: 0.5rem 0 1rem; } h2 { font-size: 1.15rem; margin: 1.6rem 0 0.6rem; }
+.lede { font-size: 1rem; color: #33414f; max-width: 70ch; } .muted { color: var(--muted); }
+.foot { max-width: 1180px; margin: 2rem auto; padding: 1rem 1.5rem; color: var(--muted);
+  font-size: 0.8rem; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+
+/* badges — glyph carries meaning; colour is secondary */
+.badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.8rem;
+  border: 1px solid var(--line); background: var(--chip); white-space: nowrap; }
+.status-strong { color: var(--strong); border-color: #b7e0cd; }
+.status-promising { color: var(--promising); border-color: #ecd6a6; }
+.status-weak, .status-reject { color: var(--reject); border-color: #e6c3c3; }
+.conf { font-family: var(--mono); }
+.ev-weak, .weak-table td { background: #fbf1f1; }
+.ev-weak { color: var(--reject); border-color: #e6c3c3; }
+.ev-primary { color: var(--accent-ink); border-color: #bcd3ec; }
+.a-untested { color: var(--muted); } .a-partially-supported { color: var(--promising); }
+.a-supported { color: var(--strong); } .a-contradicted { color: var(--reject); }
+.neutral { color: var(--muted); }
+
+/* overview cards */
+.opp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1rem; }
+.opp-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem; }
+.opp-grid.archived .opp-card { opacity: 0.85; border-style: dashed; }
+.card-head { display: flex; gap: 0.5rem; align-items: baseline; margin-bottom: 0.4rem; }
+.opp-id { font-family: var(--mono); font-weight: 700; } .opp-name { color: #33414f; }
+.score .raw { font-size: 1.5rem; font-weight: 700; } .badges { margin: 0.5rem 0; display: flex; gap: 0.4rem; flex-wrap: wrap; }
+dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.15rem 0.75rem; margin: 0.5rem 0; font-size: 0.9rem; }
+dl.facts dt { color: var(--muted); } dl.facts dd { margin: 0; } dd.next { font-weight: 600; }
+.flags { color: var(--warn); font-size: 0.85rem; margin-top: 0.4rem; }
+.detail-link { display: inline-block; margin-top: 0.5rem; font-size: 0.9rem; }
+
+/* detail */
+.detail-head { display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; }
+.score-big { font-size: 2.4rem; font-weight: 800; } .score-big span { font-size: 1rem; color: var(--muted); font-weight: 500; }
+dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 1rem; }
+dl.kv dt { color: var(--muted); } .prose { max-width: 80ch; white-space: pre-wrap; }
+
+/* tables */
+table { border-collapse: collapse; width: 100%; background: var(--panel); font-size: 0.9rem; }
+th, td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { background: #eef2f7; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; color: #45525f; }
+.factors .fkey, .fkey { font-family: var(--mono); font-size: 0.85rem; }
+.factor.assumption { background: #fcfaf4; } .aflag { color: var(--promising); font-weight: 700; }
+.eflag { color: var(--strong); } .fscore { font-weight: 700; white-space: nowrap; }
+.evchip, .fchips a { font-family: var(--mono); font-size: 0.8rem; background: var(--chip);
+  padding: 0.05rem 0.35rem; border-radius: 4px; margin-right: 0.2rem; }
+.num { text-align: center; }
+.evrow.weak { } .weak-table th { background: #f3dede; }
+
+/* filters / feed / notices */
+.filters { display: flex; gap: 1rem; margin: 1rem 0; flex-wrap: wrap; }
+.filters select { padding: 0.3rem; }
+.feed { list-style: none; padding: 0; } .feed-item { background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--muted); border-radius: 8px; padding: 0.7rem 0.9rem; margin-bottom: 0.6rem; }
+.kind-alert { border-left-color: var(--promising); } .kind-prediction-resolved { border-left-color: var(--strong); }
+.fi-head { display: flex; gap: 0.6rem; align-items: center; font-size: 0.8rem; color: var(--muted); flex-wrap: wrap; }
+.fi-kind { font-weight: 600; color: var(--ink); } .fi-title { margin: 0.2rem 0; }
+.ba { font-family: var(--mono); font-size: 0.85rem; margin-top: 0.3rem; } .ba .arrow { margin: 0 0.5rem; }
+.notice { background: #eef4fb; border: 1px solid #cfe0f2; border-radius: 8px; padding: 0.9rem 1rem; margin: 1rem 0; }
+.empty { background: var(--panel); border: 1px dashed var(--line); border-radius: 8px;
+  padding: 1.5rem; color: var(--muted); text-align: center; }
+.brief { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.25rem; margin: 1rem 0; }
+.brief-body { max-width: 82ch; } .brief-index { margin: 0.5rem 0 1rem; }
+.provenance { font-family: var(--mono); }
+
+@media (max-width: 700px) { .topbar { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+  .wrap { padding: 1rem; } table { display: block; overflow-x: auto; } }
