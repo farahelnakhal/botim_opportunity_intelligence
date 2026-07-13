@@ -64,6 +64,18 @@ Added 2026-07-13 at the repository owner's direction. **Shared ownership accepte
 
 ---
 
+## Copilot Backend — conversational product-discovery API (jointly owned)
+
+Added 2026-07-13 at the repository owner's direction; jointly owned like `shared/` (changes by agreement).
+
+**Owned directory:** `copilot-backend/`
+
+**Purpose:** a **read-only** conversational backend for the Product Discovery Copilot: it answers product-discovery questions (segments, pain, evidence, assumptions, gaps, briefs, next validation) by reusing the existing engines and read models as single sources of truth. It cannot modify evidence, segments, scorecards, assumptions, impact state, monitoring history, or backlogs; chat-generated drafts (research requests, briefs, impact-proposal drafts) are ephemeral and never persisted to the knowledge base. Real changes remain exclusively in the human-approved impact workflow.
+
+**Boundary from `executive-ui/`:** the executive UI is the presentation layer and consumes this backend over HTTP via the shared contract `shared/contracts/conversation-api.schema.md`; the backend never modifies `executive-ui/**`, and neither replaces the other's logic.
+
+---
+
 ## Executive UI — read-only presentation layer (jointly owned)
 
 Added 2026-07-11 on `feature/executive-ui`. A read-only, executive-facing static UI over all three workstreams' committed outputs. **Jointly owned** like `shared/` (changes by agreement).
