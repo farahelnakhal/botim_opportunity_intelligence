@@ -25,12 +25,35 @@ def _evidence_list(refs):
 
 
 def _history(o):
-    if not o.score_history:
-        return L.empty_state("No prior score versions recorded (single snapshot). "
-                             "History would derive from version control once the scorecard is re-scored.")
-    rows = "".join(f'<li><span class="date">{L.esc(h["date"])}</span> {L.esc(h["subject"])}</li>'
-                   for h in o.score_history)
-    return f'<ul class="history">{rows}</ul>'
+    # authoritative: append-only impact score history (applied/rollback/recovery)
+    if o.impact_history:
+        rows = "".join(
+            f'<li><span class="date">{L.esc(h.get("timestamp", "—")[:10])}</span> '
+            f'{L.esc(h.get("kind", "applied"))}: raw {L.esc(h.get("raw_score_prev", "?"))}→'
+            f'{L.esc(h.get("raw_score_new", "?"))}, composite {L.esc(h.get("composite_prev", "?"))}→'
+            f'{L.esc(h.get("composite_new", "?"))} '
+            f'<span class="muted">approved by {L.esc(h.get("approved_by", "—"))} '
+            f'({L.esc(h.get("history_id", ""))})</span></li>' for h in o.impact_history)
+        return f'<ul class="history">{rows}</ul>'
+    git = ""
+    if o.score_history:
+        git = ('<p class="muted">No approved impact transactions yet. Version-control history of the '
+               'scorecard file:</p><ul class="history">'
+               + "".join(f'<li><span class="date">{L.esc(h["date"])}</span> {L.esc(h["subject"])}</li>'
+                         for h in o.score_history) + "</ul>")
+    return git or L.empty_state("No approved impact transactions and no prior scorecard versions recorded.")
+
+
+def _brief_panel(o):
+    if not o.brief_envelope:
+        return ""
+    e = o.brief_envelope
+    ra = (e.get("recommended_action") or {}).get("text", "—")
+    dr = (e.get("decision_requested") or {}).get("text", "—")
+    return f"""<section class="brief-panel"><h2>Executive brief (from the impact workflow)</h2>
+  <dl class="kv"><dt>Recommended action</dt><dd>{L.esc(ra)}</dd>
+  <dt>Decision requested</dt><dd><strong>{L.esc(dr)}</strong></dd></dl>
+  <p class="muted">Full brief on the <a href="briefs.html">Executive Brief</a> screen. No product or build decision has been made.</p></section>"""
 
 
 def render_one(o, model):
@@ -73,6 +96,7 @@ def render_one(o, model):
 <section><h2>Seven-week MVP / validation plan</h2><div class="prose">{L.esc(o.validation_plan)}</div>
   <p class="muted">Full profile: {L.esc(o.profile_path)}</p></section>
 <section><h2>Score history</h2>{_history(o)}</section>
+{_brief_panel(o)}
 """
     return L.page(f"{o.id} — {o.name}", "index.html", body, model.generated_note)
 

@@ -79,10 +79,31 @@ class TestModel(unittest.TestCase):
         for a in self.m.assumptions:
             self.assertEqual(a.owner, M.UNKNOWN)
 
-    def test_latest_change_is_honest_default(self):
-        # no impact workflow exists -> the honest default, never a fabricated change
+    def test_latest_change_reflects_impact_history(self):
+        # no approved impacts yet -> honest default; if history existed it would be summarised
         for o in self.m.opportunities:
-            self.assertEqual(o.latest_change, "No approved impact yet")
+            if o.impact_history:
+                self.assertIn("raw", o.latest_change)
+            else:
+                self.assertEqual(o.latest_change, "No approved impact yet")
+
+    def test_impact_workflow_connected(self):
+        # the adapter consumes the real evidence-impact workflow read-only
+        self.assertTrue(self.m.impact_available)
+        self.assertTrue(all(a.source == "impact-tracker" for a in self.m.assumptions))
+        # decision importance is authoritative (from the tracker), not invented
+        self.assertTrue(any(a.decision_importance in ("high", "medium", "low")
+                            for a in self.m.assumptions))
+
+    def test_brief_envelopes_present_for_live_opps(self):
+        for o in self.m.opportunities:
+            self.assertIsNotNone(o.brief_envelope, f"{o.id} missing brief envelope")
+            self.assertIn("decision_requested", o.brief_envelope)
+
+    def test_validation_method_links_to_experiments(self):
+        # tracker maps assumptions to VE ids -> validation method is real, not "—" everywhere
+        methods = {a.validation_method for a in self.m.assumptions}
+        self.assertTrue(any("VE-" in m for m in methods))
 
 
 if __name__ == "__main__":

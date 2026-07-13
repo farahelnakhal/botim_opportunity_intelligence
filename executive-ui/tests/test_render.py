@@ -63,7 +63,9 @@ class TestRender(unittest.TestCase):
         self._common(html)
         self.assertIn('id="f-opp"', html)
         self.assertIn('id="f-status"', html)
-        self.assertIn("not yet structured fields", html)  # honesty note
+        # honesty note names its source (impact tracker when connected, else scorecard-derived)
+        self.assertTrue("impact/tracker.py" in html or "Impact tracker unavailable" in html)
+        self.assertIn("Decision importance", html)  # authoritative field now surfaced
 
     def test_feed_has_typed_items(self):
         html = feed.render(self.m)
@@ -80,11 +82,13 @@ class TestRender(unittest.TestCase):
         self.assertNotIn("<button", html.lower())         # no fake approval control
         self.assertNotIn("<form", html.lower())
 
-    def test_brief_consumes_recommendation(self):
+    def test_brief_renders_envelopes_for_all_live_opps(self):
         html = brief.render(self.m)
         self._common(html)
-        self.assertIn("OPP-001", html)              # the real recommendation
-        self.assertIn("awaiting a brief", html)     # honest coverage of the rest
+        self.assertIn("Decision requested", html)
+        self.assertIn("impact/uicontract.envelope", html)  # names the real generator
+        for o in self.m.opportunities:
+            self.assertIn(o.id, html)               # a live brief per opportunity, not just OPP-001
 
 
 class TestEmptyStates(unittest.TestCase):

@@ -11,6 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from . import impact_bridge
 from . import model as M
 
 EV_RE = re.compile(r"\bEV-\d{4}-W\d{2}-\d{3}\b")
@@ -268,7 +269,45 @@ def build_model(root="."):
         else:
             m.briefs.append(M.Brief(opportunity_id=opp.id, exists=False))
 
+    # --- Evidence-Impact Workflow enrichment (authoritative, read-only) ---
+    # Overlays real assumption status/sensitivity/validation/owner, executive
+    # brief envelopes, and score history. Degrades silently to the scorecard-
+    # derived view above if the impact workflow is unavailable.
+    live_ids = [o.id for o in m.opportunities]
+    m.impact_available = impact_bridge.available(str(root))
+    if m.impact_available:
+        tracker_assumptions = impact_bridge.assumptions_by_opp(str(root), live_ids)
+        if tracker_assumptions:
+            opp_by_id = {o.id: o for o in m.opportunities}
+            m.assumptions = []
+            for oid in live_ids:
+                for a in tracker_assumptions.get(oid, []):
+                    m.assumptions.append(M.Assumption(
+                        opportunity_id=oid, factor_key=a.get("factor", M.UNKNOWN),
+                        text=a.get("statement", M.UNKNOWN),
+                        status=str(a.get("status", "untested")).replace("_", "-"),
+                        evidence_ids=a.get("supporting_ev", []) or [],
+                        sensitivity=a.get("sensitivity", M.UNKNOWN) or M.UNKNOWN,
+                        validation_method=(", ".join(a.get("related_ve", []))
+                                           or a.get("next_validation_method", M.UNKNOWN) or M.UNKNOWN),
+                        owner=a.get("validation_owner", M.UNKNOWN) or M.UNKNOWN,
+                        decision_importance=a.get("decision_importance", M.UNKNOWN) or M.UNKNOWN,
+                        source="impact-tracker"))
+
+        envelopes = impact_bridge.brief_envelopes(str(root), live_ids)
+        hist = impact_bridge.history_by_opp(str(root))
+        for o in m.opportunities:
+            o.brief_envelope = envelopes.get(o.id)
+            o.impact_history = hist.get(o.id, [])
+            if o.impact_history:
+                h = o.impact_history[0]
+                o.latest_change = (f"{h.get('history_id', 'HIST')}: raw "
+                                   f"{h.get('raw_score_prev', '?')}→{h.get('raw_score_new', '?')} "
+                                   f"({h.get('kind', 'applied')}, approved by {h.get('approved_by', '—')})")
+        m.impact_proposals = impact_bridge.proposals(str(root))
+
     m.generated_note = (f"{len(m.opportunities)} live + {len(m.archived)} archived opportunities · "
                         f"{len(m.evidence)} evidence records · {len(m.feed)} feed items · "
+                        f"impact workflow: {'connected' if m.impact_available else 'unavailable'} · "
                         "engine-computed, read-only")
     return m

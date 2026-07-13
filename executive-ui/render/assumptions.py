@@ -9,6 +9,7 @@ def _row(a):
   <td>{L.esc(a.opportunity_id)}</td>
   <td class="fkey">{L.esc(a.factor_key)}</td>
   <td>{L.assumption_badge(a.status)}</td>
+  <td>{L.esc(a.decision_importance)}</td>
   <td class="abasis">{L.esc(a.text)}</td>
   <td>{ev}</td>
   <td>{L.esc(a.validation_method)}</td>
@@ -28,6 +29,16 @@ def render(model):
         counts[a.status] = counts.get(a.status, 0) + 1
     summary = " · ".join(f"{L.ASSUMPTION_STATUS_GLYPH.get(k, k)}: {v}" for k, v in sorted(counts.items()))
     rows = "".join(_row(a) for a in model.assumptions)
+    from_tracker = any(a.source == "impact-tracker" for a in model.assumptions)
+    if from_tracker:
+        source_note = ("Status, decision importance, validation method, sensitivity and owner come from "
+                       "the evidence-impact tracker (<code>impact/tracker.py</code>) — the authoritative "
+                       "source. Fields shown as \"—\" are ones the tracker has no metadata for yet "
+                       "(e.g. no owner assigned), not invented values.")
+    else:
+        source_note = ("Impact tracker unavailable — status is derived from the scorecard "
+                       "(evidence-backed → supported; assumption citing evidence → partially supported; "
+                       "assumption with no evidence → untested); sensitivity/owner shown as \"—\".")
     body = f"""<p class="lede">Unproven assumptions behind every score. Filter to see what a given
 opportunity still needs, and what would validate it. <span class="muted">{summary}</span></p>
 <div class="filters" data-note="client-side show/hide only — no recomputation">
@@ -41,10 +52,8 @@ opportunity still needs, and what would validate it. <span class="muted">{summar
       <option value="contradicted">Contradicted</option></select></label>
 </div>
 <table class="assumptions" id="atable"><thead><tr>
-  <th>Opportunity</th><th>Factor</th><th>Status</th><th>Assumption (basis)</th>
+  <th>Opportunity</th><th>Factor</th><th>Status</th><th>Decision importance</th><th>Assumption (basis)</th>
   <th>Supporting evidence</th><th>Validation method</th><th>Sensitivity</th><th>Owner</th>
 </tr></thead><tbody>{rows}</tbody></table>
-<p class="muted">Sensitivity, owner, and a formal status enum are not yet structured fields in the
-knowledge base — shown as "—" rather than invented. Status is derived: evidence-backed → supported;
-assumption citing evidence → partially supported; assumption with no evidence → untested.</p>"""
+<p class="muted">{source_note}</p>"""
     return L.page("Assumptions & Evidence Gaps", "assumptions.html", body, model.generated_note)

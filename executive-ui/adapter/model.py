@@ -46,9 +46,11 @@ class Assumption:
     text: str                      # the factor basis (the assumption statement)
     status: str                    # untested | partially-supported | supported | contradicted
     evidence_ids: list = field(default_factory=list)
-    sensitivity: str = UNKNOWN     # from tornado rank if available, else UNKNOWN
-    validation_method: str = UNKNOWN  # linked VE if derivable
-    owner: str = UNKNOWN
+    sensitivity: str = UNKNOWN     # impact tracker sensitivity, else UNKNOWN
+    validation_method: str = UNKNOWN  # tracker next_validation_method / linked VE
+    owner: str = UNKNOWN           # tracker validation_owner
+    decision_importance: str = UNKNOWN
+    source: str = "scorecard-derived"  # 'impact-tracker' when authoritative
 
 
 @dataclass
@@ -72,11 +74,13 @@ class Opportunity:
     rejection_conditions: str = UNKNOWN
     validation_plan: str = UNKNOWN
     score_history: list = field(default_factory=list)    # [] => no prior versions recorded
-    latest_change: str = "No approved impact yet"        # honest default (no impact workflow)
+    latest_change: str = "No approved impact yet"        # overridden by impact history if present
     latest_alert: str = UNKNOWN
     next_action: str = UNKNOWN
     profile_path: str = UNKNOWN
     is_archived: bool = False
+    impact_history: list = field(default_factory=list)   # [history entries] from impact/history
+    brief_envelope: dict = None                          # impact/uicontract envelope, if built
 
 
 @dataclass
@@ -106,5 +110,7 @@ class UIModel:
     assumptions: list = field(default_factory=list)      # [Assumption]
     feed: list = field(default_factory=list)             # [FeedItem]
     briefs: list = field(default_factory=list)           # [Brief]
+    impact_proposals: list = field(default_factory=list)  # read-only proposal rows from impact/
+    impact_available: bool = False                       # did the impact bridge load?
     generated_note: str = ""                             # provenance line (commit, counts)
     decision_banner: str = "No product or build decision has been made."
