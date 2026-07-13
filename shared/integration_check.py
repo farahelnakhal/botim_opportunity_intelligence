@@ -32,6 +32,10 @@ STEPS = (
      [sys.executable, "-m", "unittest", "discover", "-s", "intelligence-monitoring/tools/tests", "-q"]),
     ("C: monitoring artefact check",
      [sys.executable, "intelligence-monitoring/tools/monitor.py", "check"]),
+    ("Impact: evidence-impact workflow tests",
+     [sys.executable, "-m", "unittest", "discover", "-s", "impact/tests", "-q"]),
+    ("Executive UI: adapter + render tests",
+     [sys.executable, "-m", "unittest", "discover", "-s", "executive-ui/tests", "-q"]),
     ("Cross-module integration tests",
      [sys.executable, "-m", "unittest", "discover", "-s", "shared/tests", "-q"]),
 )

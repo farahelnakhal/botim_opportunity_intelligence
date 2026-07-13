@@ -64,6 +64,16 @@ Added 2026-07-13 at the repository owner's direction. **Shared ownership accepte
 
 ---
 
+## Executive UI — read-only presentation layer (jointly owned)
+
+Added 2026-07-11 on `feature/executive-ui`. A read-only, executive-facing static UI over all three workstreams' committed outputs. **Jointly owned** like `shared/` (changes by agreement).
+
+**Owned directory:** `executive-ui/`
+
+**Prime directive:** **read-only.** It reuses the existing engines as the single source of truth (no second scoring engine, no recomputation, no confidence reinterpretation), never writes to the knowledge base, and never implies a product has been validated or selected. Its only output is the gitignored `executive-ui/dist/`. It consumes the Evidence-Impact Workflow's read-only outputs (e.g. `impact/uicontract.py`) for its Intelligence Feed, Rescore/Impact Review, Brief, and Assumptions screens.
+
+---
+
 ## Cross-module contract
 
 - **A → B:** evidence by ID (`EV-YYYY-Wnn-nnn`), segments (`SEG-…`), inflection points (`IP-…`), and weekly-update §9 "Handoffs to Workstream B". B consumes read-only (`opportunity-intelligence/tools/` evidence parser + `sync`).
