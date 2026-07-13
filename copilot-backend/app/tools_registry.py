@@ -1,0 +1,413 @@
+"""Read-only tool allowlist. Every tool calls an EXISTING repository function
+(engines, impact read models, monitoring outputs). Strict ID validation; the
+model can never supply filesystem paths. Draft tools are in-memory only.
+
+Absent by design: apply/rollback/approve, email, file access, shell, eval.
+"""
+
+import datetime
+import json
+import re
+import sys
+from pathlib import Path
+
+from .config import REPO_ROOT
+
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(REPO_ROOT / "opportunity-intelligence" / "tools"))
+
+from impact import brief as impact_brief                      # noqa: E402
+from impact import gaps as impact_gaps                        # noqa: E402
+from impact import history as impact_history                  # noqa: E402
+from impact import paths as impact_paths                      # noqa: E402
+from impact import proposal as impact_proposal                # noqa: E402
+from impact import research_request as impact_rr              # noqa: E402
+from impact import tracker as impact_tracker                  # noqa: E402
+from opportunity_engine import evidence, scoring              # noqa: E402
+
+impact_paths.set_repo_root(REPO_ROOT)
+
+KB = REPO_ROOT / "knowledge-base"
+
+OPP_RE = re.compile(r"^OPP-\d{3}$")
+EV_RE = re.compile(r"^EV-\d{4}-W\d{2}-\d{3}$")
+SEG_RE = re.compile(r"^SEG-[a-z0-9][a-z0-9-]{0,60}$")
+IP_RE = re.compile(r"^IP-\d{4}-\d{3}$")
+VE_RE = re.compile(r"^VE-\d{3}$")
+ASM_RE = re.compile(r"^ASM-OPP-\d{3}-[a-z0-9_]{1,40}$")
+
+
+class ToolError(Exception):
+    def __init__(self, message, not_found=False):
+        super().__init__(message)
+        self.not_found = not_found
+
+
+def _now():
+    return datetime.datetime.utcnow().isoformat() + "Z"
+
+
+def _validate(pattern, value, kind):
+    if not isinstance(value, str) or not pattern.match(value):
+        raise ToolError(f"invalid {kind} id: {value!r}")
+    return value
+
+
+def _records():
+    return evidence.load_records(KB / "customer-evidence")
+
+
+# --- opportunity tools (reuse scoring engine + impact read models) ----------
+
+def _card_paths():
+    return sorted((KB / "opportunity-scores").glob("*-scorecard.json"))
+
+
+def list_opportunities():
+    out = []
+    for p in _card_paths():
+        card = json.loads(p.read_text(encoding="utf-8"))
+        ev = scoring.evaluate(card)
+        raw = sum(e["score"] for e in ev["scores"].values())
+        out.append({"opportunity_id": card["opportunity_id"], "name": card.get("name", ""),
+                    "raw_score": f"{raw}/85", "composite_score": ev["composite_indicative"],
+                    "assumption_count": ev["assumption_count"], "capped": ev["assumption_capped"],
+                    "classification": card.get("proposed_classification"),
+                    "evidence_confidence": card.get("evidence_confidence"),
+                    "critical_flags": ev["critical_flags"]})
+    return {"opportunities": out}
+
+
+def _one_opportunity(opp_id):
+    for entry in list_opportunities()["opportunities"]:
+        if entry["opportunity_id"] == opp_id:
+            return entry
+    raise ToolError(f"{opp_id} not found", not_found=True)
+
+
+def get_opportunity(opp_id):
+    _validate(OPP_RE, opp_id, "opportunity")
+    view = _brief_view(opp_id)
+    return {"opportunity_id": opp_id, "name": view["name"], "score": view["score"],
+            "customer": view["customer"], "confidence": view["confidence"],
+            "supporting_primary": view["supporting_primary"],
+            "supporting_leads": view["supporting_leads"],
+            "contradicting": view["contradicting"], "risks": view["risks"],
+            "next_validation": view["next_validation"],
+            "assumptions": view["assumptions"],
+            "inflection_points": view["inflection_points"]}
+
+
+def compare_opportunities(opp_a, opp_b):
+    _validate(OPP_RE, opp_a, "opportunity"); _validate(OPP_RE, opp_b, "opportunity")
+    return {"a": _one_opportunity(opp_a), "b": _one_opportunity(opp_b)}
+
+
+def get_opportunity_score(opp_id):
+    _validate(OPP_RE, opp_id, "opportunity")
+    return {"opportunity_id": opp_id, "score": _tracker(opp_id)["score"]}
+
+
+def get_score_factors(opp_id):
+    _validate(OPP_RE, opp_id, "opportunity")
+    p = KB / "opportunity-scores" / f"{opp_id.lower()}-scorecard.json"
+    if not p.exists():
+        raise ToolError(f"{opp_id} not found", not_found=True)
+    card = json.loads(p.read_text(encoding="utf-8"))
+    ev = scoring.evaluate(card)
+    return {"opportunity_id": opp_id,
+            "factors": {d: e for d, e in ev["scores"].items()}}
+
+
+def _tracker(opp_id):
+    try:
+        return impact_tracker.build(opp_id, _now())
+    except FileNotFoundError:
+        raise ToolError(f"{opp_id} not found", not_found=True)
+
+
+def get_opportunity_assumptions(opp_id):
+    _validate(OPP_RE, opp_id, "opportunity")
+    m = _tracker(opp_id)
+    return {"opportunity_id": opp_id, "counts": m["counts"],
+            "assumptions": [{k: a[k] for k in ("assumption_id", "category", "status",
+                                               "decision_importance", "supporting_ev",
+                                               "contradicting_ev", "next_validation_method")}
+                            for a in m["assumptions"]]}
+
+
+def get_assumption_register(opp_id):
+    _validate(OPP_RE, opp_id, "opportunity")
+    return _tracker(opp_id)
+
+
+def get_evidence_gaps():
+    return impact_gaps.build_portfolio(_now())
+
+
+# --- evidence / segment / inflection / competitor / experiment ---------------
+
+def get_evidence_record(ev_id):
+    _validate(EV_RE, ev_id, "evidence")
+    rec = _records().get(ev_id)
+    if rec is None:
+        raise ToolError(f"{ev_id} not found", not_found=True)
+    weak = bool(evidence.check_citations([ev_id], {ev_id: rec})["weak"])
+    return {"ev_id": ev_id, "title": rec.get("title", ""), "status": rec.get("status"),
+            "evidence_confidence": rec.get("evidence_confidence", ""),
+            "segment": rec.get("segment", ""), "pain_category": rec.get("pain_category", ""),
+            "workaround": rec.get("workaround", ""),
+            "contradictory_evidence": rec.get("contradictory_evidence", ""),
+            "scores": rec.get("scores", {}), "is_weak_lead": weak}
+
+
+def get_segment(seg_id):
+    _validate(SEG_RE, seg_id, "segment")
+    seg = impact_brief._read_segment(seg_id)   # reuses the existing adapter logic
+    if seg is None:
+        raise ToolError(f"{seg_id} not found", not_found=True)
+    return {"segment_id": seg_id, "title": seg["title"], "confidence": seg["confidence"],
+            "job_to_be_done": seg["job"]}
+
+
+def get_inflection_point(ip_id):
+    _validate(IP_RE, ip_id, "inflection")
+    p = KB / "inflection-points" / f"{ip_id}.md"     # narrow fallback: fixed dir + validated id
+    if not p.exists():
+        raise ToolError(f"{ip_id} not found", not_found=True)
+    text = p.read_text(encoding="utf-8")
+    title = re.search(r"^#\s+(.+)$", text, re.M)
+    status = re.search(r"\*\*Status:\*\*\s*(\S+)", text)
+    return {"ip_id": ip_id, "title": title.group(1) if title else ip_id,
+            "status": status.group(1) if status else None}
+
+
+def _known_competitors():
+    return sorted(p.stem for p in (KB / "competitors").glob("*.md") if p.stem != "README")
+
+
+def get_competitor_evidence(name):
+    known = _known_competitors()
+    if not isinstance(name, str) or name.lower() not in known:
+        raise ToolError(f"unknown competitor {name!r}; known: {', '.join(known)}", not_found=True)
+    text = (KB / "competitors" / f"{name.lower()}.md").read_text(encoding="utf-8")
+    title = re.search(r"^#\s+(.+)$", text, re.M)
+    gaps_m = re.search(r"\*\*Gaps[^:]*:\*\*\s*(.+)", text)
+    return {"competitor": name.lower(), "title": title.group(1) if title else name,
+            "gaps": gaps_m.group(1)[:500] if gaps_m else None}
+
+
+def get_validation_experiment(ve_id):
+    _validate(VE_RE, ve_id, "experiment")
+    p = KB / "validation" / f"{ve_id}-result.json"
+    if not p.exists():
+        raise ToolError(f"{ve_id} not found", not_found=True)
+    data = json.loads(p.read_text(encoding="utf-8"))
+    return {"ve_id": ve_id, "proposition": data.get("proposition"),
+            "metrics": data.get("metrics", []), "on_pass": data.get("on_pass"),
+            "on_fail": data.get("on_fail")}
+
+
+# --- brief / changes / history ----------------------------------------------
+
+def _brief_view(opp_id):
+    try:
+        return impact_brief.build_view(opp_id, _now())
+    except FileNotFoundError:
+        raise ToolError(f"{opp_id} not found", not_found=True)
+
+
+def get_executive_brief(opp_id):
+    """Uses the existing generator, in memory; regenerates when no derived
+    file exists. Never writes."""
+    _validate(OPP_RE, opp_id, "opportunity")
+    view = _brief_view(opp_id)
+    return {"opportunity_id": opp_id, "markdown": impact_brief.render_markdown(view),
+            "json": impact_brief.render_json(view)}
+
+
+def get_recent_changes():
+    changes = []
+    for e in impact_history.read_all():
+        changes.append({"source": "score-history", "kind": e.get("kind"),
+                        "timestamp": e.get("timestamp"), "opportunity_id": e.get("opportunity_id"),
+                        "summary": e.get("explanation", ""),
+                        "simulated_fixture": "TEST" in json.dumps(e.get("ev_ids", []))})
+    events_dir = KB / "monitoring" / "events"
+    if events_dir.is_dir():
+        for f in sorted(events_dir.glob("*.jsonl")):
+            for line in f.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                ev = json.loads(line)
+                changes.append({"source": "monitoring", "kind": ev.get("adapter"),
+                                "timestamp": ev.get("detected_at"), "entity": ev.get("entity"),
+                                "summary": f"{ev.get('adapter')} detected change on {ev.get('entity')}",
+                                "simulated_fixture": bool(ev.get("simulated"))
+                                                     or "TEST" in str(ev.get("entity", ""))})
+    return {"changes": changes[-50:]}
+
+
+def get_score_history(opp_id):
+    _validate(OPP_RE, opp_id, "opportunity")
+    return {"opportunity_id": opp_id,
+            "entries": [e for e in impact_history.read_all()
+                        if e.get("opportunity_id") == opp_id]}
+
+
+# --- bounded knowledge search (approved record fields only) ------------------
+
+def search_product_knowledge(query):
+    """Searches ONLY approved product-discovery record fields: IDs, titles,
+    evidence statements, segment/opportunity descriptions, assumptions and
+    experiments. Never code, config, env files, prompts, or git metadata."""
+    if not isinstance(query, str) or not (2 <= len(query) <= 200):
+        raise ToolError("query must be a string of 2..200 characters")
+    terms = [t for t in re.split(r"[^a-z0-9-]+", query.lower()) if len(t) >= 3]
+    if not terms:
+        raise ToolError("query has no searchable terms")
+
+    def hit(text):
+        low = (text or "").lower()
+        return sum(1 for t in terms if t in low)
+
+    results = []
+    for ev_id, rec in _records().items():
+        score = hit(ev_id) + hit(rec.get("title", "")) + hit(rec.get("segment", "")) \
+            + hit(rec.get("pain_category", "")) + hit(rec.get("workaround", ""))
+        if score:
+            results.append({"id": ev_id, "type": "evidence", "title": rec.get("title", ""), "match": score})
+    for p in _card_paths():
+        card = json.loads(p.read_text(encoding="utf-8"))
+        basis = " ".join(e.get("basis", "") for e in card["scores"].values())
+        score = hit(card["opportunity_id"]) + hit(card.get("name", "")) + hit(basis)
+        if score:
+            results.append({"id": card["opportunity_id"], "type": "opportunity",
+                            "title": card.get("name", ""), "match": score})
+    for p in sorted((KB / "segments").glob("SEG-*.md")):
+        text = p.read_text(encoding="utf-8")
+        first = text.splitlines()[0] if text else ""
+        score = hit(p.stem) + hit(first)
+        if score:
+            results.append({"id": p.stem, "type": "segment", "title": first.lstrip("# "), "match": score})
+    for p in sorted((KB / "validation").glob("VE-*-result.json")):
+        data = json.loads(p.read_text(encoding="utf-8"))
+        blob = json.dumps(data.get("metrics", [])) + str(data.get("proposition", ""))
+        score = hit(data.get("experiment_id", "")) + hit(blob)
+        if score:
+            results.append({"id": data.get("experiment_id"), "type": "experiment",
+                            "title": data.get("proposition", ""), "match": score})
+    results.sort(key=lambda r: -r["match"])
+    return {"query": query, "results": results[:12]}
+
+
+# --- draft-only tools (EPHEMERAL: returned in the response, never persisted) -
+
+def generate_research_request_draft(assumption_id):
+    _validate(ASM_RE, assumption_id, "assumption")
+    try:
+        draft = impact_rr.generate(assumption_id, _now())
+    except (ValueError, FileNotFoundError) as exc:
+        raise ToolError(str(exc), not_found=True)
+    draft["ephemeral"] = True
+    return {"draft_type": "research_request", "draft": draft}
+
+
+def generate_executive_brief(opp_id):
+    _validate(OPP_RE, opp_id, "opportunity")
+    out = get_executive_brief(opp_id)
+    return {"draft_type": "executive_brief", "draft": {"markdown": out["markdown"],
+                                                       "ephemeral": True}}
+
+
+def generate_impact_proposal_draft(opp_id, ev_id, factor, proposed_score, justification):
+    """Builds a DRAFT impact proposal in memory using the existing generator.
+    It is never written to knowledge-base/impact/proposals and cannot be
+    applied from this backend (no apply tool exists here)."""
+    _validate(OPP_RE, opp_id, "opportunity"); _validate(EV_RE, ev_id, "evidence")
+    if not isinstance(factor, str) or factor not in scoring.DIMENSIONS:
+        raise ToolError(f"unknown factor {factor!r}")
+    if not isinstance(proposed_score, int) or not 1 <= proposed_score <= 5:
+        raise ToolError("proposed_score must be an integer 1..5")
+    if not isinstance(justification, str) or not justification.strip():
+        raise ToolError("justification required")
+    rec = _records().get(ev_id)
+    if rec is None:
+        raise ToolError(f"{ev_id} not found", not_found=True)
+    p = KB / "opportunity-scores" / f"{opp_id.lower()}-scorecard.json"
+    if not p.exists():
+        raise ToolError(f"{opp_id} not found", not_found=True)
+    card = json.loads(p.read_text(encoding="utf-8"))
+    conf = (rec.get("evidence_confidence", "") or "").split("—")[0].strip().lower() or None
+    strength = rec.get("scores", {}).get("evidence strength")
+    field_map = {"willingness_to_pay": "willingness_to_pay_signal",
+                 "switching_intent": "switching_signal",
+                 "credit_need": "credit_need_confirmation"}
+    field = field_map.get(factor)
+    if field is None:
+        raise ToolError(f"factor {factor!r} has no approved evidence-field mapping for drafts")
+    descriptor = {"ev_id": ev_id, "evidence_confidence": conf,
+                  "evidence_strength": strength, "evidence_class": "observed behaviour",
+                  "observations": [{"evidence_field": field, "proposed_score": proposed_score,
+                                    "justification": justification.strip()}]}
+    draft = impact_proposal.generate(card, descriptor, None,
+                                     proposal_id="PROP-DRAFT-EPHEMERAL", today=_now()[:10])
+    draft["ephemeral"] = True
+    draft["note"] = ("Draft only — not persisted, not appliable from the copilot. "
+                     "A human must create and approve a real proposal via the impact workflow.")
+    return {"draft_type": "impact_proposal", "draft": draft}
+
+
+# --- registry ----------------------------------------------------------------
+
+def _schema(props, required):
+    return {"type": "object", "properties": props, "required": required}
+
+_ID = {"type": "string"}
+
+REGISTRY = {
+    "list_opportunities": (list_opportunities, _schema({}, []), "List all opportunities with engine scores"),
+    "compare_opportunities": (compare_opportunities, _schema({"opp_a": _ID, "opp_b": _ID}, ["opp_a", "opp_b"]), "Compare two opportunities"),
+    "get_opportunity": (get_opportunity, _schema({"opp_id": _ID}, ["opp_id"]), "Full grounded view of one opportunity"),
+    "get_opportunity_score": (get_opportunity_score, _schema({"opp_id": _ID}, ["opp_id"]), "Engine score block"),
+    "get_score_factors": (get_score_factors, _schema({"opp_id": _ID}, ["opp_id"]), "All 17 factors with bases"),
+    "get_opportunity_assumptions": (get_opportunity_assumptions, _schema({"opp_id": _ID}, ["opp_id"]), "Assumption summary"),
+    "get_assumption_register": (get_assumption_register, _schema({"opp_id": _ID}, ["opp_id"]), "Rich assumption register"),
+    "get_evidence_gaps": (get_evidence_gaps, _schema({}, []), "Portfolio evidence gaps, prioritized"),
+    "get_evidence_record": (get_evidence_record, _schema({"ev_id": _ID}, ["ev_id"]), "One Part A evidence record"),
+    "get_segment": (get_segment, _schema({"seg_id": _ID}, ["seg_id"]), "Segment profile"),
+    "get_inflection_point": (get_inflection_point, _schema({"ip_id": _ID}, ["ip_id"]), "Inflection point"),
+    "get_competitor_evidence": (get_competitor_evidence, _schema({"name": _ID}, ["name"]), "Competitor profile summary"),
+    "get_validation_experiment": (get_validation_experiment, _schema({"ve_id": _ID}, ["ve_id"]), "Validation experiment + thresholds"),
+    "get_executive_brief": (get_executive_brief, _schema({"opp_id": _ID}, ["opp_id"]), "Executive brief (in-memory)"),
+    "get_recent_changes": (get_recent_changes, _schema({}, []), "Recent history + monitoring changes"),
+    "get_score_history": (get_score_history, _schema({"opp_id": _ID}, ["opp_id"]), "Score history entries"),
+    "search_product_knowledge": (search_product_knowledge, _schema({"query": _ID}, ["query"]), "Bounded search over approved record fields"),
+    "generate_research_request_draft": (generate_research_request_draft, _schema({"assumption_id": _ID}, ["assumption_id"]), "Draft research request (ephemeral)"),
+    "generate_executive_brief": (generate_executive_brief, _schema({"opp_id": _ID}, ["opp_id"]), "Draft executive brief (ephemeral)"),
+    "generate_impact_proposal_draft": (generate_impact_proposal_draft,
+                                       _schema({"opp_id": _ID, "ev_id": _ID, "factor": _ID,
+                                                "proposed_score": {"type": "integer"},
+                                                "justification": {"type": "string"}},
+                                               ["opp_id", "ev_id", "factor", "proposed_score", "justification"]),
+                                       "Draft impact proposal (ephemeral, never appliable here)"),
+}
+
+
+def tool_specs():
+    return [{"name": name, "description": desc, "input_schema": schema}
+            for name, (_, schema, desc) in REGISTRY.items()]
+
+
+def call_tool(name, arguments):
+    if name not in REGISTRY:
+        raise ToolError(f"tool {name!r} is not in the allowlist")
+    fn, schema, _ = REGISTRY[name]
+    args = arguments or {}
+    unknown = set(args) - set(schema["properties"])
+    if unknown:
+        raise ToolError(f"unknown arguments: {sorted(unknown)}")
+    missing = [k for k in schema["required"] if k not in args]
+    if missing:
+        raise ToolError(f"missing arguments: {missing}")
+    return fn(**args)
