@@ -1,2 +1,10 @@
 .lock
 transactions/
+briefs/*.json
+briefs/*.md
+briefs/*.txt
+assumption-registers/*.json
+assumption-registers/*.md
+research-requests/*.json
+evidence-gaps.json
+evidence-gaps.md

@@ -13,15 +13,19 @@ from .proposal import _assumption_count, _raw_score, RAW_MAX
 STATUSES = ("untested", "partially supported", "supported", "contradicted")
 
 
+def _entry(factor, text=""):
+    # contradicting_ev is an additive field (default []): contradiction is
+    # recorded WITHOUT deleting any supporting_ev.
+    return {"factor": factor, "text": text, "status": "untested",
+            "supporting_ev": [], "contradicting_ev": [],
+            "sensitivity": "", "next_validation": ""}
+
+
 def build_from_scorecard(card):
     reg = {"opportunity_id": card["opportunity_id"], "assumptions": []}
     for factor, e in card["scores"].items():
         if e.get("assumption", True):
-            reg["assumptions"].append({
-                "factor": factor, "text": e.get("basis", ""),
-                "status": "untested", "supporting_ev": [],
-                "sensitivity": "", "next_validation": "",
-            })
+            reg["assumptions"].append(_entry(factor, e.get("basis", "")))
     return reg
 
 
@@ -31,16 +35,20 @@ def compute_new(card, old_register, assumption_changes):
     for ch in assumption_changes:
         a = by_factor.get(ch["assumption"])
         if a is None:
-            a = {"factor": ch["assumption"], "text": "", "status": "untested",
-                 "supporting_ev": [], "sensitivity": "", "next_validation": ""}
+            a = _entry(ch["assumption"])
             reg["assumptions"].append(a)
             by_factor[a["factor"]] = a
+        a.setdefault("contradicting_ev", [])  # tolerate older registers
         if ch["proposed_status"] not in STATUSES:
             raise ValueError(f"bad status {ch['proposed_status']}")
         a["status"] = ch["proposed_status"]
         for ev in ch.get("supporting_ev", []):
             if ev not in a["supporting_ev"]:
                 a["supporting_ev"].append(ev)
+        # contradiction never removes prior supporting evidence
+        for ev in ch.get("contradicting_ev", []):
+            if ev not in a["contradicting_ev"]:
+                a["contradicting_ev"].append(ev)
         if ch.get("next_validation"):
             a["next_validation"] = ch["next_validation"]
     return reg
