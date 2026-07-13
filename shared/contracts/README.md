@@ -10,6 +10,7 @@ Each contract states: required / optional / nullable fields, enums, `schema_vers
 | `assumption-register.schema.md` | `impact/tracker.py` (`impact.cli assumptions`) | derived |
 | `evidence-gaps.schema.md` | `impact/gaps.py` (`impact.cli gaps`) | derived |
 | `research-request.schema.md` | `impact/research_request.py` (`impact.cli research-request`) | derived (draft) |
+| `merchant-voice-api.schema.md` | `merchant-voice/` HTTP API (port 8020) | operational (persisted in `merchant-voice/data/mv.db`; not a Part A/B authoritative source — prototype-grade, synthetic-only in v1, see the contract for scope) |
 
 **Common `meta` block (every generated output):**
 ```json

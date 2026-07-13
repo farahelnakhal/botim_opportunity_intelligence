@@ -76,6 +76,24 @@ Added 2026-07-13 at the repository owner's direction; jointly owned like `shared
 
 ---
 
+## Merchant Voice & Validation — research-to-evidence backend (jointly owned)
+
+Added 2026-07-13 at the repository owner's direction; jointly owned like `shared/` (changes by agreement).
+
+**Owned directory:** `merchant-voice/`
+
+**Purpose:** a human-reviewed pipeline that turns BOTIM merchant feedback (surveys, interviews, concept tests) into traceable Part A evidence *proposals*. v1 (Phase 1, delivered) implements only research campaigns and versioned research guides; later phases add participants, response ingestion, AI-assisted extraction (never authoritative on its own), human review, evidence candidates, approved findings, and a Part A proposal preview.
+
+**Storage boundary:** its own operational database (`merchant-voice/data/mv.db`) and a separate identity database (`merchant-voice/data/identity.db`), both gitignored and never shared with `copilot-backend/`'s conversation store. **v1 is synthetic-data-only** (`MV_SYNTHETIC_ONLY=1` by default) — no real merchant data, not approved for production use, prototype-grade authentication only.
+
+**Write boundary:** Merchant Voice never writes directly into authoritative Part A evidence records, never mints Part A evidence IDs, and never directly changes Part B scores or assumptions. Any future Part A evidence proposal is generated and stored inside `merchant-voice/data/mv.db` for preview only; export of real merchant-derived findings to the knowledge base requires a separate privacy/redaction/quote-permission review, human reviewer approval, and explicit Workstream A acceptance.
+
+**Boundary from `executive-ui/`:** Merchant Voice has no UI in this delivery; a researcher-facing frontend is scheduled after the current Product Discovery Copilot frontend is stable, and will not modify Farah's existing frontend when it lands.
+
+**Shared contract:** `shared/contracts/merchant-voice-api.schema.md` (Phase 1 subset only; later phases are documented there as an explicitly-labelled, not-yet-active future roadmap).
+
+---
+
 ## Executive UI — read-only presentation layer (jointly owned)
 
 Added 2026-07-11 on `feature/executive-ui`. A read-only, executive-facing static UI over all three workstreams' committed outputs. **Jointly owned** like `shared/` (changes by agreement).
