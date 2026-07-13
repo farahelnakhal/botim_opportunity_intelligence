@@ -14,6 +14,12 @@ Phase 2 tables:
                stores; the shared `app.audit` module works against either
                connection since it only requires an `audit_events` table)
 
+Phase 3 tables:
+  mv.db:       observations, extraction_runs — model-proposed observations
+               are never authoritative; every one is created with
+               review_status='pending_review' and workflow_status='active'
+               (superseded on an explicit rerun, never overwritten).
+
 Merchant identity data (protected_external_reference, identity-level
 consent/permission fields) lives ONLY in identity.db. Participants in
 mv.db carry a `merchant_identity_id` reference and their own per-campaign
@@ -168,6 +174,55 @@ MV_MIGRATIONS = [
             expires_at TEXT NOT NULL,
             consumed_at TEXT,
             created_at TEXT NOT NULL
+        )""",
+    ]),
+    (3, [
+        """CREATE TABLE IF NOT EXISTS extraction_runs (
+            extraction_run_id TEXT PRIMARY KEY,
+            response_id TEXT NOT NULL REFERENCES responses(response_id),
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            completed_at TEXT,
+            status TEXT NOT NULL,
+            input_source_hash TEXT NOT NULL,
+            proposed_count INTEGER,
+            accepted_count INTEGER,
+            rejected_count INTEGER,
+            safe_error_code TEXT,
+            actor_id TEXT NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS observations (
+            observation_id TEXT PRIMARY KEY,
+            response_id TEXT NOT NULL REFERENCES responses(response_id),
+            campaign_id TEXT NOT NULL REFERENCES campaigns(campaign_id),
+            participant_id TEXT NOT NULL REFERENCES participants(participant_id),
+            source_answer_id TEXT NOT NULL REFERENCES raw_answers(answer_id),
+            observation_type TEXT NOT NULL,
+            normalized_statement TEXT NOT NULL,
+            source_excerpt TEXT NOT NULL,
+            is_direct_quote INTEGER NOT NULL DEFAULT 0,
+            extraction_confidence TEXT NOT NULL,
+            frequency TEXT,
+            severity TEXT,
+            current_workaround TEXT,
+            payment_rail TEXT,
+            linked_segments_json TEXT NOT NULL,
+            linked_opportunities_json TEXT NOT NULL,
+            linked_assumptions_json TEXT NOT NULL,
+            contradiction_target TEXT,
+            follow_up_question TEXT,
+            sensitivity_flags_json TEXT NOT NULL,
+            review_status TEXT NOT NULL DEFAULT 'pending_review',
+            workflow_status TEXT NOT NULL DEFAULT 'active',
+            superseded_by_run_id TEXT,
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            model_provider TEXT NOT NULL,
+            model_name TEXT NOT NULL,
+            extraction_run_id TEXT NOT NULL REFERENCES extraction_runs(extraction_run_id),
+            source_hash TEXT NOT NULL
         )""",
     ]),
 ]

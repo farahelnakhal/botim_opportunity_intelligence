@@ -26,26 +26,44 @@ consent/deletion, maintenance):
   POST   /api/merchant-voice/maintenance/expire-retention
   POST   /api/merchant-voice/maintenance/retry-transcript-deletions
 
-Viewer has NO access to any Phase 2 route (participants/responses/CSV/
-transcripts/maintenance are all researcher+ at minimum) — enforced here,
-before dispatching to the service layer, in addition to whatever role
-checks the service functions themselves apply.
+Phase 3 routes (AI-assisted extraction of pending-review observations —
+the model may only PROPOSE; there is no approval endpoint in this phase):
 
-Still not implemented (Phase 3+): AI extraction, observation review,
-evidence candidates, approved findings, strength analysis, campaign
-aggregation, Part A proposals, Copilot tools.
+  POST   /api/merchant-voice/responses/{response_id}/extract
+  GET    /api/merchant-voice/responses/{response_id}/extraction-runs
+  GET    /api/merchant-voice/extraction-runs/{run_id}
+  GET    /api/merchant-voice/responses/{response_id}/observations
+  GET    /api/merchant-voice/observations/{observation_id}
+
+Viewer has NO access to any Phase 2/3 route (participants/responses/CSV/
+transcripts/maintenance/extraction are all researcher+ at minimum) —
+enforced here, before dispatching to the service layer, in addition to
+whatever role checks the service functions themselves apply.
+
+Still not implemented (Phase 4+): reviewer approval/rejection workflows,
+duplicate observation merge, evidence candidates, approved findings,
+strength bands, campaign aggregation, Part A proposals, synthetic export,
+Copilot tools.
 """
 
 import json
 import re
 
-from . import campaigns, csv_import, guides, participants, responses, suppression, transcripts
+from . import campaigns, csv_import, extraction, guides, participants, responses, suppression, transcripts
 from .auth import AuthError, authenticate, require_any_role
 from .db import DbError
+from .eligibility import ExtractionError
 from .models import ValidationError
 
-ERROR_STATUS = {"invalid_request": 400, "unauthorized": 401, "forbidden": 403,
-                "not_found": 404, "conflict": 409, "internal": 500}
+ERROR_STATUS = {
+    "invalid_request": 400, "unauthorized": 401, "forbidden": 403, "not_found": 404, "conflict": 409,
+    "internal": 500,
+    # Phase 3 extraction error codes
+    "extraction_not_permitted": 403, "consent_denied": 403, "ai_processing_denied": 403,
+    "retention_expired": 403, "redaction_incomplete": 409, "response_purged": 409,
+    "transcript_pending_deletion": 409, "provider_timeout": 504, "provider_error": 502,
+    "invalid_provider_output": 502, "unsupported_excerpt": 400, "duplicate_extraction": 409,
+}
 
 CAMPAIGN_RE = re.compile(r"^/api/merchant-voice/campaigns/([^/]+)$")
 CAMPAIGN_TRANSITION_RE = re.compile(r"^/api/merchant-voice/campaigns/([^/]+)/transition$")
@@ -63,6 +81,12 @@ CAMPAIGN_RESPONSES_RE = re.compile(r"^/api/merchant-voice/campaigns/([^/]+)/resp
 RESPONSE_RE = re.compile(r"^/api/merchant-voice/responses/([^/]+)$")
 RESPONSE_TRANSCRIPT_RE = re.compile(r"^/api/merchant-voice/responses/([^/]+)/transcript$")
 RESPONSE_TRANSCRIPT_META_RE = re.compile(r"^/api/merchant-voice/responses/([^/]+)/transcript-metadata$")
+
+RESPONSE_EXTRACT_RE = re.compile(r"^/api/merchant-voice/responses/([^/]+)/extract$")
+RESPONSE_EXTRACTION_RUNS_RE = re.compile(r"^/api/merchant-voice/responses/([^/]+)/extraction-runs$")
+EXTRACTION_RUN_RE = re.compile(r"^/api/merchant-voice/extraction-runs/([^/]+)$")
+RESPONSE_OBSERVATIONS_RE = re.compile(r"^/api/merchant-voice/responses/([^/]+)/observations$")
+OBSERVATION_RE = re.compile(r"^/api/merchant-voice/observations/([^/]+)$")
 
 RESEARCH_ROLES = ("researcher", "reviewer", "admin")
 
@@ -225,6 +249,37 @@ class Api:
                 return 200, csv_import.commit(self.conn, self.config, principal,
                                              self._json_body(body_bytes), self.now())
 
+            # --- Phase 3: extraction --------------------------------------------
+            m = RESPONSE_EXTRACT_RE.match(path)
+            if m and method == "POST":
+                data = self._json_body(body_bytes)
+                run, observations = extraction.run_extraction(
+                    self.conn, self.config, principal, m.group(1), self.now(),
+                    rerun=bool(data.get("rerun", False)))
+                return 201, {"schema_version": "1.0", "extraction_run": run, "observations": observations}
+
+            m = RESPONSE_EXTRACTION_RUNS_RE.match(path)
+            if m and method == "GET":
+                require_any_role(principal, RESEARCH_ROLES)
+                return 200, {"schema_version": "1.0",
+                            "extraction_runs": extraction.list_runs_for_response(self.conn, m.group(1))}
+
+            m = EXTRACTION_RUN_RE.match(path)
+            if m and method == "GET":
+                require_any_role(principal, RESEARCH_ROLES)
+                return 200, extraction.get_run(self.conn, m.group(1))
+
+            m = RESPONSE_OBSERVATIONS_RE.match(path)
+            if m and method == "GET":
+                require_any_role(principal, RESEARCH_ROLES)
+                return 200, {"schema_version": "1.0",
+                            "observations": extraction.list_observations_for_response(self.conn, m.group(1))}
+
+            m = OBSERVATION_RE.match(path)
+            if m and method == "GET":
+                require_any_role(principal, RESEARCH_ROLES)
+                return 200, extraction.get_observation(self.conn, m.group(1))
+
             # --- Phase 2: maintenance ------------------------------------------
             if path == "/api/merchant-voice/maintenance/expire-retention" and method == "POST":
                 require_any_role(principal, ("admin",))
@@ -252,6 +307,8 @@ class Api:
             return 400, error_body("invalid_request", str(exc))
         except csv_import.CsvTokenError as exc:
             return 409, error_body("conflict", str(exc))
+        except ExtractionError as exc:
+            return ERROR_STATUS.get(exc.code, 403), error_body(exc.code, str(exc))
         except DbError as exc:
             msg = str(exc)
             code, status = ("conflict", 409) if "already exists" in msg else ("not_found", 404)

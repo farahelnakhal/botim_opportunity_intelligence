@@ -11,7 +11,7 @@ REPO = BACKEND.parent
 sys.path.insert(0, str(BACKEND))
 sys.path.insert(0, str(REPO))
 
-from app import campaigns, guides, identity, participants  # noqa: E402
+from app import campaigns, guides, identity, participants, responses  # noqa: E402
 from app.config import Config  # noqa: E402
 from app.db import connect_identity, connect_mv  # noqa: E402
 
@@ -43,17 +43,29 @@ def make_dbs(tmp_dir):
     return conn, identity_conn, config
 
 
-def make_active_campaign_with_approved_guide(conn, config, clock, questions=None):
+def make_active_campaign_with_approved_guide(conn, config, clock, questions=None, method="interview",
+                                             campaign_overrides=None):
     questions = questions or [{"text": "What is your biggest pain?", "purpose": "problem"},
                               {"text": "How often does it happen?", "purpose": "frequency"}]
-    camp = campaigns.create(conn, config, RESEARCHER, {
+    data = {
         "title": "MVC-TEST-FIXTURE", "objective": "synthetic fixture campaign",
-        "method": "interview", "data_classification": "synthetic"}, clock())
+        "method": method, "data_classification": "synthetic",
+    }
+    data.update(campaign_overrides or {})
+    camp = campaigns.create(conn, config, RESEARCHER, data, clock())
     guide = guides.create(conn, RESEARCHER, camp["campaign_id"], questions, clock())
     guides.approve(conn, config, REVIEWER, guide["guide_id"], clock())
     campaigns.transition(conn, REVIEWER, camp["campaign_id"], "approved", clock())
     campaigns.transition(conn, RESEARCHER, camp["campaign_id"], "active", clock())
     return camp, guide
+
+
+def make_response(conn, config, clock, campaign, guide, participant, answers):
+    """`answers`: list of {"question_id", "answer", ...} dicts (as accepted by
+    responses.create's "answers" field)."""
+    return responses.create(conn, config, RESEARCHER, {
+        "campaign_id": campaign["campaign_id"], "participant_id": participant["participant_id"],
+        "guide_id": guide["guide_id"], "method": campaign["method"], "answers": answers}, clock())
 
 
 def make_participant(conn, identity_conn, config, clock, campaign_id, **overrides):

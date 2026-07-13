@@ -1,11 +1,11 @@
-# merchant-voice-api.schema — v1.1 (Phase 1 + Phase 2: campaigns, guides, participants, responses, CSV/transcript ingestion, consent & deletion)
+# merchant-voice-api.schema — v1.2 (Phase 1 + 2 + 3: campaigns, guides, participants, responses, CSV/transcript ingestion, consent & deletion, AI-assisted extraction)
 
 > **PROTOTYPE-GRADE AUTHENTICATION. SYNTHETIC-DATA-ONLY. NOT APPROVED FOR REAL MERCHANT DATA. NOT FOR PRODUCTION USE.**
 > Authentication is a static token→role map compared with `hmac.compare_digest` — this is **not** production identity/access management (no user directory, no session revocation, no token rotation, no TLS termination). Real merchant data requires a separate privacy/security review and a hardened deployment before use. All examples in this document use synthetic IDs only (`MVC-TEST-…`, `MVG-TEST-…`, `MVP-TEST-…`, `MVR-TEST-…`).
 
 **Producer:** `merchant-voice/` (stdlib Python HTTP JSON API, port 8020) · **Consumer:** the future Merchant Voice researcher UI (Farah; scheduled after the current Product Discovery frontend is stable — no frontend work is included in this delivery).
 
-This document covers **what Phase 1 + Phase 2 implement**: research campaigns, versioned research guides, pseudonymous participants (with identity kept in a separate `identity.db`), manual and CSV-bulk response ingestion, text-only transcript ingestion, deterministic redaction, consent/privacy gating, and withdrawal/retention/deletion. AI extraction, human review, evidence candidates, approved findings, campaign-level analysis, Part A proposals, and Copilot integration are **not implemented yet** — see the Future Roadmap section at the end for their planned (not active) shape.
+This document covers **what Phase 1 + Phase 2 + Phase 3 implement**: research campaigns, versioned research guides, pseudonymous participants (with identity kept in a separate `identity.db`), manual and CSV-bulk response ingestion, text-only transcript ingestion, deterministic redaction, consent/privacy gating, withdrawal/retention/deletion, and AI-assisted extraction of structured **pending-review** observations. The model may only *propose* observations — it never approves them, assigns final evidence strength, creates a finding, or touches Part A/B/impact/assumption state. Reviewer approval/rejection, evidence candidates, approved findings, campaign-level aggregation, Part A proposals, and Copilot integration are **not implemented yet** — see the Future Roadmap section at the end for their planned (not active) shape.
 
 ## Authentication
 
@@ -37,6 +37,11 @@ Every endpoint except `GET /health` requires `Authorization: Bearer <token>`. To
 | `POST /responses/{id}/transcript`, `GET .../transcript-metadata` | — (no access) | ✅ | ✅ | ✅ |
 | `POST /maintenance/expire-retention` | — (no access) | — | — | ✅ |
 | `POST /maintenance/retry-transcript-deletions` | — (no access) | — | — | ✅ |
+| `POST /responses/{id}/extract` | — (no access) | ✅ | ✅ | ✅ |
+| `GET /responses/{id}/extraction-runs`, `GET /extraction-runs/{id}` | — (no access) | ✅ | ✅ | ✅ |
+| `GET /responses/{id}/observations`, `GET /observations/{id}` | — (no access) | ✅ | ✅ | ✅ |
+
+**No approval endpoint exists in Phase 3.** Every model-created observation is `review_status: "pending_review"`; there is no route that changes it.
 
 **Self-approval:** a guide cannot be approved by the same actor who created it unless `MV_ALLOW_SELF_APPROVAL=1` — every such approval is audited with `self_approval: true`.
 
@@ -186,13 +191,78 @@ Text only: `.txt` / `.md` / `.vtt`, max 1 MB, UTF-8, extension+declared content-
 
 `app/counting.py` computes, per campaign: `invited_count`, `enrolled_count`, `submitted_response_count`, `valid_participant_count`, `included_participant_count`, `excluded_or_suppressed_count` — six explicitly-defined counts, deliberately **not** a single ambiguous `sample_size`. Not yet exposed via an endpoint; campaign-level analysis (Phase 4) will consume these.
 
+## Extraction eligibility (the gate before any provider call)
+
+`POST /responses/{id}/extract` calls **one canonical eligibility function** (`app/eligibility.py`) before it may construct a prompt or call the provider. ALL of the following must hold, or the request fails with the matching error code below and no provider call is made:
+
+campaign method is valid · response exists · participant is not suppressed · `consent_status` is `granted` · `ai_processing_permission` is `true` · retention has not expired · response content is not purged · every relevant answer's `redaction_status` is `complete` · `processing_status` is not `blocked_for_ai`/`suppressed` · transcript status is not `pending_deletion`/`deletion_failed`.
+
+## Provider integration
+
+Uses the same canonical `shared.llm.provider` abstraction as `copilot-backend` — no second provider abstraction. The extraction system prompt and tool schema (`app/extraction_prompt.py`) are never returned by any API endpoint. Live provider calls require `ANTHROPIC_API_KEY`; standard/CI tests use `MockProvider` and make no network call. A Merchant-Voice-specific live-smoke gate (`MV_RUN_LIVE_TESTS=1`, in addition to the API key) keeps any live-model test explicitly opt-in.
+
+**Model input** is limited to: the eligible answers' already-redacted text, the guide question each answers, the campaign's `method`, the allowed observation-type/confidence taxonomy, and the campaign's *own* already-linked `target_segments`/`linked_opportunities`/`linked_assumptions` IDs (link suggestions are validated against this campaign-scoped set only — not the whole repository's identifier space, which this service does not parse). **Never sent:** identity.db content, contact information, raw unredacted text, tokens, this service's configuration, or unrelated repository content. Merchant answer text is explicitly framed to the model as untrusted data, not instructions.
+
+## Observation object
+
+| Field | Type / enum |
+|---|---|
+| `observation_id` | `MVO-...` |
+| `response_id` / `campaign_id` / `participant_id` / `source_answer_id` | string |
+| `observation_type` | enum: `pain`, `job_to_be_done`, `behaviour`, `workaround`, `frequency`, `severity`, `payment_rail`, `trust_concern`, `willingness_to_pay_signal`, `switching_barrier`, `concept_reaction`, `objection`, `contradiction`, `rejection_condition`, `adoption_condition`, `follow_up_question` |
+| `normalized_statement` | string |
+| `source_excerpt` | string — always an exact, normalized substring of the source answer text it was extracted from (never fuzzy-matched; a fabricated excerpt is rejected, not persisted) |
+| `is_direct_quote` | bool — true only when `normalized_statement` is materially identical to `source_excerpt` **and** the participant's `quote_permission` is true; otherwise forced `false` with `quote_downgraded` in `sensitivity_flags` |
+| `extraction_confidence` | enum: `low`, `medium`, `high` |
+| `frequency` | enum (`daily`, `weekly`, `monthly`, `every_order`, `most_transactions`, `twice_monthly`, `recurring`, `rarely`, `once`) or `null` — cleared (never inferred) unless the source excerpt contains explicit frequency language |
+| `severity` | enum (`low`, `medium`, `high`) or `null` — cleared unless the source excerpt contains explicit severity-supporting language (monetary loss, delay, missed payment, operational blockage, escalation, inability to complete a task) |
+| `current_workaround` / `payment_rail` / `follow_up_question` | string or `null` |
+| `linked_segments` / `linked_opportunities` / `linked_assumptions` | string[] — filtered down to the campaign's own linked IDs; anything else is **removed** (never replaced with an invented ID) and flagged `invalid_link_removed` |
+| `contradiction_target` | `observation_id` or `null` — must reference an observation from the **same response**; otherwise cleared and flagged `contradiction_target_removed` |
+| `sensitivity_flags` | string[] — computed by this service only; the model's own self-reported flags are discarded |
+| `review_status` | `pending_review` — the **only** value in Phase 3; no endpoint changes it |
+| `workflow_status` | enum: `active`, `superseded` (set automatically by an explicit rerun — never a human review action) |
+| `superseded_by_run_id` | `extraction_run_id` or `null` |
+| `created_by` / `created_at` / `updated_at` | string / ISO8601 |
+| `model_provider` / `model_name` / `extraction_run_id` / `source_hash` | string |
+
+**Willingness-to-pay safeguard:** `willingness_to_pay_signal` requires explicit source support (price/fee acceptance, a trade-off, a prior paid workaround, a deposit/commitment, observed purchase behavior, or an explicit refusal at a stated price). Generic interest phrases ("sounds useful", "good idea", "I like it", "maybe", "could be helpful", "I would try it") are downgraded to `concept_reaction` with a flag — never persisted as willingness to pay.
+
+**Single-response guard:** a statement that reads as a cross-merchant generalization ("merchants generally", "most merchants", "X percent of merchants", ...) is **rejected outright**, not persisted — every observation is about the one response it came from; cross-participant patterns are Phase 4's job.
+
+**Concept-test distinction:** for `concept_test` campaigns, a concept reaction never counts as problem validation and "I would try it" never counts as willingness to pay — the same universal WTP safeguard above already enforces this; `campaign_method` is included with every observation response so a consumer can apply this distinction.
+
+## Extraction run object
+
+| Field | Type / enum |
+|---|---|
+| `extraction_run_id` | `MER-...` |
+| `response_id` / `provider` / `model` / `actor_id` | string |
+| `started_at` / `completed_at` | ISO8601 (`completed_at` null while `in_progress`) |
+| `status` | enum: `in_progress`, `completed`, `failed` |
+| `input_source_hash` | string — hash of the response's redacted content at the time of this run |
+| `proposed_count` / `accepted_count` / `rejected_count` | int or `null` (until `completed`) |
+| `safe_error_code` | one of the error codes below, or `null` |
+
+**Never stored:** the full provider payload, the hidden system prompt, raw unredacted input, or the model's full reasoning.
+
+**Idempotency & rerun:** `POST /responses/{id}/extract` with no body (or `{"rerun": false}`) returns the existing `completed` run for the response's current redacted content (identified by `input_source_hash`) if one exists — it does not silently create duplicate observations. `{"rerun": true}` always creates a new run and marks every prior `pending_review`/`active` observation for that response `workflow_status: "superseded"` with `superseded_by_run_id` set to the new run. Superseded observations are never overwritten or deleted; a later phase's approved data is never touched by a rerun.
+
+## Errors (Phase 3 additions)
+
+`extraction_not_permitted` 403 · `consent_denied` 403 · `ai_processing_denied` 403 · `retention_expired` 403 · `redaction_incomplete` 409 · `response_purged` 409 · `transcript_pending_deletion` 409 · `provider_timeout` 504 · `provider_error` 502 · `invalid_provider_output` 502 · `unsupported_excerpt` 400 · `duplicate_extraction` 409 (an extraction is already `in_progress` for this response). None of these ever include a provider response body or a stack trace.
+
+## Audit (Phase 3)
+
+Audited: extraction requested, eligibility denied (with error code), extraction completed (with proposed/accepted/rejected counts), rerun, supersession (with count). **Never audited:** answer text, transcript text, source excerpt content, the provider payload, the prompt text, or token values — safe audit fields are limited to response ID, run ID, counts, source hash, provider/model label, and error code.
+
 ## Error shape
 
 ```json
 { "schema_version": "1.0", "error": { "code": "invalid_request", "message": "..." } }
 ```
 
-`error.code` → HTTP status: `invalid_request` 400 · `unauthorized` 401 · `forbidden` 403 · `not_found` 404 · `conflict` 409 · `internal` 500. Messages never contain stack traces, tokens, or secrets.
+`error.code` → HTTP status: `invalid_request` 400 · `unauthorized` 401 · `forbidden` 403 · `not_found` 404 · `conflict` 409 · `internal` 500 (see the Phase 3 error list above for extraction-specific codes). Messages never contain stack traces, tokens, or secrets.
 
 ## Example requests/responses (synthetic data only)
 
@@ -230,7 +300,7 @@ Authorization: Bearer <reviewer-token>
 
 ## Schema version
 
-`1.1` (Phase 1 + Phase 2 subset). This document will grow additively as later phases land; existing Phase 1/2 fields will not be renamed or removed without a version bump and cross-workstream agreement.
+`1.2` (Phase 1 + Phase 2 + Phase 3 subset). This document will grow additively as later phases land; existing Phase 1/2/3 fields will not be renamed or removed without a version bump and cross-workstream agreement.
 
 ## Streaming
 
@@ -240,4 +310,4 @@ Not applicable — this is a synchronous CRUD API, not a conversational endpoint
 
 ## Future roadmap (NOT implemented — documented for context only, not active)
 
-The following objects/endpoints are planned for later phases and **must not be treated as available**: AI-extracted observations (with mandatory human review — the extraction step itself does not exist yet; only its consent/redaction gate does, see above), evidence candidates, approved merchant findings, campaign-level analysis (n-of-m aggregates built on the Phase 2 denominator counts, never bare percentages), a Part A evidence *proposal* preview (stored in `mv.db`, never an authoritative write — export to `knowledge-base/customer-evidence/merchant-voice-candidates/` will be gated to synthetic data only, reviewer-approved, with Workstream A sign-off), and read-only Copilot tools over **approved, non-suppressed, permission-safe findings only** (a new `merchant_finding` citation type resolving to anonymized internal routes, never identity/contact/raw-transcript data).
+The following objects/endpoints are planned for later phases and **must not be treated as available**: reviewer approval/rejection of observations, duplicate-observation merge, evidence candidates, approved merchant findings, evidence strength bands, campaign-level analysis (n-of-m aggregates built on the Phase 2 denominator counts, never bare percentages), a Part A evidence *proposal* preview (stored in `mv.db`, never an authoritative write — export to `knowledge-base/customer-evidence/merchant-voice-candidates/` will be gated to synthetic data only, reviewer-approved, with Workstream A sign-off), and read-only Copilot tools over **approved, non-suppressed, permission-safe findings only** (a new `merchant_finding` citation type resolving to anonymized internal routes, never identity/contact/raw-transcript data).

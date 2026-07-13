@@ -16,11 +16,20 @@ mv.db/identity.db schema foundation, campaigns, and research guides.
 
 Phase 2 implements: pseudonymous participants (identity kept separately in
 identity.db), consent/privacy gating (including the AI-processing gate
-Phase 3 extraction will have to pass through — no provider is ever called
-here), manual and CSV-bulk response ingestion, text-only transcript
-ingestion, deterministic redaction, and withdrawal/retention/deletion
-(including recoverable transcript deletion). Still not implemented: AI
-extraction, observation review, evidence candidates, approved findings,
-strength analysis, campaign aggregation, Part A proposals, and Copilot
-Merchant Voice tools.
+Phase 3 extraction has to pass through), manual and CSV-bulk response
+ingestion, text-only transcript ingestion, deterministic redaction, and
+withdrawal/retention/deletion (including recoverable transcript deletion).
+
+Phase 3 implements: the canonical extraction eligibility gate (no
+provider call may happen without it passing), provider-backed structured
+extraction using the shared shared.llm.provider abstraction, deterministic
+validation of everything the model proposes (source-excerpt verification,
+quote/paraphrase enforcement, willingness-to-pay/frequency/severity
+safeguards, single-response aggregate-claim rejection), and persistence of
+every proposed observation as pending_review — the model may never approve
+its own output, assign final evidence strength, create a finding, or touch
+Part A/B/impact/assumption state. Still not implemented: reviewer
+approval/rejection, duplicate observation merge, evidence candidates,
+approved findings, strength bands, campaign aggregation, Part A proposals,
+synthetic export, and Copilot Merchant Voice tools.
 """

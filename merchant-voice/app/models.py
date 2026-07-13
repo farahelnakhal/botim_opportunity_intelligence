@@ -250,6 +250,84 @@ def validate_response_input(data):
         raise ValidationError("; ".join(errors))
 
 
+# --- Phase 3: extraction, observations, extraction runs ---------------------
+#
+# The model may PROPOSE observations only. It never sets review_status
+# (always 'pending_review' on creation) or workflow_status beyond what the
+# extraction service itself computes (superseded only via an explicit
+# rerun). See app/extraction_validate.py for the deterministic acceptance
+# rules and app/eligibility.py for the pre-call gate.
+
+OBSERVATION_ID_RE = re.compile(r"^MVO-[A-Za-z0-9-]{1,40}$")
+EXTRACTION_RUN_ID_RE = re.compile(r"^MER-[A-Za-z0-9-]{1,40}$")
+
+OBSERVATION_TYPES = (
+    "pain", "job_to_be_done", "behaviour", "workaround", "frequency", "severity",
+    "payment_rail", "trust_concern", "willingness_to_pay_signal", "switching_barrier",
+    "concept_reaction", "objection", "contradiction", "rejection_condition",
+    "adoption_condition", "follow_up_question",
+)
+CONFIDENCE_LEVELS = ("low", "medium", "high")
+FREQUENCY_VALUES = ("daily", "weekly", "monthly", "every_order", "most_transactions",
+                   "twice_monthly", "recurring", "rarely", "once")
+SEVERITY_VALUES = ("low", "medium", "high")
+
+# review_status is a HUMAN review outcome — Phase 3 never sets anything but
+# pending_review (reviewer approve/reject lands in Phase 4). workflow_status
+# is the observation's own system lifecycle — 'superseded' happens only as
+# an automatic side effect of an explicit extraction rerun, never a human
+# review action.
+REVIEW_STATUSES = ("pending_review",)
+OBSERVATION_WORKFLOW_STATUSES = ("active", "superseded")
+
+EXTRACTION_RUN_STATUSES = ("in_progress", "completed", "failed")
+
+EXTRACTION_ERROR_CODES = (
+    "extraction_not_permitted", "consent_denied", "ai_processing_denied", "retention_expired",
+    "redaction_incomplete", "response_purged", "transcript_pending_deletion", "provider_timeout",
+    "provider_error", "invalid_provider_output", "unsupported_excerpt", "duplicate_extraction",
+    "not_found", "forbidden",
+)
+
+# Deterministic, keyword-based safeguards. These are a FLOOR, not a ceiling —
+# they catch the clearest unsupported cases; they do not claim to catch every
+# unsupported claim a model might produce.
+
+GENERIC_INTEREST_PHRASES = (
+    "sounds useful", "good idea", "i like it", "maybe", "could be helpful", "i would try it",
+)
+WTP_SUPPORT_TRIGGERS = (
+    "willing to pay", "would pay", "pay extra", "pay a fee", "pay for this", "accept a fee",
+    "worth paying", "already pay", "currently pay", "paying for", "deposit", "commit to",
+    "would not pay more than", "wouldn't pay more than", "too expensive", "refuse to pay",
+    "at that price", "at this price", "pay up to", "happy to pay",
+)
+# Each frequency VALUE must be grounded by its OWN specific trigger phrase —
+# not just any frequency-ish word — so a model cannot claim "daily" merely
+# because the source happens to mention "every week" somewhere else.
+FREQUENCY_VALUE_TRIGGERS = {
+    "daily": ("daily", "every day"),
+    "weekly": ("weekly", "every week"),
+    "monthly": ("monthly", "every month"),
+    "every_order": ("every order", "every transaction"),
+    "most_transactions": ("most transactions", "most orders"),
+    "twice_monthly": ("twice a month", "twice monthly"),
+    "recurring": ("recurring", "every time", "each time"),
+    "rarely": ("rarely",),
+    "once": ("once", "one time", "a single time"),
+}
+SEVERITY_TRIGGER_WORDS = (
+    "lost money", "lost revenue", "financial loss", "delayed", "delay of", "missed payment",
+    "blocked", "operational blockage", "escalate", "escalation", "cannot complete",
+    "unable to complete", "critical", "urgent", "severe", "significant loss",
+    "low impact", "medium impact", "high impact",
+)
+AGGREGATE_CLAIM_PHRASES = (
+    "merchants generally", "most merchants", "many merchants", "the market",
+    "this segment broadly", "% of merchants", "percent of merchants",
+)
+
+
 def validate_answer_input(answer, position):
     errors = []
     if not isinstance(answer.get("question_id"), str) or not answer["question_id"]:
