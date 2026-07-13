@@ -125,3 +125,142 @@ def validate_questions_input(questions):
         raise ValidationError("guide requires a non-empty list of questions")
     for i, q in enumerate(questions):
         validate_question_input(q, i)
+
+
+# --- Phase 2: participants, responses, raw answers, ingestion ---------------
+#
+# Merchant identity fields (protected_external_reference and identity-level
+# consent/permission) live only in identity.db — see app/identity.py. A
+# participant's own consent fields may only narrow, never widen, the linked
+# identity's grant (enforced in app/participants.py). No merchant contact
+# data (phone/email) is modeled; `protected_external_reference` is an opaque
+# researcher-assigned reference, not a raw contact channel.
+
+MERCHANT_IDENTITY_ID_RE = re.compile(r"^MID-[A-Za-z0-9-]{1,40}$")
+PARTICIPANT_ID_RE = re.compile(r"^MVP-[A-Za-z0-9-]{1,40}$")
+RESPONSE_ID_RE = re.compile(r"^MVR-[A-Za-z0-9-]{1,40}$")
+ANSWER_ID_RE = re.compile(r"^MVA-[A-Za-z0-9-]{1,40}$")
+CSV_TOKEN_ID_RE = re.compile(r"^MVX-[A-Za-z0-9-]{1,40}$")
+
+CONSENT_STATUSES = ("granted", "withdrawn", "expired", "pending")
+PERMITTED_USE_VALUES = ("internal_research_only", "internal_research_and_product_development")
+PARTICIPANT_WORKFLOW_STATUSES = ("invited", "enrolled", "completed")
+SUPPRESSION_STATUSES = ("none", "suppressed")
+SUPPRESSION_CAUSES = ("withdrawn", "retention_expired", "deletion_request")
+
+RESPONSE_METHODS = CAMPAIGN_METHODS
+INGESTION_SOURCES = ("manual", "csv_import")
+# received: stored, not yet gated for AI eligibility (or gate not yet satisfied)
+# eligible_for_ai_processing: every future-Phase-3 gate currently passes
+# blocked_for_ai: a redaction failure (or explicit per-row override) blocks it
+# suppressed: participant suppressed for any cause — permanently excluded
+PROCESSING_STATUSES = ("received", "eligible_for_ai_processing", "blocked_for_ai", "suppressed")
+DUPLICATE_STATUSES = ("unique", "duplicate")
+# response-level transcript_status (attach/removal lifecycle)
+TRANSCRIPT_STATUSES = ("none", "stored", "pending_deletion", "deleted", "deletion_failed")
+# transcripts.storage_status uses the same vocabulary minus "none"
+TRANSCRIPT_STORAGE_STATUSES = ("stored", "pending_deletion", "deleted", "deletion_failed")
+
+REDACTION_STATUSES = ("pending", "complete", "failed", "not_required")
+
+# Deliberately small, explicit allow-list — no free-text language values.
+SUPPORTED_LANGUAGES = ("en", "ar", "ur", "hi", "fr")
+
+TRANSCRIPT_EXTENSIONS = {"txt": "text/plain", "md": "text/markdown", "vtt": "text/vtt"}
+MAX_TRANSCRIPT_BYTES = 1 * 1024 * 1024
+MAX_CSV_BYTES = 2 * 1024 * 1024
+MAX_ANSWER_CHARS = 20_000
+
+
+def _bool_field(data, key, default=False):
+    val = data.get(key, default)
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str) and val.lower() in ("true", "false", "1", "0"):
+        return val.lower() in ("true", "1")
+    raise ValidationError(f"{key} must be a boolean")
+
+
+def validate_participant_input(data, synthetic_only):
+    errors = []
+    if not isinstance(data.get("campaign_id"), str) or not data["campaign_id"]:
+        errors.append("campaign_id is required")
+    if not isinstance(data.get("merchant_identity_id"), str) and not isinstance(data.get("merchant_identity"), dict):
+        errors.append("either merchant_identity_id or a merchant_identity object is required")
+    segment_id = data.get("segment_id")
+    if segment_id is not None and (not isinstance(segment_id, str) or not SEG_RE.match(segment_id)):
+        errors.append(f"invalid segment_id: {segment_id!r}")
+    for field in ("industry", "company_size", "geography", "respondent_role"):
+        val = data.get(field)
+        if val is not None and not isinstance(val, str):
+            errors.append(f"{field} must be a string or null")
+    consent_status = data.get("consent_status", "pending")
+    if consent_status not in CONSENT_STATUSES:
+        errors.append(f"consent_status must be one of {CONSENT_STATUSES}")
+    permitted_use = data.get("permitted_use")
+    if permitted_use not in PERMITTED_USE_VALUES:
+        errors.append(f"permitted_use must be one of {PERMITTED_USE_VALUES}")
+    classification = data.get("data_classification", "synthetic")
+    if classification not in DATA_CLASSIFICATIONS:
+        errors.append(f"data_classification must be one of {DATA_CLASSIFICATIONS}")
+    if synthetic_only and classification != "synthetic":
+        errors.append("synthetic-only mode is enabled: data_classification must be 'synthetic'")
+    retention_expires_at = data.get("retention_expires_at")
+    if retention_expires_at is not None and not isinstance(retention_expires_at, str):
+        errors.append("retention_expires_at must be a string timestamp or null")
+    if errors:
+        raise ValidationError("; ".join(errors))
+
+
+def validate_merchant_identity_input(data, synthetic_only):
+    errors = []
+    ref = data.get("protected_external_reference")
+    if ref is not None and not isinstance(ref, str):
+        errors.append("protected_external_reference must be a string or null")
+    consent_status = data.get("consent_status", "pending")
+    if consent_status not in CONSENT_STATUSES:
+        errors.append(f"consent_status must be one of {CONSENT_STATUSES}")
+    permitted_use = data.get("permitted_use")
+    if permitted_use not in PERMITTED_USE_VALUES:
+        errors.append(f"permitted_use must be one of {PERMITTED_USE_VALUES}")
+    classification = data.get("data_classification", "synthetic")
+    if classification not in DATA_CLASSIFICATIONS:
+        errors.append(f"data_classification must be one of {DATA_CLASSIFICATIONS}")
+    if synthetic_only and classification != "synthetic":
+        errors.append("synthetic-only mode is enabled: data_classification must be 'synthetic'")
+    if errors:
+        raise ValidationError("; ".join(errors))
+
+
+def validate_response_input(data):
+    errors = []
+    for field in ("campaign_id", "participant_id", "guide_id"):
+        if not isinstance(data.get(field), str) or not data[field]:
+            errors.append(f"{field} is required")
+    method = data.get("method")
+    if method not in RESPONSE_METHODS:
+        errors.append(f"method must be one of {RESPONSE_METHODS}")
+    answers = data.get("answers")
+    if not isinstance(answers, list) or not answers:
+        errors.append("answers must be a non-empty list")
+    submitted_at = data.get("submitted_at")
+    if submitted_at is not None and not isinstance(submitted_at, str):
+        errors.append("submitted_at must be a string timestamp or null")
+    if errors:
+        raise ValidationError("; ".join(errors))
+
+
+def validate_answer_input(answer, position):
+    errors = []
+    if not isinstance(answer.get("question_id"), str) or not answer["question_id"]:
+        errors.append(f"answers[{position}].question_id is required")
+    text = answer.get("answer")
+    if not isinstance(text, str) or not text.strip():
+        errors.append(f"answers[{position}].answer is required")
+    elif len(text) > MAX_ANSWER_CHARS:
+        errors.append(f"answers[{position}].answer exceeds maximum length of {MAX_ANSWER_CHARS} characters")
+    language = answer.get("language", "en")
+    if language not in SUPPORTED_LANGUAGES:
+        errors.append(f"answers[{position}].language must be one of {SUPPORTED_LANGUAGES}")
+    if errors:
+        raise ValidationError("; ".join(errors))

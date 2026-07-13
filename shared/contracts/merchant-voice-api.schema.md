@@ -1,11 +1,11 @@
-# merchant-voice-api.schema — v1.0 (Phase 1: campaigns + guides only)
+# merchant-voice-api.schema — v1.1 (Phase 1 + Phase 2: campaigns, guides, participants, responses, CSV/transcript ingestion, consent & deletion)
 
 > **PROTOTYPE-GRADE AUTHENTICATION. SYNTHETIC-DATA-ONLY. NOT APPROVED FOR REAL MERCHANT DATA. NOT FOR PRODUCTION USE.**
-> Authentication is a static token→role map compared with `hmac.compare_digest` — this is **not** production identity/access management (no user directory, no session revocation, no token rotation, no TLS termination). Real merchant data requires a separate privacy/security review and a hardened deployment before use. All examples in this document use synthetic IDs only (`MVC-TEST-…`, `MVG-TEST-…`).
+> Authentication is a static token→role map compared with `hmac.compare_digest` — this is **not** production identity/access management (no user directory, no session revocation, no token rotation, no TLS termination). Real merchant data requires a separate privacy/security review and a hardened deployment before use. All examples in this document use synthetic IDs only (`MVC-TEST-…`, `MVG-TEST-…`, `MVP-TEST-…`, `MVR-TEST-…`).
 
 **Producer:** `merchant-voice/` (stdlib Python HTTP JSON API, port 8020) · **Consumer:** the future Merchant Voice researcher UI (Farah; scheduled after the current Product Discovery frontend is stable — no frontend work is included in this delivery).
 
-This document covers **only what Phase 1 implements**: research campaigns and versioned research guides. Participants, responses, ingestion, AI extraction, review, evidence candidates, findings, analysis, Part A proposals, and Copilot integration are **not implemented yet** — see the Future Roadmap section at the end for their planned (not active) shape.
+This document covers **what Phase 1 + Phase 2 implement**: research campaigns, versioned research guides, pseudonymous participants (with identity kept in a separate `identity.db`), manual and CSV-bulk response ingestion, text-only transcript ingestion, deterministic redaction, consent/privacy gating, and withdrawal/retention/deletion. AI extraction, human review, evidence candidates, approved findings, campaign-level analysis, Part A proposals, and Copilot integration are **not implemented yet** — see the Future Roadmap section at the end for their planned (not active) shape.
 
 ## Authentication
 
@@ -15,7 +15,7 @@ Every endpoint except `GET /health` requires `Authorization: Bearer <token>`. To
 
 `viewer < researcher < reviewer < admin` (each role includes everything below it unless a rule says otherwise).
 
-## Endpoint authorization matrix (Phase 1)
+## Endpoint authorization matrix (Phase 1 + Phase 2)
 
 | Endpoint | viewer | researcher | reviewer | admin |
 |---|---|---|---|---|
@@ -28,12 +28,23 @@ Every endpoint except `GET /health` requires `Authorization: Bearer <token>`. To
 | `POST /campaigns/{id}/guides`, `GET .../guides`, `GET/PATCH /guides/{id}` (draft) | — (read: ✅) | ✅ | ✅ | ✅ |
 | `POST /guides/{id}/approve` | — | — | ✅ | ✅ |
 | `POST /guides/{id}/new-version` | — | ✅ | ✅ | ✅ |
+| `POST /participants`, `PATCH /participants/{id}` | — (no access) | ✅ | ✅ | ✅ |
+| `GET /campaigns/{id}/participants`, `GET /participants/{id}` | — (no access) | ✅ | ✅ | ✅ |
+| `POST /participants/{id}/withdraw-consent` | — (no access) | ✅ | ✅ | ✅ |
+| `POST /participants/{id}/request-deletion` | — (no access) | — | — | ✅ |
+| `POST /responses`, `GET /responses/{id}`, `GET /campaigns/{id}/responses` | — (no access) | ✅ | ✅ | ✅ |
+| `POST /imports/csv/preview`, `POST /imports/csv/commit` | — (no access) | ✅ | ✅ | ✅ |
+| `POST /responses/{id}/transcript`, `GET .../transcript-metadata` | — (no access) | ✅ | ✅ | ✅ |
+| `POST /maintenance/expire-retention` | — (no access) | — | — | ✅ |
+| `POST /maintenance/retry-transcript-deletions` | — (no access) | — | — | ✅ |
 
 **Self-approval:** a guide cannot be approved by the same actor who created it unless `MV_ALLOW_SELF_APPROVAL=1` — every such approval is audited with `self_approval: true`.
 
+**Viewer has no access at all** to any Phase 2 route (participants/responses/CSV/transcripts/maintenance) — not a filtered view, a hard `403 forbidden`. Viewer access remains limited to Phase 1's read-only campaign/guide endpoints.
+
 ## Synthetic-only mode
 
-`MV_SYNTHETIC_ONLY=1` (default). While enabled, every campaign's `data_classification` must be `"synthetic"`; any other value is rejected with `invalid_request`.
+`MV_SYNTHETIC_ONLY=1` (default). While enabled, every campaign's `data_classification` must be `"synthetic"`; any other value is rejected with `invalid_request`. The same rule applies to merchant identities and participants (Phase 2).
 
 ## Campaign object
 
@@ -84,6 +95,97 @@ Every endpoint except `GET /health` requires `Authorization: Bearer <token>`. To
 | `linked_hypothesis` | optional | yes | string |
 | `position` | required | no | int (order within the guide) |
 
+## Merchant identity (identity.db — never exposed directly)
+
+Merchant identity is the durable, cross-campaign privacy record: `merchant_identity_id`, `protected_external_reference` (an opaque researcher-assigned reference — never a raw phone/email), `consent_status`, `permitted_use`, `quote_permission`, `ai_processing_permission`, `data_classification`, `retention_expires_at`, `deletion_requested_at`, `deleted_at`, `created_at`/`updated_at`. It lives in a **separate database** (`identity.db`) and has **no direct API endpoint** — it is only ever created (optionally) as a side effect of `POST /participants` (via an inline `merchant_identity` object) or referenced by an existing `merchant_identity_id`. No route returns its fields.
+
+## Participant object (mv.db)
+
+| Field | Req? | Nullable | Type / enum |
+|---|---|---|---|
+| `participant_id` | required | no | `MVP-...` |
+| `merchant_identity_id` | required | no | `MID-...` (identity.db reference only — no identity fields are ever joined in) |
+| `campaign_id` | required | no | string |
+| `segment_id` | optional | yes | `SEG-...` |
+| `industry` / `company_size` / `geography` / `respondent_role` | optional | yes | string |
+| `consent_status` | required | no | enum: `granted`, `withdrawn`, `expired`, `pending` |
+| `permitted_use` | required | no | enum: `internal_research_only`, `internal_research_and_product_development` |
+| `quote_permission` / `ai_processing_permission` | optional | no (default `false`) | bool — **may only narrow, never widen,** the linked identity's grant (`invalid_request` otherwise) |
+| `data_classification` | required | no | enum, synthetic-only enforced |
+| `retention_expires_at` | optional | yes | ISO8601 |
+| `workflow_status` | required | no | enum: `invited` → `enrolled` (auto, on first accepted response) → `completed` (manual) |
+| `suppression_status` / `suppression_cause` | required/optional | no/yes | enum `none`\|`suppressed`; cause enum `withdrawn`\|`retention_expired`\|`deletion_request` |
+| `created_by` / `created_at` / `updated_at` | required | no | string / ISO8601 |
+
+`GET /campaigns/{id}/participants` excludes suppressed participants by default (the "normal query" exclusion); `GET /participants/{id}` still returns a suppressed record for compliance lookups. A suppressed participant cannot be edited (`PATCH` → `invalid_request`).
+
+## Response object (mv.db)
+
+| Field | Type / enum |
+|---|---|
+| `response_id` | `MVR-...` |
+| `campaign_id` / `participant_id` / `guide_id` / `guide_version` | string / string / string / int |
+| `method` | enum, must match the campaign's `method` |
+| `ingestion_source` | enum: `manual`, `csv_import` |
+| `submitted_at` | ISO8601 |
+| `processing_status` | enum: `received`, `eligible_for_ai_processing`, `blocked_for_ai`, `suppressed` (see Consent gate below) |
+| `duplicate_status` | enum: `unique`, `duplicate` — duplicates are **flagged, never dropped** |
+| `consent_snapshot` | object — a copy of the participant's consent fields at submission time |
+| `transcript_status` | enum: `none`, `stored`, `pending_deletion`, `deleted`, `deletion_failed` |
+| `answers` | array of raw answer objects (below) |
+
+No response ever becomes evidence directly — Part A proposals (Phase 5, not built) are a separate, human-reviewed step.
+
+## Raw answer object
+
+| Field | Type / enum |
+|---|---|
+| `answer_id` | `MVA-...` |
+| `response_id` / `question_id` | string |
+| `original_answer` | string, or `null` if the participant is suppressed or the content has been purged — this is a **read-time visibility rule**, not necessarily physical deletion (see Suppression below) |
+| `content_visible` | bool — derived at read time; `false` whenever `original_answer` is `null` |
+| `language` | one of `en`, `ar`, `ur`, `hi`, `fr` |
+| `is_direct_quote` | bool — a quote may only be cited if this AND the participant's `quote_permission` are both true |
+| `redaction_status` | enum: `pending`, `complete`, `failed`, `not_required` |
+| `sensitive_data_flags` | array of detected categories (`phone`, `email`, `iban`, `account`, `name`, `entity`) plus `manual_review_required` when present |
+| `content_purged` | bool |
+| `created_at` | ISO8601 |
+
+## Consent / privacy gate (enforced now; nothing calls a provider yet)
+
+Before any future AI extraction (Phase 3) may process a response, ALL of the following must hold — enforced by `app/consent.py`, testable today even though no provider call exists:
+consent is `granted` and not suppressed · retention has not expired · `ai_processing_permission` is `true` · every answer's `redaction_status` is `complete` (a `failed` redaction blocks the whole response as `blocked_for_ai` and never exposes the original text in an error).
+
+## Manual response ingestion
+
+`POST /responses` validates: the campaign is `active`; the participant belongs to the campaign and has valid consent; the guide is `approved`; every `question_id` belongs to that guide version; answer language/length; and duplicate detection — key `(participant_id, question_id, normalized_answer_hash)` — before storing. Redaction runs synchronously on every answer at ingestion time.
+
+## CSV bulk import — `POST /imports/csv/preview` then `POST /imports/csv/commit`
+
+- **Preview writes nothing** to participant/response/answer tables (its only write is a single-use, expiring preview-token bookkeeping row).
+- Required columns: `participant_ref`, `question_id`, `answer`. Optional: `submitted_at`, `language`, `respondent_role`, `segment_id`, `quote_permission`, `ai_processing_permission`.
+- `participant_ref` must match an **existing** `participant_id` in the campaign — CSV import never creates participants or merchant identities.
+- Max size 2 MB, UTF-8 only. A leading `=`, `+`, `-`, or `@` in any cell is neutralized (prefixed with `'`) — defense against spreadsheet formula injection.
+- The preview token binds file hash + `campaign_id` + `guide_id` + actor + expiry (default 15 minutes, `MV_CSV_PREVIEW_TTL_S`). Commit re-validates everything from scratch, rejects a changed file or a mismatched/expired/already-used token (`409 conflict`), and writes all rows in **one transaction** (partial failure → nothing is written).
+- Row-level errors and duplicates are returned in the response, never silently dropped.
+
+## Transcript ingestion — `POST /responses/{id}/transcript`, `GET .../transcript-metadata`
+
+Text only: `.txt` / `.md` / `.vtt`, max 1 MB, UTF-8, extension+declared content-type must match. The stored filename is generated **only** from the already-validated `response_id` (`{response_id}.{extension}`) — any client-supplied filename is never read or retained. The transcript directory is not web-served (this service has no static file handler). The database stores metadata only (extension, content type, language, size, storage status, speaker map) — transcript text is never returned by any endpoint, logged, or placed in an audit event. Re-`POST` replaces the stored transcript and speaker map (researcher-editable).
+
+## Suppression, withdrawal, retention & deletion
+
+`POST /participants/{id}/withdraw-consent` (researcher+), `POST /participants/{id}/request-deletion` (admin only), and the maintenance sweep `POST /maintenance/expire-retention` (admin only) all funnel through one routine (`suppress_participant`):
+
+- **`withdrawn`**: quote permission removed immediately; raw content is **not** deleted from storage but every read path returns it as suppressed (`original_answer: null`, `content_visible: false`) from that point on.
+- **`retention_expired` / `deletion_request`**: raw answer content is purged (`original_answer` set to `null`, `content_purged: true`) and any attached transcript is scheduled for deletion.
+- Transcript deletion is **not** claimed atomic with the SQLite commit: the DB transaction (suppress + purge + mark `pending_deletion`) commits first; only then is filesystem deletion attempted. A failure leaves the transcript `pending_deletion`/`deletion_failed` (never claims success) for a later `POST /maintenance/retry-transcript-deletions` (admin only) to retry. No transcript content or file path ever appears in an audit event or error message.
+- Every one of these operations is audited (actor/action/object/counts only — never raw content).
+
+## Denominator counts (foundation only — no endpoint yet)
+
+`app/counting.py` computes, per campaign: `invited_count`, `enrolled_count`, `submitted_response_count`, `valid_participant_count`, `included_participant_count`, `excluded_or_suppressed_count` — six explicitly-defined counts, deliberately **not** a single ambiguous `sample_size`. Not yet exposed via an endpoint; campaign-level analysis (Phase 4) will consume these.
+
 ## Error shape
 
 ```json
@@ -128,7 +230,7 @@ Authorization: Bearer <reviewer-token>
 
 ## Schema version
 
-`1.0` (Phase 1 subset). This document will grow additively as later phases land; existing Phase 1 fields will not be renamed or removed without a version bump and cross-workstream agreement.
+`1.1` (Phase 1 + Phase 2 subset). This document will grow additively as later phases land; existing Phase 1/2 fields will not be renamed or removed without a version bump and cross-workstream agreement.
 
 ## Streaming
 
@@ -138,4 +240,4 @@ Not applicable — this is a synchronous CRUD API, not a conversational endpoint
 
 ## Future roadmap (NOT implemented — documented for context only, not active)
 
-The following objects/endpoints are planned for later phases and **must not be treated as available**: participants (pseudonymous, consent-tracked), merchant responses (manual/CSV/transcript ingestion), raw answers, AI-extracted observations (with human review), evidence candidates, approved merchant findings, campaign-level analysis (n-of-m aggregates, never bare percentages), a Part A evidence *proposal* preview (stored in `mv.db`, never an authoritative write — export to `knowledge-base/customer-evidence/merchant-voice-candidates/` will be gated to synthetic data only, reviewer-approved, with Workstream A sign-off), and read-only Copilot tools over **approved, non-suppressed, permission-safe findings only** (a new `merchant_finding` citation type resolving to anonymized internal routes, never identity/contact/raw-transcript data).
+The following objects/endpoints are planned for later phases and **must not be treated as available**: AI-extracted observations (with mandatory human review — the extraction step itself does not exist yet; only its consent/redaction gate does, see above), evidence candidates, approved merchant findings, campaign-level analysis (n-of-m aggregates built on the Phase 2 denominator counts, never bare percentages), a Part A evidence *proposal* preview (stored in `mv.db`, never an authoritative write — export to `knowledge-base/customer-evidence/merchant-voice-candidates/` will be gated to synthetic data only, reviewer-approved, with Workstream A sign-off), and read-only Copilot tools over **approved, non-suppressed, permission-safe findings only** (a new `merchant_finding` citation type resolving to anonymized internal routes, never identity/contact/raw-transcript data).

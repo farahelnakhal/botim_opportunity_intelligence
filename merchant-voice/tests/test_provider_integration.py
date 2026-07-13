@@ -59,6 +59,19 @@ class ProviderReuseTests(unittest.TestCase):
         finally:
             socket.socket.connect = original_connect
 
+    def test_phase2_modules_never_call_the_provider(self):
+        # Phase 2 (participants/consent/responses/csv/transcripts/redaction/
+        # suppression) implements the AI-processing consent GATE only —
+        # Phase 3 extraction, which would actually call a provider, is not
+        # built yet. None of these modules may reference the provider layer.
+        phase2_modules = ("participants.py", "consent.py", "responses.py", "csv_import.py",
+                          "transcripts.py", "redaction.py", "suppression.py", "identity.py", "counting.py")
+        for name in phase2_modules:
+            src = (BACKEND / "app" / name).read_text(encoding="utf-8")
+            self.assertNotIn("make_provider", src, f"{name} must not call the provider layer")
+            self.assertNotIn("shared.llm", src, f"{name} must not import the provider layer")
+            self.assertNotIn("ANTHROPIC_API_KEY", src, f"{name} must not reference provider credentials")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

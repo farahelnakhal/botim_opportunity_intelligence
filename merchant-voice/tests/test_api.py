@@ -17,21 +17,22 @@ sys.path.insert(0, str(REPO))
 
 from app.api import Api  # noqa: E402
 from app.config import Config  # noqa: E402
-from app.db import connect_mv  # noqa: E402
+from app.db import connect_identity, connect_mv  # noqa: E402
 
 TOKENS = "admin:tok-admin:admin,researcher:tok-res:researcher,reviewer:tok-rev:reviewer,viewer:tok-view:viewer"
 
 
 def make_api(tmp_dir):
-    config = Config(env={"MV_TOKENS": TOKENS})
+    config = Config(env={"MV_TOKENS": TOKENS, "MV_TRANSCRIPT_DIR": str(Path(tmp_dir) / "transcripts")})
     conn = connect_mv(Path(tmp_dir) / "mv.db")
+    identity_conn = connect_identity(Path(tmp_dir) / "identity.db")
     counter = {"n": 0}
 
     def now():
         counter["n"] += 1
         return f"2026-01-01T00:00:{counter['n']:02d}Z"
 
-    return Api(config, conn, now), config
+    return Api(config, conn, identity_conn, now), config
 
 
 class ApiUnitTests(unittest.TestCase):
@@ -106,12 +107,11 @@ class HttpServerTests(unittest.TestCase):
         self.mv_server = mv_server
         config = Config(env={"MV_TOKENS": TOKENS, "MV_HOST": "127.0.0.1", "MV_PORT": "0",
                              "MV_DB_PATH": str(Path(self.tmp.name) / "mv.db"),
-                             "MV_IDENTITY_DB_PATH": str(Path(self.tmp.name) / "identity.db")})
+                             "MV_IDENTITY_DB_PATH": str(Path(self.tmp.name) / "identity.db"),
+                             "MV_TRANSCRIPT_DIR": str(Path(self.tmp.name) / "transcripts")})
         conn = connect_mv(config.db_path)
-        from app.db import connect_identity
-        connect_identity(config.identity_db_path)
-        import time
-        api = Api(config, conn, lambda: "2026-01-01T00:00:00Z")
+        identity_conn = connect_identity(config.identity_db_path)
+        api = Api(config, conn, identity_conn, lambda: "2026-01-01T00:00:00Z")
         import threading as th
         self.server = mv_server.ThreadingHTTPServer(
             (config.host, config.port), mv_server.build_handler(api, config, th.BoundedSemaphore(4)))

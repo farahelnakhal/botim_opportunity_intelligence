@@ -52,6 +52,8 @@ class Config:
         self.allow_self_approval = _bool(e, "MV_ALLOW_SELF_APPROVAL", default=False)
         self.synthetic_only = _bool(e, "MV_SYNTHETIC_ONLY", default=True)
 
+        self.csv_preview_ttl_s = _int(e, "MV_CSV_PREVIEW_TTL_S", 900)
+
     @staticmethod
     def _parse_tokens(raw):
         """Returns {token: {"role": role, "label": label}}. Never logs values."""

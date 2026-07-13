@@ -102,8 +102,8 @@ def main():
                  "'admin:REPLACE_ME:admin'). This service requires mandatory "
                  "token authentication even on localhost.")
     mv_conn = connect_mv(config.db_path)
-    connect_identity(config.identity_db_path)  # Phase 1: schema only, unused otherwise
-    api = Api(config, mv_conn, _now)
+    identity_conn = connect_identity(config.identity_db_path)
+    api = Api(config, mv_conn, identity_conn, _now)
     semaphore = threading.BoundedSemaphore(config.max_concurrency)
     server = ThreadingHTTPServer((config.host, config.port), build_handler(api, config, semaphore))
     print(f"merchant-voice backend listening on http://{config.host}:{config.port} "

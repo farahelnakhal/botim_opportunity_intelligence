@@ -3,7 +3,23 @@ WAL mode, explicit transactions, parameterized SQL only.
 
 Phase 1 tables:
   mv.db:       schema_meta, campaigns, guides, guide_questions, audit_events
-  identity.db: schema_meta   (participant/identity tables land in Phase 2)
+  identity.db: schema_meta
+
+Phase 2 tables:
+  mv.db:       participants, responses, raw_answers, transcripts,
+               csv_import_tokens
+  identity.db: merchant_identity, audit_events (identity.db gets its own
+               append-only audit log — never joined with mv.db's — so
+               identity operations are traceable without mixing the two
+               stores; the shared `app.audit` module works against either
+               connection since it only requires an `audit_events` table)
+
+Merchant identity data (protected_external_reference, identity-level
+consent/permission fields) lives ONLY in identity.db. Participants in
+mv.db carry a `merchant_identity_id` reference and their own per-campaign
+consent snapshot, but never identity.db's other fields — see app/models.py
+and app/participants.py for the enforcement that a participant's consent
+scope can only narrow, never widen, the identity-level grant.
 """
 
 import json
@@ -77,10 +93,119 @@ MV_MIGRATIONS = [
             self_approval INTEGER NOT NULL DEFAULT 0
         )""",
     ]),
+    (2, [
+        """CREATE TABLE IF NOT EXISTS participants (
+            participant_id TEXT PRIMARY KEY,
+            merchant_identity_id TEXT NOT NULL,
+            campaign_id TEXT NOT NULL REFERENCES campaigns(campaign_id),
+            segment_id TEXT,
+            industry TEXT,
+            company_size TEXT,
+            geography TEXT,
+            respondent_role TEXT,
+            consent_status TEXT NOT NULL,
+            permitted_use TEXT NOT NULL,
+            quote_permission INTEGER NOT NULL DEFAULT 0,
+            ai_processing_permission INTEGER NOT NULL DEFAULT 0,
+            data_classification TEXT NOT NULL,
+            retention_expires_at TEXT,
+            workflow_status TEXT NOT NULL,
+            suppression_status TEXT NOT NULL DEFAULT 'none',
+            suppression_cause TEXT,
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS responses (
+            response_id TEXT PRIMARY KEY,
+            campaign_id TEXT NOT NULL REFERENCES campaigns(campaign_id),
+            participant_id TEXT NOT NULL REFERENCES participants(participant_id),
+            guide_id TEXT NOT NULL REFERENCES guides(guide_id),
+            guide_version INTEGER NOT NULL,
+            method TEXT NOT NULL,
+            ingestion_source TEXT NOT NULL,
+            submitted_at TEXT NOT NULL,
+            processing_status TEXT NOT NULL,
+            duplicate_status TEXT NOT NULL,
+            consent_snapshot_json TEXT NOT NULL,
+            transcript_status TEXT NOT NULL DEFAULT 'none',
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS raw_answers (
+            answer_id TEXT PRIMARY KEY,
+            response_id TEXT NOT NULL REFERENCES responses(response_id),
+            question_id TEXT NOT NULL,
+            original_answer TEXT,
+            language TEXT NOT NULL,
+            transcript_location TEXT,
+            is_direct_quote INTEGER NOT NULL DEFAULT 0,
+            redaction_status TEXT NOT NULL,
+            sensitive_data_flags_json TEXT NOT NULL,
+            content_purged INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            normalized_answer_hash TEXT NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS transcripts (
+            response_id TEXT PRIMARY KEY REFERENCES responses(response_id),
+            extension TEXT NOT NULL,
+            content_type TEXT,
+            language TEXT,
+            size_bytes INTEGER NOT NULL,
+            storage_status TEXT NOT NULL,
+            speaker_map_json TEXT NOT NULL DEFAULT '{}',
+            storage_filename TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS csv_import_tokens (
+            token_id TEXT PRIMARY KEY,
+            file_hash TEXT NOT NULL,
+            campaign_id TEXT NOT NULL,
+            guide_id TEXT NOT NULL,
+            actor_label TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            consumed_at TEXT,
+            created_at TEXT NOT NULL
+        )""",
+    ]),
 ]
 
 IDENTITY_MIGRATIONS = [
     (1, ["CREATE TABLE IF NOT EXISTS schema_meta (version INTEGER NOT NULL)"]),
+    (2, [
+        """CREATE TABLE IF NOT EXISTS merchant_identity (
+            merchant_identity_id TEXT PRIMARY KEY,
+            protected_external_reference TEXT,
+            consent_status TEXT NOT NULL,
+            permitted_use TEXT NOT NULL,
+            quote_permission INTEGER NOT NULL DEFAULT 0,
+            ai_processing_permission INTEGER NOT NULL DEFAULT 0,
+            data_classification TEXT NOT NULL,
+            retention_expires_at TEXT,
+            deletion_requested_at TEXT,
+            deleted_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )""",
+        # Same shape as mv.db's audit_events — identity.db keeps its own,
+        # separate append-only log (never joined with mv.db).
+        """CREATE TABLE IF NOT EXISTS audit_events (
+            audit_id TEXT PRIMARY KEY,
+            actor_id TEXT NOT NULL,
+            actor_role TEXT NOT NULL,
+            action TEXT NOT NULL,
+            object_type TEXT NOT NULL,
+            object_id TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            reason TEXT,
+            before_hash TEXT,
+            after_hash TEXT,
+            safe_diff_json TEXT,
+            self_approval INTEGER NOT NULL DEFAULT 0
+        )""",
+    ]),
 ]
 
 
