@@ -63,6 +63,8 @@ export interface Opportunity {
   is_archived: boolean;
   impact_history: Record<string, unknown>[];
   brief_envelope: Record<string, any> | null;
+  generated?: boolean; // true = an on-demand AI analysis, not a committed KB opportunity
+  engine?: "claude" | "scaffold";
 }
 
 export interface FeedItem {
@@ -187,6 +189,7 @@ export type BlockType =
   | "decision_journal"
   | "calibration"
   | "evidence"
+  | "research_plan"
   | "banner"
   | "empty";
 
@@ -203,4 +206,5 @@ export interface ChatResponse {
   text: string;
   blocks: ChatBlock[];
   decision_banner: string;
+  generated_opportunity?: Opportunity | null;
 }

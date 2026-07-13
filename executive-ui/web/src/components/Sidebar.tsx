@@ -11,7 +11,7 @@ const WORKSPACE_NAV: { key: string; label: string; icon: IconName; tab?: string 
 
 export default function Sidebar() {
   const {
-    projects, view, activeProjectId, theme, toggleTheme, sidebarOpen,
+    projects, generated, view, activeProjectId, theme, toggleTheme, sidebarOpen,
     goHome, goUpdates, openProject,
   } = useApp();
 
@@ -26,8 +26,27 @@ export default function Sidebar() {
       </div>
 
       <button className="new-project-btn" onClick={goHome}>
-        <Icon name="plus" size={16} /> New conversation
+        <Icon name="plus" size={16} /> New analysis
       </button>
+
+      {generated.length > 0 && (
+        <>
+          <div className="nav-section-label">Your analyses</div>
+          <div className="nav-list">
+            {generated.map((p) => (
+              <button
+                key={p.id}
+                className={`nav-item${view === "project" && activeProjectId === p.id ? " active" : ""}`}
+                onClick={() => openProject(p.id)}
+                title={`${p.id} — ${p.name} (AI-generated, unvalidated)`}
+              >
+                <Icon name="star" />
+                {p.name}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       <div className="nav-section-label">Opportunities</div>
       <div className="nav-list">

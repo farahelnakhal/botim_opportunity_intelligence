@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { api } from "./lib/api";
-import type { ChatBlock, Opportunity, OverviewPayload } from "./types";
+import type { ChatBlock, ChatResponse, Opportunity, OverviewPayload } from "./types";
 
 export type View = "home" | "updates" | "project";
 export type Tab =
@@ -22,7 +22,8 @@ interface AppState {
   loading: boolean;
   error: string | null;
   overview: OverviewPayload | null;
-  projects: Opportunity[]; // real opportunities presented as "projects"
+  projects: Opportunity[]; // committed KB opportunities
+  generated: Opportunity[]; // on-demand AI analyses created this session
 
   view: View;
   activeProjectId: string | null;
@@ -41,6 +42,7 @@ interface AppState {
   openDrawer: (id: string) => void;
   closeDrawer: () => void;
   send: (message: string, projectId?: string) => Promise<void>;
+  analyzeNew: (prompt: string) => Promise<void>; // start a fresh analysis of ANY opportunity
 }
 
 const Ctx = createContext<AppState | null>(null);
@@ -59,6 +61,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [conversations, setConversations] = useState<Record<string, Message[]>>({});
   const [drawerOppId, setDrawerOppId] = useState<string | null>(null);
+  const [generated, setGenerated] = useState<Opportunity[]>([]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -108,49 +111,75 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const openDrawer = useCallback((id: string) => setDrawerOppId(id), []);
   const closeDrawer = useCallback(() => setDrawerOppId(null), []);
 
+  // Shared: append the user turn + a pending assistant turn, reveal progress
+  // stages one at a time, then land the final response.
+  const deliver = useCallback(async (pid: string, userText: string, resp: ChatResponse) => {
+    const userMsg: Message = { id: nextId(), role: "user", text: userText };
+    const pendingId = nextId();
+    const pending: Message = { id: pendingId, role: "assistant", text: "", streaming: true, stages: [] };
+    setConversations((c) => ({ ...c, [pid]: [...(c[pid] ?? []), userMsg, pending] }));
+    for (let i = 1; i <= resp.stages.length; i++) {
+      await new Promise((r) => setTimeout(r, 240));
+      setConversations((c) => ({
+        ...c,
+        [pid]: (c[pid] ?? []).map((m) => (m.id === pendingId ? { ...m, stages: resp.stages.slice(0, i) } : m)),
+      }));
+    }
+    await new Promise((r) => setTimeout(r, 200));
+    setConversations((c) => ({
+      ...c,
+      [pid]: (c[pid] ?? []).map((m) =>
+        m.id === pendingId ? { ...m, text: resp.text, blocks: resp.blocks, stages: resp.stages, streaming: false } : m),
+    }));
+  }, []);
+
+  const isGenerated = useCallback((id: string | null) => !!id && generated.some((g) => g.id === id), [generated]);
+
   const send = useCallback(
     async (message: string, projectId?: string) => {
       const pid = projectId ?? activeProjectId ?? overview?.opportunities[0]?.id ?? "portfolio";
       if (!activeProjectId) setActiveProjectId(pid);
       setView("project");
       setActiveTab("chat");
-
-      const userMsg: Message = { id: nextId(), role: "user", text: message };
-      const pendingId = nextId();
-      const pending: Message = { id: pendingId, role: "assistant", text: "", streaming: true, stages: [] };
-      setConversations((c) => ({ ...c, [pid]: [...(c[pid] ?? []), userMsg, pending] }));
-
-      const resp = await api.chat(message);
-
-      // reveal progress stages one at a time for the long-running-task feel
-      for (let i = 1; i <= resp.stages.length; i++) {
-        await new Promise((r) => setTimeout(r, 260));
-        setConversations((c) => ({
-          ...c,
-          [pid]: (c[pid] ?? []).map((m) =>
-            m.id === pendingId ? { ...m, stages: resp.stages.slice(0, i) } : m,
-          ),
-        }));
+      // Follow-ups inside a generated analysis keep analysing that topic in context;
+      // follow-ups inside a committed opportunity use the read-only router.
+      if (isGenerated(pid)) {
+        const topic = generated.find((g) => g.id === pid)?.name ?? "";
+        const resp = await api.analyze(`${topic}. Follow-up: ${message}`);
+        if (resp.generated_opportunity) {
+          const updated = { ...resp.generated_opportunity, id: pid, name: topic };
+          setGenerated((g) => g.map((x) => (x.id === pid ? updated : x)));
+          resp.blocks = resp.blocks.map((b) => (b.type === "opportunity" || b.type === "scorecard") ? { ...b, opportunity: updated } : b);
+        }
+        await deliver(pid, message, resp);
+        return;
       }
-      await new Promise((r) => setTimeout(r, 200));
-      setConversations((c) => ({
-        ...c,
-        [pid]: (c[pid] ?? []).map((m) =>
-          m.id === pendingId
-            ? { ...m, text: resp.text, blocks: resp.blocks, stages: resp.stages, streaming: false }
-            : m,
-        ),
-      }));
+      await deliver(pid, message, await api.chat(message));
     },
-    [activeProjectId, overview],
+    [activeProjectId, overview, generated, isGenerated, deliver],
+  );
+
+  const analyzeNew = useCallback(
+    async (prompt: string) => {
+      const resp = await api.analyze(prompt);
+      const opp = resp.generated_opportunity;
+      const pid = opp?.id ?? `GEN-${Date.now()}`;
+      if (opp) setGenerated((g) => (g.some((x) => x.id === opp.id) ? g : [opp, ...g]));
+      setActiveProjectId(pid);
+      setActiveTab("chat");
+      setView("project");
+      setSidebarOpen(false);
+      await deliver(pid, prompt, resp);
+    },
+    [deliver],
   );
 
   const value: AppState = {
     theme, toggleTheme,
-    loading, error, overview, projects,
+    loading, error, overview, projects, generated,
     view, activeProjectId, activeTab, sidebarOpen,
     conversations, drawerOppId,
-    goHome, goUpdates, openProject, setTab, setSidebarOpen, openDrawer, closeDrawer, send,
+    goHome, goUpdates, openProject, setTab, setSidebarOpen, openDrawer, closeDrawer, send, analyzeNew,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

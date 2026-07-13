@@ -21,11 +21,11 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 try:
-    from . import router, serialize
+    from . import generate, router, serialize
 except ImportError:  # run directly as a script (python3 executive-ui/api/server.py)
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from api import router, serialize
+    from api import generate, router, serialize
 
 UI_DIR = Path(__file__).resolve().parents[1]
 WEB_DIST = UI_DIR / "web" / "dist"
@@ -99,6 +99,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/chat":
                 msg = (query.get("q") or query.get("message") or [""])[0]
                 return self._json(router.route(msg, root))
+            if path == "/analyze":
+                msg = (query.get("q") or query.get("message") or [""])[0]
+                return self._json(generate.analyze(msg, root))
             return self._error(404, f"unknown endpoint {path}")
         except Exception as exc:  # never leak a stack trace to the client
             return self._error(500, f"{type(exc).__name__}: {exc}")

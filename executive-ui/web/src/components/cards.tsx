@@ -284,6 +284,35 @@ export function DecisionJournalEntry({ data }: { data: Prediction }) {
   );
 }
 
+/* ---------------- Research plan (generated opportunities) ---------------- */
+export function ResearchPlanCard({ data }: { data: { questions: string[]; gaps: string[] } }) {
+  return (
+    <>
+      {data.gaps?.length > 0 && (
+        <Collapsible title="Evidence gaps to close before building" icon="alert" defaultOpen>
+          <ul className="evidence-list">
+            {data.gaps.map((g, i) => (
+              <li key={i}><span className="dot weak" /><span>{g}</span></li>
+            ))}
+          </ul>
+        </Collapsible>
+      )}
+      {data.questions?.length > 0 && (
+        <Collapsible title="Customer-research plan (non-leading interview questions)" icon="users" defaultOpen>
+          <div className="survey-q-list">
+            {data.questions.map((q, i) => (
+              <div className="survey-q-row" key={i}>
+                <span className="survey-q-num">{String(i + 1).padStart(2, "0")}</span>
+                <span className="survey-q-text">{q}</span>
+              </div>
+            ))}
+          </div>
+        </Collapsible>
+      )}
+    </>
+  );
+}
+
 /* ---------------- Evidence ---------------- */
 export function EvidenceCard({ data }: { data: EvidenceRef }) {
   return (

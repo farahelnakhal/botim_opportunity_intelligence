@@ -20,8 +20,8 @@ function Section({ title, defaultOpen = false, children }: { title: string; defa
 }
 
 export default function Drawer() {
-  const { drawerOppId, closeDrawer, projects, overview } = useApp();
-  const opp = projects.find((p) => p.id === drawerOppId) ?? null;
+  const { drawerOppId, closeDrawer, projects, generated, overview } = useApp();
+  const opp = [...generated, ...projects].find((p) => p.id === drawerOppId) ?? null;
   const [comm, setComm] = useState<CommercialModel | null>(null);
 
   useEffect(() => {

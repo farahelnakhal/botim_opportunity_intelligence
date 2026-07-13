@@ -18,8 +18,8 @@ const TABS: { key: Tab; label: string }[] = [
 ];
 
 export default function ProjectWorkspace() {
-  const { projects, activeProjectId, activeTab, setTab } = useApp();
-  const opp = projects.find((p) => p.id === activeProjectId) ?? projects[0];
+  const { projects, generated, activeProjectId, activeTab, setTab } = useApp();
+  const opp = [...generated, ...projects].find((p) => p.id === activeProjectId) ?? projects[0];
   if (!opp) return null;
 
   const status = statusFromClassification(opp.classification);

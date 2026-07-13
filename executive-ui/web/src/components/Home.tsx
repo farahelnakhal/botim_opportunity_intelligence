@@ -4,12 +4,12 @@ import { tagLabel } from "../lib/format";
 import Icon from "./Icon";
 
 const EXAMPLE_PROMPTS = [
-  "Why is OPP-010 the leading opportunity?",
-  "Show the commercial model for OPP-010",
-  "What validation experiments are planned?",
-  "Summarize this week's monitoring signals",
-  "Generate an executive brief",
-  "What are the weakest assumptions across the portfolio?",
+  "Invoice financing for UAE logistics SMEs",
+  "Pharmacy working-capital lending in Saudi Arabia",
+  "Instant settlement for grocery merchants in Egypt",
+  "Cross-border payroll for GCC construction firms",
+  "BNPL for private-school tuition in the UAE",
+  "Embedded insurance for gig-economy drivers",
 ];
 
 function greeting(): string {
@@ -20,13 +20,13 @@ function greeting(): string {
 }
 
 export default function Home() {
-  const { projects, openProject, send } = useApp();
+  const { projects, openProject, analyzeNew } = useApp();
   const [val, setVal] = useState("");
 
   const submit = (text?: string) => {
     const t = (text ?? val).trim();
     if (!t) return;
-    send(t);
+    analyzeNew(t); // a new conversation runs a fresh analysis of whatever you describe
     setVal("");
   };
 
@@ -34,13 +34,13 @@ export default function Home() {
     <section className="view" id="view-home">
       <div className="home-wrap">
         <div className="home-greeting">{greeting()}</div>
-        <div className="home-sub">What are we figuring out today?</div>
+        <div className="home-sub">Describe any market or product idea — I'll run a fresh opportunity analysis.</div>
 
         <div className="home-input-card">
           <textarea
             rows={1}
             value={val}
-            placeholder="Ask about an opportunity, evaluate the commercial model, or generate a briefing…"
+            placeholder="e.g. Invoice financing for UAE logistics SMEs waiting 45 days to get paid…"
             onChange={(e) => {
               setVal(e.target.value);
               e.target.style.height = "auto";

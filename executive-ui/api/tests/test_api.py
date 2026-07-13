@@ -16,7 +16,7 @@ for p in (str(API_PKG_PARENT),):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from api import router, serialize, server  # noqa: E402
+from api import generate, router, serialize, server  # noqa: E402
 
 
 class TestSerialize(unittest.TestCase):
@@ -90,6 +90,50 @@ class TestRouter(unittest.TestCase):
             r = router.route(q, str(REPO))
             self.assertIn("No product or build decision", r["decision_banner"])
             self.assertTrue(r["stages"] and r["stages"][-1] == "Finished")
+
+
+class TestGenerate(unittest.TestCase):
+    """On-demand analysis of an arbitrary opportunity is honest by construction."""
+
+    @classmethod
+    def setUpClass(cls):
+        # force the deterministic offline path so the test never hits the network
+        cls._saved = generate.API_KEY
+        generate.API_KEY = ""
+        cls.r = generate.analyze("Invoice financing for UAE logistics SMEs waiting 45 days")
+
+    @classmethod
+    def tearDownClass(cls):
+        generate.API_KEY = cls._saved
+
+    def test_produces_a_generated_opportunity(self):
+        o = self.r["generated_opportunity"]
+        self.assertTrue(o["generated"])
+        self.assertTrue(o["id"].startswith("GEN-"))
+        self.assertEqual(len(o["factors"]), 17)
+
+    def test_all_dimensions_are_assumptions(self):
+        o = self.r["generated_opportunity"]
+        self.assertTrue(all(f["assumption"] for f in o["factors"]))
+        self.assertEqual(o["assumption_count"], 17)
+
+    def test_never_strong_and_low_confidence(self):
+        o = self.r["generated_opportunity"]
+        self.assertIn(o["classification"], ("promising", "weak"))  # engine caps: never 'strong'
+        self.assertEqual(o["confidence"], "low")
+
+    def test_engine_scores_it_not_the_caller(self):
+        o = self.r["generated_opportunity"]
+        self.assertEqual(o["raw_score"], sum(f["score"] for f in o["factors"]))
+
+    def test_carries_research_plan_and_banner(self):
+        types = [b["type"] for b in self.r["blocks"]]
+        self.assertIn("research_plan", types)
+        self.assertIn("banner", types)
+        self.assertIn("No product or build decision", self.r["decision_banner"])
+
+    def test_offline_engine_labelled(self):
+        self.assertEqual(self.r["generated_opportunity"]["engine"], "scaffold")
 
 
 class TestServerReadOnly(unittest.TestCase):
