@@ -20,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from monitoring_engine import adapter_regulator  # noqa: E402
 from monitoring_engine import adapters as adapters_mod  # noqa: E402
 from monitoring_engine import alerts as alerts_mod  # noqa: E402
 from monitoring_engine import digest as digest_mod  # noqa: E402
@@ -71,6 +72,25 @@ def cmd_scan(args):
     intake_events, candidate_stubs = adapters_mod.process_intake(
         root / MON, existing + created, _week(), today, _entity_ids(root))
     created += intake_events
+
+    # Automated network adapters are opt-in (never run in the gate).
+    if args.adapters:
+        requested = [a.strip() for a in args.adapters.split(",") if a.strip()]
+        entities = json.loads((root / MON / "entities.json").read_text(encoding="utf-8"))["entities"]
+        for ent in entities:
+            if ent.get("status") != "active":
+                continue
+            if "regulator-watch" in requested and any(
+                    s.get("adapter") == "regulator-watch" for s in ent.get("sources", [])):
+                obs, status = adapter_regulator.fetch(ent, since=today)
+                if status.startswith("error") or status == "no-source":
+                    print(f"  regulator-watch [{ent['id']}]: {status}")
+                reg_events = adapter_regulator.observations_to_events(
+                    obs, existing + created, today, _week())
+                created += reg_events
+                for e in reg_events:
+                    if e.get("scores", {}).get("relevance", 0) >= 3:
+                        print(f"  regulator-watch [{ent['id']}]: {e['id']} {e['title'][:70]}")
     for fname, md in candidate_stubs:
         cand = root / MON / "evidence-candidates" / fname
         cand.write_text(md, encoding="utf-8")
@@ -279,6 +299,8 @@ def main(argv=None):
 
     p = sub.add_parser("scan", help="diff the KB against last state (or a git ref) and emit events")
     p.add_argument("--from-ref", help="build the baseline from a git ref instead of the state file")
+    p.add_argument("--adapters", help="comma-separated network adapters to run (opt-in; e.g. regulator-watch). "
+                                      "Off by default so scans and the gate never touch the network.")
 
     p = sub.add_parser("events", help="list stored events")
     p.add_argument("--tier", choices=list(TIERS))

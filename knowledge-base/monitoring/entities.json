@@ -27,7 +27,10 @@
      "notes": "IP-2026-002: $65M pre-A; supplier-payment financing"},
     {"id": "ENT-cbuae", "kind": "regulator", "name": "Central Bank of the UAE", "region": "UAE",
      "ref": null, "categories": ["banking-access", "regulatory"],
-     "sources": [], "status": "active",
-     "notes": "Licences/regulatory announcements; highest-precision source class when P1 adapters land"}
+     "sources": [
+       {"adapter": "regulator-watch", "url": "https://www.centralbank.ae/en/news/rss", "cadence": "daily",
+        "note": "CBUAE news feed; confirm exact feed URL on first live run — adapter degrades gracefully if the URL 404s"}
+     ], "status": "active",
+     "notes": "Licences/regulatory announcements; highest-precision source class. regulator-watch adapter (P1) configured — run with `monitor.py scan --adapters regulator-watch`"}
   ]
 }

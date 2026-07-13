@@ -11,6 +11,7 @@ architecture of opportunity_engine:
 - alerts: alert ledger + instant-alert outbox (file-based transport)
 - summaries: AI-summary schema validation (12 sections + flags block)
 - adapters: adapter framework + the manual-intake adapter
+- adapter_regulator: regulator-watch automated adapter (injected network)
 
 Pure standard library (kbwatch shells out to `git` for --from-ref baselines
 only). Writes ONLY under knowledge-base/monitoring/. Reads the other

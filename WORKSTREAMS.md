@@ -40,7 +40,7 @@ Build an internal AI research and product-discovery agent for BOTIM/AstraTech fo
 
 ## Workstream C — Intelligence Monitoring & Alerting (jointly owned)
 
-Added 2026-07-11 at the repository owner's direction; jointly owned by both contributors pending Person 1's acknowledgement (like `shared/`). Design: `intelligence-monitoring/DESIGN.md`.
+Added 2026-07-11 at the repository owner's direction. **Shared ownership accepted by both contributors (Person 1 and Person 2), 2026-07-11** — Workstream C is jointly owned like `shared/`; changes to it follow the shared-file rule (agreement between both contributors). Design: `intelligence-monitoring/DESIGN.md`.
 
 **Owned directories:**
 - `intelligence-monitoring/`
