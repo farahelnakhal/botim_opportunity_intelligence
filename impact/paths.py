@@ -16,11 +16,13 @@ from pathlib import Path
 REPO_ROOT = KB = IMPACT_KB = None
 PROPOSALS_DIR = TRANSACTIONS_DIR = ASSUMPTIONS_DIR = None
 MONITORING_DIR = EMAIL_DIR = SCORE_HISTORY = LOCK_FILE = None
+REGISTERS_DIR = BRIEFS_DIR = RESEARCH_DIR = METADATA_DIR = None
 
 
 def _compute(root):
     global REPO_ROOT, KB, IMPACT_KB, PROPOSALS_DIR, TRANSACTIONS_DIR
     global ASSUMPTIONS_DIR, MONITORING_DIR, EMAIL_DIR, SCORE_HISTORY, LOCK_FILE
+    global REGISTERS_DIR, BRIEFS_DIR, RESEARCH_DIR, METADATA_DIR
     REPO_ROOT = Path(root).resolve()
     KB = REPO_ROOT / "knowledge-base"
     IMPACT_KB = KB / "impact"
@@ -31,6 +33,11 @@ def _compute(root):
     EMAIL_DIR = IMPACT_KB / "email-previews"
     SCORE_HISTORY = IMPACT_KB / "score-history.jsonl"
     LOCK_FILE = IMPACT_KB / ".lock"
+    # generated read-model outputs (derived, written only with --write/--output)
+    REGISTERS_DIR = IMPACT_KB / "assumption-registers"
+    BRIEFS_DIR = IMPACT_KB / "briefs"
+    RESEARCH_DIR = IMPACT_KB / "research-requests"
+    METADATA_DIR = IMPACT_KB / "assumption-metadata"
 
 
 def set_repo_root(root):
