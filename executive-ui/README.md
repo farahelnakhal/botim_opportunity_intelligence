@@ -90,6 +90,42 @@ python3 executive-ui/api/server.py --check-llm "Invoice financing for UAE logist
 
 **Conversation memory.** Follow-up questions inside a generated analysis send the full conversation history to the model, so it refines the same opportunity in context (e.g. "now focus on Saudi Arabia" updates the segment, market, and scores). Conversations and generated analyses are persisted in the browser (`localStorage`), so they survive a page reload.
 
+## Deploy for free (a public link, no paid API key)
+
+`executive-ui/deploy/` bundles the built React app, the read-only API, and a
+small local model (Ollama) into **one Docker container**, deployable for free
+on [Hugging Face Spaces](https://huggingface.co/spaces) (their free CPU tier:
+no GPU, no credit card). A GitHub Action redeploys it automatically on every
+push to `main`. Costs nothing to run; the tradeoffs are honest: a free Space
+**sleeps after inactivity** (the next visitor waits ~30-60s for it to wake),
+and CPU-only inference of even a small model takes several seconds per
+analysis, not instantly.
+
+**One-time setup (about 5 minutes):**
+
+1. Create a free account at [huggingface.co](https://huggingface.co/join).
+2. Create a new Space: **New → Space** → pick a name → **SDK: Docker** →
+   **Hardware: CPU basic (free)** → **Public**. Leave it empty otherwise —
+   the GitHub Action fills it in.
+3. Create an access token: **Settings → Access Tokens → New token** →
+   role **Write**. Copy it.
+4. In this GitHub repo: **Settings → Secrets and variables → Actions**
+   - Add **secret** `HF_TOKEN` = the token from step 3.
+   - Add **variable** `HF_SPACE` = `your-hf-username/your-space-name`.
+5. Push to `main` (or run the **"Deploy to Hugging Face Space"** workflow
+   manually from the **Actions** tab). The Space builds automatically —
+   watch progress on the Space's own page — and your public link is:
+   `https://huggingface.co/spaces/your-hf-username/your-space-name`.
+
+The Space bakes a small model (`llama3.2:1b` by default) into the image at
+*build* time — not pulled at container start — so waking from sleep never
+re-downloads model weights. Swap the model by editing the `ARG OLLAMA_MODEL`
+line in `executive-ui/deploy/Dockerfile` (bigger models answer better but are
+slower on free CPU hardware and make the image larger).
+
+Every honesty guarantee still holds in this deployment: the real scoring
+engine (not the model) computes and caps every generated opportunity.
+
 ## Plain-language UI (no codes)
 
 The interface is written for a non-technical audience: internal identifiers (opportunity, evidence, experiment, segment, and prediction codes) never appear on screen. Opportunities are shown by name, evidence by its title, experiments by their title, and monitoring "affected" items are mapped back to opportunity names (`web/src/lib/labels.ts`). The identifiers still exist in the engines and API — they're just not surfaced in the UI.
