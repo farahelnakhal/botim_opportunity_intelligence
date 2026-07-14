@@ -6,12 +6,14 @@ Absent by design: apply/rollback/approve, email, file access, shell, eval.
 """
 
 import datetime
+import functools
 import json
 import re
 import sys
 from pathlib import Path
 
-from .config import REPO_ROOT
+from . import mv_tools
+from .config import Config, REPO_ROOT
 
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "opportunity-intelligence" / "tools"))
@@ -26,6 +28,12 @@ from impact import tracker as impact_tracker                  # noqa: E402
 from opportunity_engine import evidence, scoring              # noqa: E402
 
 impact_paths.set_repo_root(REPO_ROOT)
+
+# Merchant Voice tools (app/mv_tools.py) each take `config` as their first
+# argument (mv_db_path lives there, mutable — tests point it at a temp
+# mv.db). Bound once here via a shared, mutable Config instance so
+# REGISTRY/call_tool below can treat them like every other zero-config tool.
+MV_CONFIG = Config()
 
 KB = REPO_ROOT / "knowledge-base"
 
@@ -392,6 +400,24 @@ REGISTRY = {
                                                ["opp_id", "ev_id", "factor", "proposed_score", "justification"]),
                                        "Draft impact proposal (ephemeral, never appliable here)"),
 }
+
+# Merchant Voice tools — each wrapped with MV_CONFIG bound in (see mv_tools.py)
+# and mv_tools.ToolError translated to THIS module's ToolError (a distinct
+# class — orchestrator.py only catches this one), so call_tool() below can
+# invoke every entry uniformly as fn(**args).
+
+def _wrap_mv_tool(fn):
+    @functools.wraps(fn)
+    def wrapper(**kwargs):
+        try:
+            return fn(MV_CONFIG, **kwargs)
+        except mv_tools.ToolError as exc:
+            raise ToolError(str(exc), not_found=exc.not_found)
+    return wrapper
+
+
+for _mv_name, (_mv_fn, _mv_schema, _mv_desc) in mv_tools.REGISTRY.items():
+    REGISTRY[_mv_name] = (_wrap_mv_tool(_mv_fn), _mv_schema, _mv_desc)
 
 
 def tool_specs():
