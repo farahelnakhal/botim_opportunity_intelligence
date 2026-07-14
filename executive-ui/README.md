@@ -7,21 +7,60 @@ There are two front-ends over the **same read-only adapter** (`adapter/collect.p
 1. **`web/` — a modern React + TypeScript assistant** (the primary UI): a chat-first, project-workspace interface matching the approved design mockup, wired to a live Python JSON API.
 2. **stdlib static site** (`build.py` + `render/`): a zero-dependency server-rendered fallback/export.
 
-## Run the assistant (React app + live API)
+## Two backends, one frontend (Integration Phase 2)
+
+The React app talks to **two** independent backends over two explicit, non-overlapping
+prefixes — never one ambiguous shared `/api`:
+
+- **`/executive-api/*`** → `executive-ui/api/server.py` (port **8000** locally) — read-only
+  dashboard data: overview, commercial models, experiments, journal/reports, monitoring,
+  and the legacy `/analyze` + `/chat` compatibility endpoints (see "generate.py" below).
+- **`/copilot-api/*`** → `copilot-backend/server.py` (port **8010** locally) — the
+  conversational, grounded copilot: chat, follow-ups, new-product analysis, Merchant
+  Voice questions, citations. This is the only backend the chat UI calls.
+
+Both prefixes are environment-configurable on the frontend (`VITE_EXECUTIVE_API_BASE_URL`,
+`VITE_COPILOT_API_BASE_URL` — see `web/.env.example`); left unset they default to the
+relative paths above, which work with both the Vite dev-server proxy (`web/vite.config.ts`)
+and a single-origin production deploy.
+
+## Run the assistant (React app + both APIs)
 
 ```bash
-# 1. read-only JSON API over the engines (stdlib only)
+# 1. read-only dashboard API over the engines (stdlib only)
 python3 executive-ui/api/server.py --port 8000
 
-# 2. React dev server (proxies /api → :8000)
+# 2. the conversational copilot backend — runs without any key using the
+#    deterministic MockProvider (never fabricates; see copilot-backend/README.md)
+COPILOT_PROVIDER=mock python3 copilot-backend/server.py
+#    …or with a real Anthropic key instead:
+# ANTHROPIC_API_KEY=sk-ant-… python3 copilot-backend/server.py
+
+# 3. React dev server (proxies /executive-api → :8000, /copilot-api → :8010)
 cd executive-ui/web && npm install && npm run dev      # http://localhost:5173
 
-# --- or a single-process deploy ---
-cd executive-ui/web && npm run build                   # emits web/dist
-python3 executive-ui/api/server.py --port 8000         # also serves web/dist
+# --- or a single-process deploy (see executive-ui/deploy/start.sh) ---
+cd executive-ui/web && npm run build                    # emits web/dist
+executive-ui/deploy/start.sh                             # runs both backends; serves web/dist
 ```
 
-If the API is unreachable, the React app falls back to a bundled snapshot of **real** engine output (`web/src/seed.json`) so it always renders truthful data and never fabricates.
+If the dashboard API is unreachable, the React app falls back to a bundled snapshot of
+**real** engine output (`web/src/seed.json`) for *dashboard* reads only — it always
+renders truthful data and never fabricates. If copilot-backend is unreachable, the chat
+UI shows an honest "grounded analysis is temporarily unavailable" message instead —
+it never silently substitutes seed data, the deterministic router, or the legacy
+direct-LLM scaffold for a live chat response (see "generate.py" below).
+
+### `executive-ui/api/generate.py` and `router.py` — legacy/compatibility only
+
+Before Integration Phase 2, `generate.py` (a direct-LLM scaffold with no tool retrieval)
+answered "new analysis" requests, and `router.py` (a deterministic keyword router)
+answered existing-opportunity questions. **The chat UI no longer calls either
+automatically.** copilot-backend's grounded `new_opportunity_analysis` intent and its
+existing per-record intents now own both flows. Both old endpoints remain reachable
+directly (`POST /executive-api/analyze`, `GET|POST /executive-api/chat`) as an explicit,
+disclosed compatibility path — e.g. for scripts or a future non-conversational dashboard
+widget — but nothing in the normal UI falls back to them silently.
 
 ## Run the static site (no Node needed)
 

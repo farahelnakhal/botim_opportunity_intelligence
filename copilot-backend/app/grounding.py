@@ -12,7 +12,10 @@ ROUTE = {"evidence": "/evidence/{id}", "opportunity": "/opportunity/{id}",
          "experiment": "/experiment/{id}", "assumption": "/assumption/{id}",
          # Merchant Voice (Phase 5) — an approved, published finding. Never
          # authoritative Part A evidence; never an EV-typed citation.
-         "merchant_finding": "/merchant-findings/{id}"}
+         "merchant_finding": "/merchant-findings/{id}",
+         # Integration Phase 2 — additive citation type (competitor profiles
+         # surfaced by search_product_knowledge for new-opportunity analysis).
+         "competitor": "/competitor/{id}"}
 
 NO_DECISION = "No product or build decision has been made."
 NOT_VALIDATION = ("A concept reaction is a reaction to a proposed concept, not independent proof that the "
@@ -387,6 +390,32 @@ def build(intent, executed, ids):
             "Merchant Voice discipline: findings above are approved and published research signals, "
             "not authoritative Part A evidence — Workstream A decides final evidence strength. "
             + NOT_VALIDATION)
+        pack.needs_no_decision = True
+
+    if intent == "new_opportunity_analysis":
+        # No OPP record exists for this idea, so there is nothing to score —
+        # deterministic scoring requires a committed scorecard's real inputs,
+        # which a brand-new idea never has. We never ask the model to invent
+        # one either: the response is retrieved repository context (if any)
+        # plus a clearly labeled hypothesis, gaps, and a research plan.
+        found_anything = any(
+            name in ("search_product_knowledge",) and r.get("results")
+            or name == "get_approved_merchant_findings" and r.get("findings")
+            for name, r in executed
+        )
+        if not found_anything:
+            pack.unknowns.append(
+                "no related repository evidence, opportunities, segments, competitor notes, or "
+                "approved Merchant Voice findings were found for this idea — treat it as a fresh, "
+                "unvalidated hypothesis with no supporting internal signal yet")
+        if not pack.actions:
+            pack.actions.append("Run first customer interviews to test the core pain hypothesis before any build decision.")
+        pack.facts.append(
+            "New-opportunity discipline: this is NOT a committed opportunity — no OPP id has been "
+            "assigned, no engine score has been computed (scoring requires a real, committed scorecard, "
+            "which a brand-new idea does not have), and nothing has been written to the knowledge base. "
+            "Everything above `search_product_knowledge` returned is a real repository record; the "
+            "problem framing, target-segment hypothesis, and research plan are unvalidated hypotheses to test.")
         pack.needs_no_decision = True
 
     return pack

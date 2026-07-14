@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { api } from "./lib/api";
-import type { ChatBlock, ChatResponse, Opportunity, OverviewPayload } from "./types";
+import { copilotApi } from "./lib/copilotApi";
+import type { ChatBlock, Citation, CopilotChatResult, Opportunity, OverviewPayload } from "./types";
 
 export type View = "home" | "updates" | "project" | "monitoring" | "knowledge" | "reports" | "settings";
 export type Tab =
@@ -9,10 +10,13 @@ export type Tab =
 // Generic detail-drawer target — a lighter-weight sibling to the opportunity
 // drawer (drawerOppId) for record types that aren't opportunities. Kept
 // separate so the existing opportunity drawer is never touched.
-export type DetailTargetType = "evidence" | "assumption" | "monitoring_update";
+export type DetailTargetType = "evidence" | "assumption" | "monitoring_update" | "merchant_finding";
 export interface DetailTarget {
   type: DetailTargetType;
   id: string;
+  // merchant_finding detail is rendered entirely from the citation object
+  // itself (Phase 2H) — no extra backend lookup needed or available.
+  payload?: Citation;
 }
 
 export interface Message {
@@ -22,6 +26,13 @@ export interface Message {
   blocks?: ChatBlock[];
   stages?: string[];
   streaming?: boolean;
+  // Populated for copilot-backend-answered assistant turns (Phase 2C/2K).
+  citations?: Citation[];
+  copilotAssumptions?: string[];
+  unknowns?: string[];
+  copilotWarnings?: string[];
+  recommendedNextActions?: string[];
+  copilotUnavailable?: boolean;
 }
 
 export interface AppState {
@@ -55,10 +66,11 @@ export interface AppState {
   setSidebarOpen: (open: boolean) => void;
   openDrawer: (id: string) => void;
   closeDrawer: () => void;
-  openDetail: (type: DetailTargetType, id: string) => void;
+  openDetail: (type: DetailTargetType, id: string, payload?: Citation) => void;
   closeDetail: () => void;
   send: (message: string, projectId?: string) => Promise<void>;
   analyzeNew: (prompt: string) => Promise<void>; // start a fresh analysis of ANY opportunity
+  clearConversation: (projectId: string) => Promise<void>; // Phase 2I — end the copilot conversation for this chat
 }
 
 const Ctx = createContext<AppState | null>(null);
@@ -67,7 +79,10 @@ let seq = 0;
 const nextId = () => `m${++seq}`;
 
 // --- lightweight persistence so conversations & analyses survive a reload ---
-const LS = { conv: "botim.conversations", gen: "botim.generated", theme: "botim.theme" };
+const LS = {
+  conv: "botim.conversations", gen: "botim.generated", theme: "botim.theme",
+  copilotConv: "botim.copilotConversationIds",
+};
 function load<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
@@ -97,6 +112,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [drawerOppId, setDrawerOppId] = useState<string | null>(null);
   const [detailTarget, setDetailTarget] = useState<DetailTarget | null>(null);
   const [generated, setGenerated] = useState<Opportunity[]>(() => load<Opportunity[]>(LS.gen, []));
+  // Phase 2I — the copilot conversation id backing each chat (project id ->
+  // conv_… ). A brand-new chat has none yet; the first send() creates one.
+  // Switching projects never reuses another project's conversation id.
+  const [copilotConversationIds, setCopilotConversationIds] =
+    useState<Record<string, string>>(() => load(LS.copilotConv, {}));
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -106,6 +126,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => save(LS.conv, conversations), [conversations]);
   useEffect(() => save(LS.gen, generated), [generated]);
+  useEffect(() => save(LS.copilotConv, copilotConversationIds), [copilotConversationIds]);
 
   useEffect(() => {
     let cancel = false;
@@ -168,32 +189,50 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const setTab = useCallback((tab: Tab) => setActiveTab(tab), []);
   const openDrawer = useCallback((id: string) => setDrawerOppId(id), []);
   const closeDrawer = useCallback(() => setDrawerOppId(null), []);
-  const openDetail = useCallback((type: DetailTargetType, id: string) => setDetailTarget({ type, id }), []);
+  const openDetail = useCallback(
+    (type: DetailTargetType, id: string, payload?: Citation) => setDetailTarget({ type, id, payload }),
+    [],
+  );
   const closeDetail = useCallback(() => setDetailTarget(null), []);
 
   // Shared: append the user turn + a pending assistant turn, reveal progress
-  // stages one at a time, then land the final response.
-  const deliver = useCallback(async (pid: string, userText: string, resp: ChatResponse) => {
+  // stages one at a time, then land the final copilot-backend response.
+  // Phase 2 adapter (2C): one clear place that turns a CopilotChatResult into
+  // the Message shape Chat.tsx renders — never spread across components.
+  const deliverCopilot = useCallback(async (pid: string, userText: string, result: CopilotChatResult) => {
     const userMsg: Message = { id: nextId(), role: "user", text: userText };
+    const stages = result.unavailable
+      ? ["Contacting the grounded copilot", "Unavailable"]
+      : ["Understanding the question", "Retrieving grounded repository context", "Preparing the answer", "Finished"];
     const pendingId = nextId();
     const pending: Message = { id: pendingId, role: "assistant", text: "", streaming: true, stages: [] };
     setConversations((c) => ({ ...c, [pid]: [...(c[pid] ?? []), userMsg, pending] }));
-    for (let i = 1; i <= resp.stages.length; i++) {
-      await new Promise((r) => setTimeout(r, 240));
+    for (let i = 1; i <= stages.length; i++) {
+      await new Promise((r) => setTimeout(r, 180));
       setConversations((c) => ({
         ...c,
-        [pid]: (c[pid] ?? []).map((m) => (m.id === pendingId ? { ...m, stages: resp.stages.slice(0, i) } : m)),
+        [pid]: (c[pid] ?? []).map((m) => (m.id === pendingId ? { ...m, stages: stages.slice(0, i) } : m)),
       }));
     }
-    await new Promise((r) => setTimeout(r, 200));
+    // Phase 2L/2J — never silently substitute a router/generate.py answer when
+    // copilot-backend is unreachable; say so honestly instead.
+    const text = result.unavailable
+      ? "Grounded analysis is temporarily unavailable right now (the copilot backend could not be reached). "
+        + "No repository-grounded answer was generated for this message — please try again shortly."
+      : result.answerMarkdown;
     setConversations((c) => ({
       ...c,
-      [pid]: (c[pid] ?? []).map((m) =>
-        m.id === pendingId ? { ...m, text: resp.text, blocks: resp.blocks, stages: resp.stages, streaming: false } : m),
+      [pid]: (c[pid] ?? []).map((m) => (m.id === pendingId ? {
+        ...m, text, stages, streaming: false,
+        citations: result.citations,
+        copilotAssumptions: result.assumptions,
+        unknowns: result.unknowns,
+        copilotWarnings: result.warnings,
+        recommendedNextActions: result.recommendedNextActions,
+        copilotUnavailable: result.unavailable,
+      } : m)),
     }));
   }, []);
-
-  const isGenerated = useCallback((id: string | null) => !!id && generated.some((g) => g.id === id), [generated]);
 
   const send = useCallback(
     async (message: string, projectId?: string) => {
@@ -201,40 +240,78 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (!activeProjectId) setActiveProjectId(pid);
       setView("project");
       setActiveTab("chat");
-      // Follow-ups inside a generated analysis keep analysing that topic in context;
-      // follow-ups inside a committed opportunity use the read-only router.
-      if (isGenerated(pid)) {
-        const topic = generated.find((g) => g.id === pid)?.name ?? "";
-        const history = (conversations[pid] ?? [])
-          .filter((m) => m.text)
-          .map((m) => ({ role: m.role, content: m.text }));
-        const resp = await api.analyze(`${topic}. Follow-up: ${message}`, history);
-        if (resp.generated_opportunity) {
-          const updated = { ...resp.generated_opportunity, id: pid, name: topic };
-          setGenerated((g) => g.map((x) => (x.id === pid ? updated : x)));
-          resp.blocks = resp.blocks.map((b) => (b.type === "opportunity" || b.type === "scorecard") ? { ...b, opportunity: updated } : b);
-        }
-        await deliver(pid, message, resp);
-        return;
+      const existingConvId = copilotConversationIds[pid] ?? null;
+      // A committed KB opportunity is passed as selected context so follow-ups
+      // resolve correctly even without an explicit OPP- id in the message text
+      // (Phase 2D/2G) — a copilot-originated topic (or the shared "portfolio"
+      // chat) carries no such context, letting the first message start fresh.
+      const isCommittedOpportunity = !!overview
+        && (overview.opportunities.some((o) => o.id === pid) || overview.archived.some((o) => o.id === pid));
+      const context = isCommittedOpportunity ? { opportunity_id: pid } : undefined;
+      const result = await copilotApi.chat(message, existingConvId, context);
+      if (!existingConvId && !result.unavailable && result.conversationId) {
+        setCopilotConversationIds((m) => ({ ...m, [pid]: result.conversationId }));
       }
-      await deliver(pid, message, await api.chat(message));
+      await deliverCopilot(pid, message, result);
     },
-    [activeProjectId, overview, generated, isGenerated, deliver, conversations],
+    [activeProjectId, overview, copilotConversationIds, deliverCopilot],
   );
 
   const analyzeNew = useCallback(
     async (prompt: string) => {
-      const resp = await api.analyze(prompt);
-      const opp = resp.generated_opportunity;
-      const pid = opp?.id ?? `GEN-${Date.now()}`;
-      if (opp) setGenerated((g) => (g.some((x) => x.id === opp.id) ? g : [opp, ...g]));
+      // Always a brand-new copilot conversation (Phase 2I: "new chat gets a
+      // new conversation_id" / "does not inherit prior product context").
+      const result = await copilotApi.chat(prompt, null, {});
+      const pid = result.conversationId || `local-${nextId()}`;
+      const title = prompt.trim().replace(/\.$/, "").slice(0, 80) || "New analysis";
+      // No score is ever fabricated for a new idea — copilot-backend never
+      // computes one (Phase 2E: no valid scorecard inputs exist yet). This
+      // stub only carries enough shape to reuse the existing project-workspace
+      // UI (sidebar entry, header, drawer) unchanged; the real content is the
+      // grounded conversation itself (citations/assumptions/unknowns/actions).
+      const stub: Opportunity = {
+        id: pid, name: title.charAt(0).toUpperCase() + title.slice(1),
+        raw_score: null, raw_max: 85, composite: null,
+        classification: "unscored", classification_label: "Unscored",
+        confidence: "—", assumption_count: 0, factors: [], critical_flags: [],
+        segment: "—", jtbd: "—", hypothesis: "—",
+        strongest_evidence: [], contradictory_evidence: "—", rejection_conditions: "—",
+        validation_plan: "—", score_history: [],
+        latest_change: "Started via the grounded product-discovery copilot", latest_alert: "—",
+        next_action: result.recommendedNextActions[0] || "—",
+        profile_path: "(generated — not committed to the knowledge base)",
+        is_archived: false, impact_history: [], brief_envelope: null,
+        generated: true, engine: "copilot",
+      };
+      setGenerated((g) => (g.some((x) => x.id === pid) ? g : [stub, ...g]));
+      if (!result.unavailable && result.conversationId) {
+        setCopilotConversationIds((m) => ({ ...m, [pid]: result.conversationId }));
+      }
       setActiveProjectId(pid);
       setActiveTab("chat");
       setView("project");
       setSidebarOpen(false);
-      await deliver(pid, prompt, resp);
+      await deliverCopilot(pid, prompt, result);
     },
-    [deliver],
+    [deliverCopilot],
+  );
+
+  const clearConversation = useCallback(
+    async (projectId: string) => {
+      const cid = copilotConversationIds[projectId];
+      if (cid) await copilotApi.deleteConversation(cid);
+      setCopilotConversationIds((m) => {
+        const next = { ...m };
+        delete next[projectId];
+        return next;
+      });
+      setConversations((c) => {
+        const next = { ...c };
+        delete next[projectId];
+        return next;
+      });
+    },
+    [copilotConversationIds],
   );
 
   const value: AppState = {
@@ -243,7 +320,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     view, activeProjectId, activeTab, sidebarOpen,
     conversations, drawerOppId, detailTarget,
     goHome, goUpdates, goMonitoring, goKnowledge, goReports, goSettings,
-    openProject, setTab, setSidebarOpen, openDrawer, closeDrawer, openDetail, closeDetail, send, analyzeNew,
+    openProject, setTab, setSidebarOpen, openDrawer, closeDrawer, openDetail, closeDetail,
+    send, analyzeNew, clearConversation,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

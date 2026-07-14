@@ -18,7 +18,10 @@ _EXTRA = ("management approved", "board approved", "we have selected",
           # a proof of demand, and a concept reaction is never proof of
           # willingness to pay.
           "market validated", "demand is validated", "demand validated",
-          "merchants will pay", "merchant demand is validated", "ready to build")
+          "merchants will pay", "merchant demand is validated", "ready to build",
+          # New-opportunity analysis (Phase 2) — a brand-new idea has no
+          # scorecard and no committed evidence; these are never true of it.
+          "proven demand", "demand is proven", "proven the demand")
 
 
 def check_wording(text):

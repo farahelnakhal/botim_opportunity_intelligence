@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useApp, type Message } from "../store";
 import type { ChatBlock } from "../types";
 import Icon from "./Icon";
+import Citations from "./Citations";
+import ActionButton from "./ActionButton";
 import {
   Banner, BriefEnvelopeCard, CalibrationCard, CommercialModelCard, DecisionJournalEntry,
   EvidenceCard, ExecutiveSummaryCard, ExperimentCard, FeedItemCard, MonitoringAlertCard,
@@ -88,6 +90,34 @@ function renderOne(b: ChatBlock): JSX.Element | null {
   }
 }
 
+/* ---------------- copilot-backend answer metadata (Phase 2C/2K) ---------------- */
+function ListSection({ icon, label, items }: { icon: Parameters<typeof Icon>[0]["name"]; label: string; items: string[] }) {
+  if (!items.length) return null;
+  return (
+    <div className="copilot-meta-section">
+      <div className="copilot-meta-label"><Icon name={icon} size={12} /> {label}</div>
+      <ul className="copilot-meta-list">
+        {items.map((it, i) => <li key={i}>{it}</li>)}
+      </ul>
+    </div>
+  );
+}
+
+function CopilotMeta({ m }: { m: Message }) {
+  const hasAny = (m.citations?.length || m.copilotAssumptions?.length || m.unknowns?.length
+    || m.copilotWarnings?.length || m.recommendedNextActions?.length);
+  if (!hasAny) return null;
+  return (
+    <div className="copilot-meta">
+      {m.citations && m.citations.length > 0 && <Citations citations={m.citations} />}
+      <ListSection icon="alert" label="Assumptions" items={m.copilotAssumptions ?? []} />
+      <ListSection icon="search" label="Unknowns" items={m.unknowns ?? []} />
+      <ListSection icon="alert" label="Warnings" items={m.copilotWarnings ?? []} />
+      <ListSection icon="check-circle" label="Recommended next actions" items={m.recommendedNextActions ?? []} />
+    </div>
+  );
+}
+
 /* ---------------- message ---------------- */
 function MessageView({ m }: { m: Message }) {
   if (m.role === "user") {
@@ -103,10 +133,16 @@ function MessageView({ m }: { m: Message }) {
       <div className="msg-role">BOTIM</div>
       <Timeline stages={m.stages ?? []} done={!m.streaming} />
       {m.text && (
-        <div className="msg-assistant-body">
+        <div className={`msg-assistant-body${m.copilotUnavailable ? " unavailable" : ""}`}>
+          {m.copilotUnavailable && (
+            <div className="banner-note" style={{ marginBottom: 8 }}>
+              <Icon name="alert" /><span>Grounded analysis is temporarily unavailable.</span>
+            </div>
+          )}
           <p>{m.text}{m.streaming && <span className="stream-caret" />}</p>
         </div>
       )}
+      {!m.streaming && <CopilotMeta m={m} />}
       {m.blocks && <Blocks blocks={m.blocks} />}
     </div>
   );
@@ -173,7 +209,7 @@ function ChatInput({ onSend }: { onSend: (t: string) => void }) {
 
 /* ---------------- chat view ---------------- */
 export default function Chat({ projectId }: { projectId: string }) {
-  const { conversations, send } = useApp();
+  const { conversations, send, clearConversation } = useApp();
   const msgs = conversations[projectId] ?? [];
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -183,11 +219,19 @@ export default function Chat({ projectId }: { projectId: string }) {
   return (
     <div className="tab-panel" style={{ display: "flex", flexDirection: "column" }}>
       <div className="chat-scroll" style={{ flex: 1 }}>
-        {msgs.length === 0 && (
+        {msgs.length === 0 ? (
           <div className="empty-state" style={{ paddingTop: 80 }}>
             <Icon name="message" className="icon" />
             <div className="empty-state-title">Start the conversation</div>
             Ask about an opportunity, its commercial model, evidence, experiments, or what changed this week.
+          </div>
+        ) : (
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
+            <ActionButton
+              className="btn btn-sm" icon="x" label="Clear chat" doneLabel="Cleared"
+              title="End this conversation and start fresh next time (Phase 2I)"
+              onAct={() => clearConversation(projectId)}
+            />
           </div>
         )}
         {msgs.map((m) => <MessageView key={m.id} m={m} />)}

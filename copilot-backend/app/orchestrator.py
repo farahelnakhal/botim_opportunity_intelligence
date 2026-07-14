@@ -43,6 +43,7 @@ class Orchestrator:
             return {"error": {"code": "message_too_long" if "limit" in err else "invalid_request",
                               "message": err, "retryable": False}}
 
+        is_new_conversation = conversation_id is None
         if conversation_id:
             conv = self.store.get_conversation(conversation_id)
             if conv is None:
@@ -80,7 +81,9 @@ class Orchestrator:
                                   {"level": "high", "basis": "scope redirect — no data accessed"},
                                   [], [], [], [], [], trace, None)
 
-        intent = intents.classify(message, ids)
+        has_selected_context = bool(ctx.get("opportunity_id") or ctx.get("segment_id"))
+        intent = intents.classify(message, ids, is_new_conversation=is_new_conversation,
+                                  has_selected_context=has_selected_context)
         plan = intents.tool_plan(intent, ids, message)
 
         executed, seen, not_found = [], set(), []

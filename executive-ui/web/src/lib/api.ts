@@ -1,9 +1,19 @@
-// Read-only API client for the BOTIM Opportunity Intelligence engines.
+// Read-only DASHBOARD API client for the BOTIM Opportunity Intelligence
+// engines (overview, commercial models, experiments, journal/reports,
+// monitoring, static read-model serialization).
 //
-// Talks to the Python JSON API (executive-ui/api/server.py). When the API is
-// unreachable — e.g. a static build with no server running — it falls back to a
-// bundled snapshot of REAL engine output (seed.json), so the UI always renders
-// truthful data and never fabricates. It performs no writes.
+// Talks to executive-ui/api/server.py — never copilot-backend. Conversational
+// requests (chat, follow-ups, new-product analysis, Merchant Voice questions)
+// belong in lib/copilotApi.ts instead (Integration Phase 2 architecture
+// split); this module keeps its existing dashboard responsibilities and
+// existing exported shape unchanged for backward compatibility.
+//
+// When the API is unreachable — e.g. a static build with no server running —
+// dashboard reads fall back to a bundled snapshot of REAL engine output
+// (seed.json), so the UI always renders truthful data and never fabricates.
+// It performs no writes. `analyze()`/`chat()` below remain for the legacy
+// scaffold path only (see store.tsx and executive-ui/api/generate.py) — the
+// normal chat UI no longer calls them (Phase 2J).
 
 import seed from "../seed.json";
 import type {
@@ -18,6 +28,8 @@ import type {
 
 const S = seed as any;
 
+const BASE = import.meta.env.VITE_EXECUTIVE_API_BASE_URL || "/executive-api";
+
 let liveOk: boolean | null = null;
 
 // Read endpoints all have a real-data seed fallback, so if the API is slow
@@ -29,7 +41,7 @@ async function get<T>(path: string, fallback: () => T, timeoutMs = READ_TIMEOUT_
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(`/api${path}`, { headers: { Accept: "application/json" }, signal: ctrl.signal });
+    const res = await fetch(`${BASE}${path}`, { headers: { Accept: "application/json" }, signal: ctrl.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     liveOk = true;
     return (await res.json()) as T;
@@ -62,24 +74,29 @@ export const api = {
 
   monitoring: () => get<MonitoringPayload>("/monitoring", () => S.monitoring),
 
-  // Chat routing. The live server runs the deterministic router; offline we run
-  // the same routing shape client-side against the seed so the demo still works.
+  // LEGACY (Phase 2J): the deterministic keyword router. copilot-backend now
+  // owns conversational chat (lib/copilotApi.ts); this remains only as a
+  // narrowly-scoped dashboard helper / compatibility path (Phase 2G) — the
+  // normal chat UI in store.tsx no longer calls it automatically.
   chat: (message: string) =>
     get<ChatResponse>(
       `/chat?q=${encodeURIComponent(message)}`,
       () => routeOffline(message),
     ),
 
-  // On-demand analysis of ANY opportunity. Live: Claude, a local model (Ollama),
-  // or the Python scaffold — chosen server-side. Conversation history is sent so
-  // follow-ups refine the same analysis in context. Offline: a client scaffold.
+  // LEGACY SCAFFOLD (Phase 2J): direct-LLM (or offline) analysis with no tool
+  // retrieval/grounding. Retained only as an explicit, disclosed compatibility
+  // path — the normal "new analysis" flow now goes through copilot-backend's
+  // grounded `new_opportunity_analysis` intent (lib/copilotApi.ts) instead.
+  // Conversation history is sent so follow-ups refine the same analysis in
+  // context, for callers that still use this endpoint directly.
   analyze: async (prompt: string, history?: { role: string; content: string }[]): Promise<ChatResponse> => {
     // Generation is legitimately slow (LLM + possible cold start), so allow up
     // to 90s before falling back to the client-side scaffold.
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 90000);
     try {
-      const res = await fetch("/api/analyze", {
+      const res = await fetch(`${BASE}/analyze`, {
         method: "POST",
         headers: { "content-type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ q: prompt, history: history ?? [] }),

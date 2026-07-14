@@ -22,6 +22,8 @@ import argparse
 import json
 import os
 import re
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -44,6 +46,14 @@ _CONTENT_TYPES = {
 }
 
 OPP_ID = re.compile(r"^OPP-\d{3}$")
+
+# Integration Phase 2 — this server also fronts copilot-backend so a single
+# process/origin can serve both APIs in a single-container deploy. The
+# upstream is a FIXED, operator-configured address (never derived from a
+# request) — this is a narrow, single-destination passthrough, not an open
+# proxy: no arbitrary host/URL from user input is ever honored.
+COPILOT_UPSTREAM = os.environ.get("COPILOT_UPSTREAM_URL", "http://127.0.0.1:8010").rstrip("/")
+COPILOT_PROXY_TIMEOUT_S = 30
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -68,9 +78,36 @@ class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):  # CORS preflight
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Accept")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization")
         self.end_headers()
+
+    # -- copilot-backend passthrough (Phase 2) ------------------------------ #
+    # Forwards /copilot-api/<sub> to COPILOT_UPSTREAM + /api/<sub> unchanged.
+    # Bounded: fixed upstream, bounded timeout, request body already size-
+    # limited by copilot-backend itself; never proxies to a caller-supplied URL.
+    def _proxy_to_copilot(self, method, sub_path, query, body_bytes):
+        url = f"{COPILOT_UPSTREAM}/api{sub_path}"
+        if query:
+            url += "?" + query
+        req = urllib.request.Request(url, data=body_bytes if body_bytes else None, method=method,
+                                     headers={"content-type": "application/json", "accept": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=COPILOT_PROXY_TIMEOUT_S) as r:
+                status = r.status
+                data = r.read()
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            data = exc.read()
+        except (urllib.error.URLError, TimeoutError, OSError):
+            return self._json({"schema_version": "1.0", "error": {
+                "code": "provider_error", "message": "the conversational backend is unavailable",
+                "retryable": True}}, status=502)
+        try:
+            payload = json.loads(data.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return self._error(502, "malformed response from conversational backend")
+        return self._json(payload, status=status)
 
     def _read_json_body(self):
         length = int(self.headers.get("Content-Length", 0) or 0)
@@ -87,6 +124,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        if path.startswith("/copilot-api/"):
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            body = self.rfile.read(length) if length else b""
+            return self._proxy_to_copilot("POST", path[len("/copilot-api"):], parsed.query, body)
+        if path.startswith("/executive-api/"):
+            path = "/api" + path[len("/executive-api"):]
         if not path.startswith("/api/"):
             return self._error(404, "not found")
         sub = path[len("/api"):]
@@ -102,10 +145,21 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             return self._error(500, f"{type(exc).__name__}: {exc}")
 
+    def do_DELETE(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+        if path.startswith("/copilot-api/"):
+            return self._proxy_to_copilot("DELETE", path[len("/copilot-api"):], parsed.query, b"")
+        return self._error(404, "not found")
+
     # -- routing ----------------------------------------------------------- #
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        if path.startswith("/copilot-api/"):
+            return self._proxy_to_copilot("GET", path[len("/copilot-api"):], parsed.query, b"")
+        if path.startswith("/executive-api/"):
+            return self._api(path[len("/executive-api"):], parse_qs(parsed.query))
         if path.startswith("/api/"):
             return self._api(path[len("/api"):], parse_qs(parsed.query))
         return self._static(path)

@@ -15,6 +15,10 @@ INTENTS = ("portfolio_summary", "opportunity_explanation", "opportunity_comparis
            "merchant_feedback", "campaign_summary", "segment_feedback",
            "merchant_objections", "merchant_workarounds", "concept_reactions",
            "merchant_wtp_signals", "merchant_contradictions",
+           # Integration Phase 2 — a genuinely new product/opportunity that has
+           # no OPP record yet. Never fabricates repository evidence; never
+           # persists anything (see grounding.py + system_prompt.py).
+           "new_opportunity_analysis",
            "unknown_or_unsupported")
 
 OPP_REF = re.compile(r"\bOPP-\d{3}\b", re.I)
@@ -81,7 +85,17 @@ def is_out_of_scope(text):
     return bool(_CODE_WORDS.search(text))
 
 
-def classify(text, ids):
+def classify(text, ids, is_new_conversation=False, has_selected_context=False):
+    """Deterministic mode detection.
+
+    `is_new_conversation` / `has_selected_context` let a genuinely new product
+    idea (first message, no conversation history, no explicit/selected record)
+    route to `new_opportunity_analysis` instead of falling through to
+    `unknown_or_unsupported` and being treated as a bare LLM prompt. Any
+    explicit OPP/EV/SEG/ASM/MVC id, or an existing selected opportunity
+    (frontend `context.opportunity_id`), or a message matching one of the
+    deterministic rules above, always takes priority.
+    """
     for intent, pattern in _RULES.items() if isinstance(_RULES, dict) else _RULES:
         if pattern.search(text):
             return intent
@@ -89,6 +103,8 @@ def classify(text, ids):
         return "opportunity_explanation"
     if ids.get("campaigns"):
         return "campaign_summary"
+    if is_new_conversation and not has_selected_context and text.strip():
+        return "new_opportunity_analysis"
     return "unknown_or_unsupported"
 
 
@@ -205,6 +221,20 @@ def tool_plan(intent, ids, message):
     if intent == "contradictory_evidence" and opp:
         plan.append(("get_opportunity_merchant_feedback", {"opportunity_id": opp}))
 
+    # --- new_opportunity_analysis (Phase 2) -------------------------------- #
+    # No OPP record exists yet, so there is nothing to look up by id — instead
+    # search everything the repository already knows (evidence, opportunities,
+    # segments, experiments, competitors, inflection points via the bounded
+    # keyword search), surface portfolio-wide evidence gaps and monitoring
+    # signals for context, and check for any approved Merchant Voice findings
+    # that already speak to this space. Every tool here is read-only and
+    # already used elsewhere; nothing new is written or scored.
+    elif intent == "new_opportunity_analysis":
+        plan.append(("search_product_knowledge", {"query": message[:200]}))
+        plan.append(("get_evidence_gaps", {}))
+        plan.append(("get_recent_changes", {}))
+        plan.append(("get_approved_merchant_findings", {}))
+
     return plan[:6]
 
 
@@ -220,5 +250,6 @@ ANSWER_TYPE = {
     "segment_feedback": "merchant_feedback", "merchant_objections": "merchant_feedback",
     "merchant_workarounds": "merchant_feedback", "concept_reactions": "merchant_feedback",
     "merchant_wtp_signals": "merchant_feedback", "merchant_contradictions": "merchant_feedback",
+    "new_opportunity_analysis": "new_opportunity_analysis",
     "unknown_or_unsupported": "analysis",
 }

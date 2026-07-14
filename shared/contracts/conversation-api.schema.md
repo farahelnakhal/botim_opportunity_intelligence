@@ -41,7 +41,7 @@
 | `conversation_id` | required | no | string (`conv_…`) |
 | `message_id` | required | no | string (`msg_…`) |
 | `answer_markdown` | required | no | string — natural-language answer ending with an **“Evidence used”** section |
-| `answer_type` | required | no | enum: `analysis, brief, comparison, evidence, challenge, assumptions, research_recommendation, research_request_draft, change_summary, merchant_feedback` (`merchant_feedback` added for Merchant Voice research questions — additive, backward compatible, `schema_version` unchanged) |
+| `answer_type` | required | no | enum: `analysis, brief, comparison, evidence, challenge, assumptions, research_recommendation, research_request_draft, change_summary, merchant_feedback, new_opportunity_analysis` (`merchant_feedback` added for Merchant Voice research questions; `new_opportunity_analysis` added in Integration Phase 2 for a genuinely new idea with no OPP record yet — both additive, backward compatible, `schema_version` unchanged) |
 | `confidence` | required | no | `{level: "high"|"medium"|"low"|"mixed", basis: string}` — derived deterministically from records/engines, never model-invented |
 | `citations` | required | no | array of citation objects (below); may be empty |
 | `assumptions` | required | no | string[] — working assumptions relevant to the answer |
@@ -55,7 +55,7 @@ Citation object:
 
 ```json
 { "id": "EV-2026-W28-014",
-  "type": "evidence",             // enum: evidence | opportunity | segment | inflection | experiment | assumption | merchant_finding
+  "type": "evidence",             // enum: evidence | opportunity | segment | inflection | experiment | assumption | merchant_finding | competitor
   "title": "Card rails appear unsuitable for many core supplier-payment transactions…",
   "role": "primary",              // enum: primary | contextual | contradictory | weak_lead | excluded | concept_reaction
   "target": { "type": "internal_route", "value": "/evidence/EV-2026-W28-014" },
@@ -112,6 +112,7 @@ Citation object:
 - The answer never claims a product was validated/selected or a build approved; promising-but-unvalidated answers include: *“No product or build decision has been made.”*
 - Repository/code/implementation questions get a polite product-discovery redirect; state-changing requests (apply/approve/rollback/email/shell/file access) are refused — the backend has no such tools.
 - Merchant Voice research questions are grounded only in **approved, published** findings (`merchant_finding` citations) — never unreviewed/rejected/suppressed/`needs_revalidation` content, never identity fields, never raw transcript text. A finding's `suggested_strength` is a Merchant Voice research signal, never authoritative Part A evidence, and is never blended into the response's own `confidence` field. A `concept_reaction` finding is never presented as proof that pain, frequency, or willingness to pay have been established.
+- **`new_opportunity_analysis` (Integration Phase 2).** A genuinely new product/opportunity with no `OPP-` record. Selected deterministically when: the conversation is new (`conversation_id` was null), no explicit `OPP-/EV-/SEG-/ASM-/MVC-` id is present in the message, and no `opportunity_id`/`segment_id` is already selected via `context` or prior conversation state — any of those instead route to the existing deterministic intents unchanged. Retrieval reuses `search_product_knowledge` (now also covering competitor profiles and inflection points), `get_evidence_gaps`, `get_recent_changes`, and `get_approved_merchant_findings` — the same read-only tools used elsewhere, never a new write path. No numeric score, composite, or classification is ever computed or stated for a new idea (the scoring engine requires a real, committed scorecard, which a brand-new idea never has); if nothing relevant is found, `unknowns` says so explicitly rather than the model inventing supporting signal. `citations` are only ever built from what the tools actually returned — the model cannot add a citation for an id it merely mentions in prose.
 
 ## Example — normal fetch() from the UI
 

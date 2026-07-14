@@ -64,7 +64,7 @@ export interface Opportunity {
   impact_history: Record<string, unknown>[];
   brief_envelope: Record<string, any> | null;
   generated?: boolean; // true = an on-demand AI analysis, not a committed KB opportunity
-  engine?: "claude" | "scaffold";
+  engine?: "claude" | "scaffold" | "copilot";
 }
 
 export interface FeedItem {
@@ -207,4 +207,50 @@ export interface ChatResponse {
   blocks: ChatBlock[];
   decision_banner: string;
   generated_opportunity?: Opportunity | null;
+}
+
+// --- copilot-backend conversation contract (shared/contracts/conversation-api.schema.md) ---
+// Additive citation types beyond what copilot-backend emits today
+// (monitoring_update, knowledge_source) are included so the frontend renders
+// them safely as non-clickable references if a future backend change adds them,
+// per Phase 2K ("unsupported citation types render safely, never crash").
+export type CitationType =
+  | "opportunity" | "evidence" | "segment" | "inflection" | "experiment"
+  | "assumption" | "merchant_finding" | "competitor"
+  | "monitoring_update" | "knowledge_source";
+
+export type CitationRole = "primary" | "contextual" | "contradictory" | "weak_lead" | "excluded" | "concept_reaction";
+
+export interface Citation {
+  id: string;
+  type: CitationType;
+  title: string;
+  role: CitationRole;
+  target: { type: string; value: string };
+  metadata: Record<string, unknown> | null;
+}
+
+export interface CopilotConfidence {
+  level: "high" | "medium" | "low" | "mixed";
+  basis: string;
+}
+
+// Normalized (camelCase) shape the frontend works with — see
+// lib/copilotApi.ts for the adapter from the wire (snake_case) response.
+export interface CopilotChatResult {
+  conversationId: string;
+  messageId: string | null;
+  answerMarkdown: string;
+  answerType: string;
+  confidence: CopilotConfidence | null;
+  citations: Citation[];
+  assumptions: string[];
+  unknowns: string[];
+  recommendedNextActions: string[];
+  warnings: string[];
+  // true when copilot-backend could not be reached / errored. Never silently
+  // replaced by generate.py or seed data — the frontend must render an honest
+  // unavailable state instead (Phase 2L/2J).
+  unavailable: boolean;
+  unavailableReason?: string;
 }

@@ -267,8 +267,10 @@ def get_score_history(opp_id):
 
 def search_product_knowledge(query):
     """Searches ONLY approved product-discovery record fields: IDs, titles,
-    evidence statements, segment/opportunity descriptions, assumptions and
-    experiments. Never code, config, env files, prompts, or git metadata."""
+    evidence statements, segment/opportunity descriptions, assumptions,
+    experiments, competitor profiles and inflection points. Never code,
+    config, env files, prompts, or git metadata. Deterministic keyword
+    matching only — no vector index, no external search."""
     if not isinstance(query, str) or not (2 <= len(query) <= 200):
         raise ToolError("query must be a string of 2..200 characters")
     terms = [t for t in re.split(r"[^a-z0-9-]+", query.lower()) if len(t) >= 3]
@@ -305,6 +307,22 @@ def search_product_knowledge(query):
         if score:
             results.append({"id": data.get("experiment_id"), "type": "experiment",
                             "title": data.get("proposition", ""), "match": score})
+    for name in _known_competitors():
+        p = KB / "competitors" / f"{name}.md"
+        text = p.read_text(encoding="utf-8")
+        title_m = re.search(r"^#\s+(.+)$", text, re.M)
+        title = title_m.group(1) if title_m else name
+        gaps_m = re.search(r"\*\*Gaps[^:]*:\*\*\s*(.+)", text)
+        score = hit(name) + hit(title) + hit(gaps_m.group(1) if gaps_m else "")
+        if score:
+            results.append({"id": name, "type": "competitor", "title": title, "match": score})
+    for p in sorted((KB / "inflection-points").glob("IP-*.md")):
+        text = p.read_text(encoding="utf-8")
+        title_m = re.search(r"^#\s+(.+)$", text, re.M)
+        title = title_m.group(1) if title_m else p.stem
+        score = hit(p.stem) + hit(title)
+        if score:
+            results.append({"id": p.stem, "type": "inflection", "title": title, "match": score})
     results.sort(key=lambda r: -r["match"])
     return {"query": query, "results": results[:12]}
 

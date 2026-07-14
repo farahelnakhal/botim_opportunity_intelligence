@@ -49,6 +49,27 @@ A returned Merchant Voice finding is a research signal, not authoritative Part A
 
 Because Merchant Voice's `app` package and this backend's own `app` package share a name, `mv_tools.py` loads Merchant Voice's package under the distinct alias `mv_app` (never the bare name `app`) — see that module's docstring.
 
+### New-opportunity analysis (Integration Phase 2)
+
+`new_opportunity_analysis` handles a genuinely new product/opportunity with no `OPP-`
+record yet — selected deterministically when the conversation is new, no explicit
+OPP/EV/SEG/ASM/MVC id is present, and no opportunity/segment is already selected (see
+`intents.classify`). It reuses existing read-only tools only — `search_product_knowledge`
+(now also covering competitor profiles and inflection points), `get_evidence_gaps`,
+`get_recent_changes`, `get_approved_merchant_findings` — never a new write path, never a
+vector index. **No numeric score, composite, or classification is ever computed for a new
+idea** (the scoring engine requires a real, committed scorecard, which a brand-new idea
+never has); if nothing relevant is found, `unknowns` says so explicitly. See
+`shared/contracts/conversation-api.schema.md` for the response shape and
+`tests/test_new_opportunity_analysis.py` for the behavioral tests.
+
+### Frontend wiring (Integration Phase 2)
+
+`executive-ui/web` now calls this backend directly for all conversational requests
+(`lib/copilotApi.ts`) — dashboard reads still go to `executive-ui/api` (`lib/api.ts`).
+See `executive-ui/README.md`, "Two backends, one frontend", for local run instructions
+and `executive-ui/deploy/start.sh` for the single-container deploy path.
+
 ## Security defaults
 
 Localhost bind (non-local requires `COPILOT_API_TOKEN`); CORS restricted to the configured UI origin; body/message-length limits; bounded concurrency; strict ID validation on every tool argument; no state-changing tools exist in the registry; `safe_tool_trace` empty unless `COPILOT_DEBUG_TRACE=1`; keys only from env, never logged.

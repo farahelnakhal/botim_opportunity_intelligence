@@ -180,9 +180,20 @@ class TestServerReadOnly(unittest.TestCase):
 
     def test_no_kb_write_methods(self):
         # POST exists only for compute endpoints (chat/analyze with history); it
-        # never writes to the knowledge base. No PUT/DELETE at all.
+        # never writes to the knowledge base. No PUT at all. DELETE (Phase 2)
+        # exists ONLY to proxy copilot-backend conversation deletion — its own
+        # local SQLite convenience store, never the knowledge base — and is
+        # refused everywhere else (see test_delete_only_proxies_copilot below).
         self.assertFalse(hasattr(server.Handler, "do_PUT"))
-        self.assertFalse(hasattr(server.Handler, "do_DELETE"))
+        self.assertTrue(hasattr(server.Handler, "do_DELETE"))
+
+    def test_delete_only_proxies_copilot(self):
+        import urllib.error
+        import urllib.request
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}/api/overview", method="DELETE")
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            urllib.request.urlopen(req)
+        self.assertEqual(cm.exception.code, 404)
 
     def test_post_only_on_compute_endpoints(self):
         import urllib.error
@@ -215,6 +226,98 @@ class TestServerReadOnly(unittest.TestCase):
             self.assertIn("404", str(exc))
         else:
             self.fail("expected 404")
+
+    def test_executive_api_alias_serves_same_data_as_api(self):
+        # Phase 2B — the dashboard client can address either prefix.
+        status, data = self._get("/executive-api/overview")
+        self.assertEqual(status, 200)
+        self.assertTrue(data["opportunities"])
+
+
+class TestCopilotProxy(unittest.TestCase):
+    """Phase 2 — /copilot-api/* forwards to a FIXED, configured upstream only;
+    never an arbitrary caller-supplied URL. Covers both the success path (a
+    real copilot-backend instance) and the honest-failure path (upstream
+    down) — Phase 2L requires this never silently degrades."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.httpd = server.make_server(port=0, root=str(REPO))
+        cls.port = cls.httpd.server_address[1]
+        cls.t = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
+        cls.t.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+
+    def test_proxy_unavailable_upstream_returns_honest_502_not_a_crash(self):
+        import urllib.error
+        import urllib.request
+        # Port 1 is never a live copilot-backend — simulates "copilot down".
+        server.COPILOT_UPSTREAM = "http://127.0.0.1:1"
+        try:
+            body = json.dumps({"conversation_id": None, "message": "hi"}).encode()
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{self.port}/copilot-api/chat", data=body,
+                method="POST", headers={"content-type": "application/json"})
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                urllib.request.urlopen(req)
+            self.assertEqual(cm.exception.code, 502)
+            payload = json.loads(cm.exception.read())
+            self.assertEqual(payload["error"]["code"], "provider_error")
+        finally:
+            server.COPILOT_UPSTREAM = "http://127.0.0.1:8010"
+
+    def test_proxy_forwards_to_a_real_copilot_backend(self):
+        import urllib.request
+
+        copilot_dir = UI.parents[0] / "copilot-backend"
+        if str(copilot_dir) not in sys.path:
+            sys.path.insert(0, str(copilot_dir))
+        import tempfile
+        from app.api import Api as CopilotApi
+        from app.config import Config as CopilotConfig
+        from app.orchestrator import Orchestrator
+        from app.store import ConversationStore
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        cfg = CopilotConfig(env={"COPILOT_PROVIDER": "mock"})
+        cfg.db_path = Path(tempfile.mkdtemp()) / "conv.db"
+        capi = CopilotApi(Orchestrator(cfg, ConversationStore(cfg.db_path)), ConversationStore(cfg.db_path))
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", 0) or 0)
+                body = self.rfile.read(length) if length else b""
+                status, payload = capi.handle("POST", self.path, body)
+                data = json.dumps(payload).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+        chttpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        cport = chttpd.server_address[1]
+        cthread = threading.Thread(target=chttpd.serve_forever, daemon=True)
+        cthread.start()
+        server.COPILOT_UPSTREAM = f"http://127.0.0.1:{cport}"
+        try:
+            body = json.dumps({"conversation_id": None, "message": "Tell me about OPP-013"}).encode()
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{self.port}/copilot-api/chat", data=body,
+                method="POST", headers={"content-type": "application/json"})
+            with urllib.request.urlopen(req) as r:
+                data = json.loads(r.read())
+            self.assertEqual(data["schema_version"], "1.0")
+            self.assertTrue(data["conversation_id"].startswith("conv_"))
+        finally:
+            server.COPILOT_UPSTREAM = "http://127.0.0.1:8010"
+            chttpd.shutdown()
 
 
 if __name__ == "__main__":

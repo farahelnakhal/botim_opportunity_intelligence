@@ -92,6 +92,38 @@ export default function DetailDrawer() {
         </div>
       );
     }
+  } else if (detailTarget?.type === "merchant_finding") {
+    // Rendered entirely from the citation itself (Phase 2H) — copilot-backend
+    // already embeds everything a safe detail view may show in `metadata`;
+    // there is no separate lookup, and no participant/identity/transcript
+    // field is ever present in this object in the first place.
+    const c = detailTarget.payload;
+    const meta = (c?.metadata ?? {}) as Record<string, unknown>;
+    if (!c) {
+      title = "Merchant finding";
+      body = <Unavailable label="This Merchant Voice finding is not available." />;
+    } else {
+      title = "Merchant Voice finding";
+      body = (
+        <div className="drawer-body">
+          <p className="source-tag" style={{ display: "block", marginBottom: 14 }}>{c.id}</p>
+          <p style={{ marginTop: 0 }}>{humanize(c.title)}</p>
+          <dl className="detail-fields">
+            <div><dt>Campaign</dt><dd>{String(meta.campaign_id ?? "—")}</dd></div>
+            <div><dt>Method</dt><dd>{humanize(String(meta.method ?? "")) || "—"}</dd></div>
+            <div><dt>Segment</dt><dd>{meta.segment_id ? String(meta.segment_id) : "Not segment-specific"}</dd></div>
+            <div><dt>Strength band</dt><dd>{humanize(String(meta.strength_band ?? "")) || "—"}</dd></div>
+            <div><dt>Support count</dt><dd>{String(meta.support_count ?? "—")}</dd></div>
+            <div><dt>Contradiction count</dt><dd>{String(meta.contradiction_count ?? "—")}</dd></div>
+            <div><dt>Denominator</dt><dd>{meta.denominator_definition ? `${meta.denominator} — ${meta.denominator_definition}` : String(meta.denominator ?? "—")}</dd></div>
+          </dl>
+          <p className="source-tag" style={{ display: "block", marginTop: 6 }}>
+            A Merchant Voice research signal — not authoritative Part A evidence, and never proof that
+            pain, frequency, or willingness to pay have been established.
+          </p>
+        </div>
+      );
+    }
   } else if (detailTarget?.type === "monitoring_update") {
     const f = overview?.feed.find((x) => x.id === detailTarget.id);
     if (!f) {

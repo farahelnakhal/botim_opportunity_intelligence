@@ -65,8 +65,10 @@ def make_orchestrator():
 
 
 ANSWER_TYPES = {"analysis", "brief", "comparison", "evidence", "challenge", "assumptions",
-                "research_recommendation", "research_request_draft", "change_summary"}
-CITE_TYPES = {"evidence", "opportunity", "segment", "inflection", "experiment", "assumption"}
+                "research_recommendation", "research_request_draft", "change_summary",
+                "merchant_feedback", "new_opportunity_analysis"}
+CITE_TYPES = {"evidence", "opportunity", "segment", "inflection", "experiment", "assumption",
+             "merchant_finding", "competitor"}
 CITE_ROLES = {"primary", "contextual", "contradictory", "weak_lead", "excluded"}
 
 
@@ -315,11 +317,13 @@ class ToolBoundaries(unittest.TestCase):
         r = tools_registry.search_product_knowledge("supplier payment card")
         self.assertTrue(r["results"])
         for hit in r["results"]:
-            self.assertIn(hit["type"], ("evidence", "opportunity", "segment", "experiment"))
+            self.assertIn(hit["type"], ("evidence", "opportunity", "segment", "experiment",
+                                       "competitor", "inflection"))
         # never returns code/config/prompt matches
         r2 = tools_registry.search_product_knowledge("import sqlite3 def generate")
         for hit in r2["results"]:
-            self.assertIn(hit["type"], ("evidence", "opportunity", "segment", "experiment"))
+            self.assertIn(hit["type"], ("evidence", "opportunity", "segment", "experiment",
+                                       "competitor", "inflection"))
         with self.assertRaises(ToolError):
             tools_registry.search_product_knowledge("x")
 
