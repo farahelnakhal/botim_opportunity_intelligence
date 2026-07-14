@@ -145,6 +145,24 @@ def _quote_eligible(conn, obs, now):
     return True
 
 
+def _check_live_quotes_still_eligible(conn, proposal, now):
+    """Export-time-only check: re-verifies every quote baked into this
+    proposal's payload at generate() time is STILL eligible right now —
+    quote_permission, consent, retention, and active/non-suppressed status
+    can all change without touching the finding's counts/strength_band, so
+    this must never be inferred from _refresh_and_check_freshness's
+    fingerprint (numerator/denominator/support_count/contradiction_count/
+    strength_band/workflow_status/publication_status). A revoked quote is
+    never silently exported — export is blocked outright rather than
+    silently re-rendered without the quote."""
+    for quote in proposal["payload"].get("quotes", []):
+        obs = get_observation(conn, quote["observation_id"])
+        if not _quote_eligible(conn, obs, now):
+            raise Phase5Error(
+                f"quote permission is no longer valid for observation {quote['observation_id']} — "
+                "export refused rather than silently dropping the quote", code="quote_permission_denied")
+
+
 def _observation_provenance(conn, ref):
     obs = get_observation(conn, ref["observation_id"])
     answer_row = conn.execute("SELECT question_id FROM raw_answers WHERE answer_id=?",
@@ -476,7 +494,12 @@ def export(conn, config, principal, proposal_id, now, repo_root):
     knowledge-base/customer-evidence/merchant-voice-candidates/. Never
     mints an EV ID, never writes to
     knowledge-base/customer-evidence/records/, never accepts a caller-
-    supplied path or filename (always server-generated from proposal_id)."""
+    supplied path or filename (always server-generated from proposal_id).
+    Every quote baked into the payload is re-checked live immediately
+    before the write (_check_live_quotes_still_eligible) — quote
+    permission/consent/retention can change without touching the finding's
+    counts or strength_band, so this is never inferred from the freshness
+    fingerprint alone."""
     require_any_role(principal, ("reviewer", "admin"))
     current = get(conn, proposal_id)
     campaign = campaigns.get(conn, current["campaign_id"])
@@ -493,6 +516,7 @@ def export(conn, config, principal, proposal_id, now, repo_root):
                           "(call approve-export first)", code="proposal_not_exportable")
 
     _refresh_and_check_freshness(conn, current)
+    _check_live_quotes_still_eligible(conn, current, now)
 
     export_dir = repo_root.joinpath(*EXPORT_DIR_RELATIVE)
     export_dir.mkdir(parents=True, exist_ok=True)

@@ -12,9 +12,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fixtures import (ADMIN, RESEARCHER, REVIEWER, make_active_campaign_with_approved_guide,
                       make_approved_observation, make_dbs)
 
-from app import audit, candidates, findings, part_a_proposal, suppression
+from app import audit, candidates, findings, part_a_proposal, published_query, suppression
 from app.config import Config
 from app.models import Phase5Error
+from app import participants as participants_module
 
 
 class SyntheticExportTests(unittest.TestCase):
@@ -168,6 +169,60 @@ class SyntheticExportTests(unittest.TestCase):
         complete_event = next(e for e in events if e["action"] == "export_completed")
         self.assertNotIn("Suppliers cancel late payments", str(complete_event))
         self.assertIn("export_path", complete_event["safe_diff"])
+
+    def test_export_blocked_after_quote_permission_revoked(self):
+        text = "Suppliers cancel late payments every week."
+        obs, participant, _ = make_approved_observation(
+            self.conn, self.identity_conn, self.config, self._clock, self.camp, self.guide, text,
+            is_direct_quote=True, normalized_statement=text)
+        candidate = candidates.create(self.conn, RESEARCHER, self.config, {
+            "campaign_id": self.camp["campaign_id"], "finding_type": "pain",
+            "statement": "Suppliers cancel late payments.", "proposed_evidence_role": "supporting",
+            "observations": [{"observation_id": obs["observation_id"], "role": "supporting"}]}, self._clock())
+        candidates.submit(self.conn, RESEARCHER, candidate["candidate_id"], self._clock())
+        _approved_candidate, finding = candidates.approve(self.conn, self.config, REVIEWER,
+                                                          candidate["candidate_id"], self._clock())
+        findings.publish(self.conn, REVIEWER, finding["finding_id"], self._clock())
+
+        proposal = part_a_proposal.generate(self.conn, RESEARCHER, finding["finding_id"], self._clock())
+        self.assertEqual(len(proposal["payload"]["quotes"]), 1)  # baked in while permission was still true
+        part_a_proposal.submit(self.conn, RESEARCHER, proposal["proposal_id"], self._clock())
+        proposal = part_a_proposal.approve(self.conn, self.config, REVIEWER, proposal["proposal_id"],
+                                          self._clock())
+        part_a_proposal.approve_export(self.conn, self.config, REVIEWER, proposal["proposal_id"], self._clock())
+
+        # narrowing-only edit — NOT a withdrawal — so finding counts/strength_band
+        # (and therefore source_finding_version_hash) are completely untouched
+        participants_module.update(self.conn, self.identity_conn, self.config, RESEARCHER,
+                                   participant["participant_id"], {"quote_permission": False}, self._clock())
+
+        with self.assertRaises(Phase5Error) as ctx:
+            part_a_proposal.export(self.conn, self.config, REVIEWER, proposal["proposal_id"], self._clock(),
+                                  Path(self.export_root.name))
+        self.assertEqual(ctx.exception.code, "quote_permission_denied")
+
+        # no export file was created anywhere under the export root
+        candidates_dir = Path(self.export_root.name, "knowledge-base", "customer-evidence",
+                              "merchant-voice-candidates")
+        self.assertFalse(candidates_dir.exists() and any(candidates_dir.iterdir()))
+
+        # the audit trail contains no quote text or raw answer content
+        events = audit.list_for_object(self.conn, "part_a_proposal", proposal["proposal_id"])
+        self.assertTrue(events)
+        for event in events:
+            self.assertNotIn(text, str(event))
+            self.assertNotIn(text, str(event.get("safe_diff", {})))
+
+        # the proposal itself is preserved, still approved+export_approved, for audit
+        preserved = part_a_proposal.get(self.conn, proposal["proposal_id"])
+        self.assertEqual(preserved["workflow_status"], "approved")
+        self.assertEqual(preserved["publication_status"], "export_approved")
+        self.assertEqual(preserved["export_status"], "not_exported")
+
+        # standard published-quote queries also exclude the now-ineligible quote
+        live_quotes = published_query.get_merchant_quotes(self.conn, self._clock(),
+                                                          campaign_id=self.camp["campaign_id"])
+        self.assertEqual(live_quotes, [])
 
     def test_previously_exported_proposal_flagged_after_invalidation(self):
         proposal, _finding, participants_out = self._ready_proposal(participant_count=1)
