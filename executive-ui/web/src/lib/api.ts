@@ -61,13 +61,24 @@ export const api = {
       () => routeOffline(message),
     ),
 
-  // On-demand analysis of ANY opportunity. Live: Claude (or the Python scaffold).
-  // Offline: a client-side scaffold so a new conversation still produces a frame.
-  analyze: (prompt: string) =>
-    get<ChatResponse>(
-      `/analyze?q=${encodeURIComponent(prompt)}`,
-      () => analyzeOffline(prompt),
-    ),
+  // On-demand analysis of ANY opportunity. Live: Claude, a local model (Ollama),
+  // or the Python scaffold — chosen server-side. Conversation history is sent so
+  // follow-ups refine the same analysis in context. Offline: a client scaffold.
+  analyze: async (prompt: string, history?: { role: string; content: string }[]): Promise<ChatResponse> => {
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "content-type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ q: prompt, history: history ?? [] }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      liveOk = true;
+      return (await res.json()) as ChatResponse;
+    } catch {
+      liveOk = false;
+      return analyzeOffline(prompt);
+    }
+  },
 };
 
 const DIMENSIONS = [

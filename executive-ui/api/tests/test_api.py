@@ -135,6 +135,23 @@ class TestGenerate(unittest.TestCase):
     def test_offline_engine_labelled(self):
         self.assertEqual(self.r["generated_opportunity"]["engine"], "scaffold")
 
+    def test_provider_selection(self):
+        # provider() picks the engine from env with no key -> scaffold here
+        saved_key, saved_local = generate.API_KEY, generate.LOCAL_BASE_URL
+        try:
+            generate.API_KEY, generate.LOCAL_BASE_URL = "", ""
+            self.assertEqual(generate.provider(), "scaffold")
+            generate.LOCAL_BASE_URL = "http://localhost:11434/v1"
+            self.assertEqual(generate.provider(), "local")   # local model, no API key needed
+            generate.API_KEY = "sk-ant-x"
+            self.assertEqual(generate.provider(), "claude")  # key wins
+        finally:
+            generate.API_KEY, generate.LOCAL_BASE_URL = saved_key, saved_local
+
+    def test_history_is_accepted(self):
+        r = generate.analyze("refine for KSA", history=[{"role": "user", "content": "pharmacy lending"}])
+        self.assertTrue(r["generated_opportunity"]["generated"])
+
 
 class TestServerReadOnly(unittest.TestCase):
     @classmethod
@@ -161,11 +178,35 @@ class TestServerReadOnly(unittest.TestCase):
         _, data = self._get("/api/chat?q=why%20is%20OPP-010%20leading")
         self.assertEqual(data["intent"], "opportunity")
 
-    def test_no_write_methods(self):
-        # the handler defines no do_POST/do_PUT/do_DELETE — the server is read-only
-        self.assertFalse(hasattr(server.Handler, "do_POST"))
+    def test_no_kb_write_methods(self):
+        # POST exists only for compute endpoints (chat/analyze with history); it
+        # never writes to the knowledge base. No PUT/DELETE at all.
         self.assertFalse(hasattr(server.Handler, "do_PUT"))
         self.assertFalse(hasattr(server.Handler, "do_DELETE"))
+
+    def test_post_only_on_compute_endpoints(self):
+        import urllib.error
+        import urllib.request
+        # POST to a data endpoint is refused (405) — those are read-only GETs
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/api/overview", data=b"{}",
+            method="POST", headers={"content-type": "application/json"})
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            urllib.request.urlopen(req)
+        self.assertEqual(cm.exception.code, 405)
+
+    def test_post_analyze_with_history(self):
+        import urllib.request
+        body = json.dumps({"q": "pharmacy working capital in KSA",
+                           "history": [{"role": "user", "content": "hi"},
+                                       {"role": "assistant", "content": "..."}]}).encode()
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/api/analyze", data=body,
+            method="POST", headers={"content-type": "application/json"})
+        with urllib.request.urlopen(req) as r:
+            data = json.loads(r.read())
+        self.assertEqual(data["intent"], "new_analysis")
+        self.assertTrue(data["generated_opportunity"]["generated"])
 
     def test_unknown_endpoint_404(self):
         try:

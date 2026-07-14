@@ -43,11 +43,31 @@ STAGES = ["Understanding the opportunity", "Searching comparable markets",
           "Drafting a validation plan", "Finished"]
 
 # --- LLM config (the user sets these in their own environment) -------------- #
+# Three ways to run, chosen automatically in this order:
+#   1. Anthropic (cloud, needs a key): ANTHROPIC_API_KEY
+#   2. Local / self-hosted, NO KEY: an OpenAI-compatible endpoint such as Ollama
+#      (http://localhost:11434/v1) or LM Studio — set BOTIM_LLM_BASE_URL.
+#   3. Deterministic offline scaffold (no setup at all).
 API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
 # Deliberately NOT reusing this session's ANTHROPIC_BASE_URL (an internal proxy):
 # a self-hosted deployment should hit the public API with its own key.
 BASE_URL = os.environ.get("BOTIM_ANTHROPIC_BASE_URL", "https://api.anthropic.com").rstrip("/")
 MODEL = os.environ.get("BOTIM_ANALYSIS_MODEL", "claude-sonnet-5")
+
+# Local / OpenAI-compatible (no API key required for Ollama). If BOTIM_LLM_BASE_URL
+# is unset we auto-try a local Ollama at :11434 only when no Anthropic key is set.
+LOCAL_BASE_URL = os.environ.get("BOTIM_LLM_BASE_URL", "").rstrip("/")
+LOCAL_MODEL = os.environ.get("BOTIM_LLM_MODEL", "llama3.1")
+LOCAL_KEY = os.environ.get("BOTIM_LLM_API_KEY", "ollama")  # Ollama ignores it; some servers want any string
+
+
+def provider():
+    """Which engine will answer: 'claude' | 'local' | 'scaffold'."""
+    if API_KEY:
+        return "claude"
+    if LOCAL_BASE_URL:
+        return "local"
+    return "scaffold"
 
 _SYSTEM = (
     "You are a rigorous, skeptical product-opportunity analyst for BOTIM, the UAE super-app "
@@ -86,28 +106,68 @@ def _gen_id(prompt):
 _last_error = None  # surfaced to help the user debug their key/config
 
 
-def _call_llm(prompt, timeout=60):
-    """Return parsed JSON from Claude, or None on any failure (caller falls back)."""
-    global _last_error
-    _last_error = None
-    if not API_KEY:
-        return None
-    body = json.dumps({
-        "model": MODEL,
-        "max_tokens": 2000,
-        "system": _SYSTEM,
-        "messages": [{"role": "user", "content": f"Analyze this opportunity for BOTIM:\n\n{prompt}"}],
-    }).encode("utf-8")
+def _history_messages(prompt, history):
+    """Build a role/content message list from prior turns + the new prompt."""
+    msgs = []
+    for h in (history or []):
+        content = str(h.get("content") or h.get("text") or "").strip()
+        if not content:
+            continue
+        msgs.append({"role": "assistant" if h.get("role") == "assistant" else "user",
+                     "content": content[:4000]})
+    msgs.append({"role": "user", "content": f"Analyze/refine this opportunity for BOTIM:\n\n{prompt}"})
+    return msgs
+
+
+def _extract_json(text):
+    text = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
+    # tolerate leading/trailing prose from smaller local models: grab the outer {...}
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        text = text[start:end + 1]
+    return json.loads(text)
+
+
+def _call_anthropic(messages, timeout):
+    body = json.dumps({"model": MODEL, "max_tokens": 2000, "system": _SYSTEM,
+                       "messages": messages}).encode("utf-8")
     req = urllib.request.Request(
         f"{BASE_URL}/v1/messages", data=body, method="POST",
         headers={"content-type": "application/json", "x-api-key": API_KEY,
                  "anthropic-version": "2023-06-01"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        payload = json.loads(r.read())
+    text = "".join(b.get("text", "") for b in payload.get("content", []) if b.get("type") == "text")
+    return _extract_json(text)
+
+
+def _call_openai_compatible(messages, timeout):
+    """Ollama / LM Studio / any OpenAI-compatible /chat/completions endpoint. No key needed for Ollama."""
+    body = json.dumps({
+        "model": LOCAL_MODEL,
+        "messages": [{"role": "system", "content": _SYSTEM}] + messages,
+        "temperature": 0.4,
+        "stream": False,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        f"{LOCAL_BASE_URL}/chat/completions", data=body, method="POST",
+        headers={"content-type": "application/json", "authorization": f"Bearer {LOCAL_KEY}"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        payload = json.loads(r.read())
+    text = payload["choices"][0]["message"]["content"]
+    return _extract_json(text)
+
+
+def _call_llm(prompt, history=None, timeout=90):
+    """Return parsed JSON from the configured LLM, or None on any failure."""
+    global _last_error
+    _last_error = None
+    p = provider()
+    if p == "scaffold":
+        return None
+    messages = _history_messages(prompt, history)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            payload = json.loads(r.read())
-        text = "".join(b.get("text", "") for b in payload.get("content", []) if b.get("type") == "text")
-        text = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
-        return json.loads(text)
+        return _call_anthropic(messages, timeout) if p == "claude" else _call_openai_compatible(messages, timeout)
     except Exception as exc:
         _last_error = f"{type(exc).__name__}: {exc}"
         return None
@@ -205,7 +265,7 @@ def _build_opportunity(prompt, data, engine):
     }
 
 
-def analyze(prompt, root=None):  # noqa: ARG001 (root kept for signature parity)
+def analyze(prompt, root=None, history=None):  # noqa: ARG001 (root kept for signature parity)
     prompt = (prompt or "").strip()
     if not prompt:
         return {"intent": "new_analysis", "stages": STAGES, "decision_banner": DECISION_BANNER,
@@ -213,20 +273,21 @@ def analyze(prompt, root=None):  # noqa: ARG001 (root kept for signature parity)
                 "blocks": [{"type": "empty", "text": "Nothing to analyze yet."}],
                 "generated_opportunity": None}
 
-    data = _call_llm(prompt)
-    engine = "claude"
+    data = _call_llm(prompt, history)
+    engine = provider()  # 'claude' | 'local' | 'scaffold'
     if data is None:
         data = _scaffold(prompt)
         engine = "scaffold"
     opp = _build_opportunity(prompt, data, engine)
 
     if engine == "claude":
-        engine_note = "Generated by Claude from your prompt — an unvalidated first-pass hypothesis. "
-    elif API_KEY and _last_error:
-        engine_note = (f"Claude call failed ({_last_error}); showing an offline scaffold instead. "
-                       "Check ANTHROPIC_API_KEY / BOTIM_ANALYSIS_MODEL. ")
+        engine_note = "Generated by Claude — an unvalidated first-pass hypothesis. "
+    elif engine == "local":
+        engine_note = f"Generated by your local model ({LOCAL_MODEL}) — an unvalidated first-pass hypothesis. "
+    elif provider() != "scaffold" and _last_error:
+        engine_note = (f"The model call failed ({_last_error}); showing an offline scaffold instead. ")
     else:
-        engine_note = "Offline scaffold (no ANTHROPIC_API_KEY set) — a frame to run the analysis yourself. "
+        engine_note = "Offline scaffold (no model configured) — a frame to run the analysis yourself. "
     blocks = [
         {"type": "opportunity", "opportunity": opp},
         {"type": "scorecard", "opportunity": opp},

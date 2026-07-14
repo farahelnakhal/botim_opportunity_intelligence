@@ -50,8 +50,26 @@ const Ctx = createContext<AppState | null>(null);
 let seq = 0;
 const nextId = () => `m${++seq}`;
 
+// --- lightweight persistence so conversations & analyses survive a reload ---
+const LS = { conv: "botim.conversations", gen: "botim.generated", theme: "botim.theme" };
+function load<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function save(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* quota / disabled storage — non-fatal */
+  }
+}
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [theme, setTheme] = useState<"light" | "dark">(() => load<"light" | "dark">(LS.theme, "light"));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
@@ -59,14 +77,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("chat");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [conversations, setConversations] = useState<Record<string, Message[]>>({});
+  const [conversations, setConversations] = useState<Record<string, Message[]>>(() => load(LS.conv, {}));
   const [drawerOppId, setDrawerOppId] = useState<string | null>(null);
-  const [generated, setGenerated] = useState<Opportunity[]>([]);
+  const [generated, setGenerated] = useState<Opportunity[]>(() => load<Opportunity[]>(LS.gen, []));
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     document.body.setAttribute("data-theme", theme);
+    save(LS.theme, theme);
   }, [theme]);
+
+  useEffect(() => save(LS.conv, conversations), [conversations]);
+  useEffect(() => save(LS.gen, generated), [generated]);
 
   useEffect(() => {
     let cancel = false;
@@ -145,7 +167,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // follow-ups inside a committed opportunity use the read-only router.
       if (isGenerated(pid)) {
         const topic = generated.find((g) => g.id === pid)?.name ?? "";
-        const resp = await api.analyze(`${topic}. Follow-up: ${message}`);
+        const history = (conversations[pid] ?? [])
+          .filter((m) => m.text)
+          .map((m) => ({ role: m.role, content: m.text }));
+        const resp = await api.analyze(`${topic}. Follow-up: ${message}`, history);
         if (resp.generated_opportunity) {
           const updated = { ...resp.generated_opportunity, id: pid, name: topic };
           setGenerated((g) => g.map((x) => (x.id === pid ? updated : x)));
@@ -156,7 +181,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
       await deliver(pid, message, await api.chat(message));
     },
-    [activeProjectId, overview, generated, isGenerated, deliver],
+    [activeProjectId, overview, generated, isGenerated, deliver, conversations],
   );
 
   const analyzeNew = useCallback(
