@@ -1,4 +1,5 @@
 import { useApp } from "../store";
+import { humanize, nameMap } from "../lib/labels";
 import Icon, { type IconName } from "./Icon";
 
 function iconForKind(kind: string): IconName {
@@ -11,6 +12,7 @@ function iconForKind(kind: string): IconName {
 export default function Updates() {
   const { overview } = useApp();
   const feed = overview?.feed ?? [];
+  const names = nameMap([...(overview?.opportunities ?? []), ...(overview?.archived ?? [])]);
 
   return (
     <section className="view" id="view-updates">
@@ -41,8 +43,8 @@ export default function Updates() {
                 </div>
                 <div className="list-row-main">
                   <div className="list-row-title">
-                    {f.title}
-                    {f.detail && f.detail !== "—" && <span className="chip">{f.detail}</span>}
+                    {humanize(f.title, names)}
+                    {f.detail && f.detail !== "—" && <span className="chip">{humanize(f.detail, names)}</span>}
                   </div>
                   {f.before_after && (
                     <div className="list-row-sub">{f.before_after.before} → {f.before_after.after}</div>

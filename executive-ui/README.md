@@ -45,8 +45,54 @@ python3 executive-ui/build.py --serve    # build, then serve dist/ at http://loc
 | `/api/journal` | decision-journal predictions + calibration (Brier) |
 | `/api/monitoring` | monitoring events, alerts, summaries |
 | `/api/chat?q=…` | deterministic intent router → progress stages + typed cards |
+| `/api/analyze?q=…` | on-demand analysis of ANY opportunity → generated scorecard + research plan |
 
 The assistant auto-routes each prompt (`api/router.py`) to the right read-model; the user never picks a module. Routing is rule-based and transparent — no LLM, no hidden state, no fabrication.
+
+## Analyze any opportunity (new conversation)
+
+A **new conversation** from the Home screen runs a fresh customer-search + opportunity analysis for whatever you describe — any market, not just the committed SME set. It produces a new "analysis" project with a segment, job-to-be-done, hypothesis, a full 17-dimension scorecard, evidence gaps, and a non-leading customer-research plan.
+
+Honesty is enforced **by construction** (`api/generate.py`), not by trusting the model:
+
+- Every dimension of a generated scorecard is `assumption = true` (there is no evidence yet), so the **real engine** (`opportunity_engine.scoring.evaluate`) caps it at *"promising (unvalidated)"* — a generated opportunity can never come out "strong", and confidence is always "low".
+- The engine, not the LLM, computes the composite, assumption count, and critical flags.
+- Nothing is written to the knowledge base — the analysis is ephemeral.
+
+**Engine selection** — chosen automatically in this order:
+
+1. **Anthropic (cloud, needs a key)** — set `ANTHROPIC_API_KEY`.
+2. **Local model, NO API KEY** — any OpenAI-compatible endpoint (Ollama, LM Studio, vLLM). Set `BOTIM_LLM_BASE_URL`.
+3. **Deterministic offline scaffold** — no setup at all; a labelled frame to run the analysis yourself.
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | *(unset)* | Use Claude (cloud). |
+| `BOTIM_ANALYSIS_MODEL` | `claude-sonnet-5` | Claude model. |
+| `BOTIM_LLM_BASE_URL` | *(unset)* | OpenAI-compatible local endpoint, e.g. `http://localhost:11434/v1` for Ollama. **No key needed.** |
+| `BOTIM_LLM_MODEL` | `llama3.1` | Local model name. |
+| `BOTIM_ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | Override the Anthropic base URL. |
+
+```bash
+# Option 1 — cloud (needs a key)
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# Option 2 — local, NO API KEY (run a model on your own machine)
+#   ollama pull llama3.1 && ollama serve
+export BOTIM_LLM_BASE_URL=http://localhost:11434/v1
+export BOTIM_LLM_MODEL=llama3.1
+
+python3 executive-ui/api/server.py --port 8000
+
+# verify which engine actually answers (works for all three):
+python3 executive-ui/api/server.py --check-llm "Invoice financing for UAE logistics SMEs"
+```
+
+**Conversation memory.** Follow-up questions inside a generated analysis send the full conversation history to the model, so it refines the same opportunity in context (e.g. "now focus on Saudi Arabia" updates the segment, market, and scores). Conversations and generated analyses are persisted in the browser (`localStorage`), so they survive a page reload.
+
+## Plain-language UI (no codes)
+
+The interface is written for a non-technical audience: internal identifiers (opportunity, evidence, experiment, segment, and prediction codes) never appear on screen. Opportunities are shown by name, evidence by its title, experiments by their title, and monitoring "affected" items are mapped back to opportunity names (`web/src/lib/labels.ts`). The identifiers still exist in the engines and API — they're just not surfaced in the UI.
 
 ## Architecture (read-only, single source of truth)
 

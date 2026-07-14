@@ -145,7 +145,7 @@ def route(message, root=None):
                   if e["ev_id"] in {r["ev_id"] for r in target.get("strongest_evidence", [])}]
             blocks += [{"type": "evidence", "data": e} for e in ev[:4]]
             return wrap("opportunity", blocks,
-                        f"{target['id']} — {target['name']}. All 17 scoring dimensions are shown; the "
+                        f"{target['name']}. All 17 scoring dimensions are shown below; the "
                         "composite is reference only.")
 
     # --- portfolio / everything ------------------------------------------- #

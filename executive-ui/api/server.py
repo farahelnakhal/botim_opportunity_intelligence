@@ -21,11 +21,11 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 try:
-    from . import router, serialize
+    from . import generate, router, serialize
 except ImportError:  # run directly as a script (python3 executive-ui/api/server.py)
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from api import router, serialize
+    from api import generate, router, serialize
 
 UI_DIR = Path(__file__).resolve().parents[1]
 WEB_DIST = UI_DIR / "web" / "dist"
@@ -62,9 +62,39 @@ class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):  # CORS preflight
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Accept")
         self.end_headers()
+
+    def _read_json_body(self):
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if not length:
+            return {}
+        try:
+            return json.loads(self.rfile.read(length) or b"{}")
+        except Exception:
+            return {}
+
+    # POST is used ONLY for compute endpoints that need a request body (chat /
+    # analyze with conversation history). It never writes to the knowledge base
+    # or any engine state — it computes a response and returns it.
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+        if not path.startswith("/api/"):
+            return self._error(404, "not found")
+        sub = path[len("/api"):]
+        body = self._read_json_body()
+        msg = str(body.get("q") or body.get("message") or "")
+        history = body.get("history") if isinstance(body.get("history"), list) else None
+        try:
+            if sub == "/analyze":
+                return self._json(generate.analyze(msg, self.repo_root, history=history))
+            if sub == "/chat":
+                return self._json(router.route(msg, self.repo_root))
+            return self._error(405, f"{sub} does not accept POST (read-only)")
+        except Exception as exc:
+            return self._error(500, f"{type(exc).__name__}: {exc}")
 
     # -- routing ----------------------------------------------------------- #
     def do_GET(self):
@@ -99,6 +129,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/chat":
                 msg = (query.get("q") or query.get("message") or [""])[0]
                 return self._json(router.route(msg, root))
+            if path == "/analyze":
+                msg = (query.get("q") or query.get("message") or [""])[0]
+                return self._json(generate.analyze(msg, root))
             return self._error(404, f"unknown endpoint {path}")
         except Exception as exc:  # never leak a stack trace to the client
             return self._error(500, f"{type(exc).__name__}: {exc}")
@@ -129,7 +162,24 @@ def main():
     ap = argparse.ArgumentParser(description="Read-only Opportunity Intelligence API")
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--root", default=str(UI_DIR.parents[0]))
+    ap.add_argument("--check-llm", metavar="PROMPT", nargs="?", const="Invoice financing for UAE logistics SMEs",
+                    help="Run one analysis and report whether Claude answered (verifies ANTHROPIC_API_KEY), then exit.")
     args = ap.parse_args()
+
+    if args.check_llm is not None:
+        want = generate.provider()
+        r = generate.analyze(args.check_llm, args.root)
+        o = r["generated_opportunity"]
+        model = generate.MODEL if want == "claude" else generate.LOCAL_MODEL if want == "local" else "—"
+        print(f"configured provider   : {want}" + (f" ({model})" if want != "scaffold" else ""))
+        print(f"engine that answered  : {o['engine']}"
+              + ("  ✓ working" if o["engine"] == want and want != "scaffold"
+                 else "  (offline scaffold)" if o["engine"] == "scaffold" else ""))
+        if want != "scaffold" and o["engine"] == "scaffold" and generate._last_error:
+            print(f"model error           : {generate._last_error}")
+        print(f"result                : {o['name']} — {o['classification']} "
+              f"(composite {o['composite']}, {o['assumption_count']}/17 assumptions)")
+        return 0 if (want == "scaffold" or o["engine"] == want) else 1
     httpd = make_server(args.port, args.root)
     print(f"Read-only API on http://127.0.0.1:{args.port}  (root={Handler.repo_root})")
     print("Endpoints: /api/overview /api/opportunities/OPP-nnn /api/commercial/OPP-nnn "

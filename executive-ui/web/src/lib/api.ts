@@ -60,7 +60,92 @@ export const api = {
       `/chat?q=${encodeURIComponent(message)}`,
       () => routeOffline(message),
     ),
+
+  // On-demand analysis of ANY opportunity. Live: Claude, a local model (Ollama),
+  // or the Python scaffold — chosen server-side. Conversation history is sent so
+  // follow-ups refine the same analysis in context. Offline: a client scaffold.
+  analyze: async (prompt: string, history?: { role: string; content: string }[]): Promise<ChatResponse> => {
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "content-type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ q: prompt, history: history ?? [] }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      liveOk = true;
+      return (await res.json()) as ChatResponse;
+    } catch {
+      liveOk = false;
+      return analyzeOffline(prompt);
+    }
+  },
 };
+
+const DIMENSIONS = [
+  "pain_severity", "pain_frequency", "financial_impact", "workaround_cost", "switching_intent",
+  "willingness_to_pay", "digital_readiness", "payment_volume", "credit_need",
+  "botim_distribution_advantage", "transaction_data_advantage", "payment_revenue_potential",
+  "lending_revenue_potential", "credit_risk_visibility", "competitive_defensibility",
+  "ease_of_validation", "mvp_feasibility_7wk",
+];
+
+function analyzeOffline(prompt: string): ChatResponse {
+  const banner = "No product or build decision has been made.";
+  const title = prompt.trim().replace(/\.$/, "").slice(0, 80);
+  const id = "GEN-" + Math.abs(hash(prompt.toLowerCase())).toString(16).slice(0, 4).toUpperCase();
+  const factors = DIMENSIONS.map((k) => ({
+    key: k, score: 3, assumption: true,
+    basis: "Not yet assessed — assign after first customer interviews.", evidence_ids: [] as string[],
+  }));
+  const opp: Opportunity = {
+    id, name: title.charAt(0).toUpperCase() + title.slice(1),
+    raw_score: factors.reduce((s, f) => s + f.score, 0), raw_max: 85, composite: 3.0,
+    classification: "promising", classification_label: "Promising (unvalidated)",
+    confidence: "low", assumption_count: 17, factors, critical_flags: [],
+    segment: "To be defined — narrow to a specific, reachable segment first.",
+    jtbd: "To be articulated from customer interviews.",
+    hypothesis: `Unvalidated hypothesis from your prompt: "${title}". No evidence gathered yet — every dimension is an assumption to test.`,
+    strongest_evidence: [], contradictory_evidence: "None gathered yet — actively seek disconfirming evidence.",
+    rejection_conditions: "Define a pre-committed kill threshold before any experiment.",
+    validation_plan: "Run first customer interviews.", score_history: [],
+    latest_change: "Generated offline (no server)", latest_alert: "—",
+    next_action: "Run first customer interviews.", profile_path: "(generated — not committed)",
+    is_archived: false, impact_history: [], brief_envelope: null, generated: true, engine: "scaffold",
+  };
+  return {
+    intent: "new_analysis",
+    stages: ["Understanding the opportunity", "Mapping customer pain", "Scoring 17 dimensions", "Drafting a validation plan", "Finished"],
+    decision_banner: banner,
+    text: "Offline scaffold (no server / no API key) — a frame to run the analysis yourself. All 17 dimensions are assumptions to test.",
+    blocks: [
+      { type: "opportunity", opportunity: opp },
+      { type: "scorecard", opportunity: opp },
+      { type: "research_plan", data: {
+        questions: [
+          "Walk me through the last time you faced this problem — what did you do?",
+          "What did that cost you (time, money, missed opportunities)?",
+          "What have you tried to solve it, and what happened?",
+          "Who else is involved in that decision?",
+          "What would have to be true for you to switch?",
+        ],
+        gaps: [
+          "Is the pain frequent and severe enough to drive switching?",
+          "Is there observed willingness to pay, not just stated interest?",
+          "Does BOTIM have a real distribution or data advantage here?",
+          "What is the competitive gap, and how long does it stay open?",
+        ],
+      } },
+      { type: "banner", text: banner },
+    ],
+    generated_opportunity: opp,
+  };
+}
+
+function hash(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  return h;
+}
 
 // --- offline routing fallback (mirrors api/router.py at a high level) -------
 function routeOffline(message: string): ChatResponse {

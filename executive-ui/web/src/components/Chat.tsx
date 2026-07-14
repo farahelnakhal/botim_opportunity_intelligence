@@ -5,7 +5,7 @@ import Icon from "./Icon";
 import {
   Banner, BriefEnvelopeCard, CalibrationCard, CommercialModelCard, DecisionJournalEntry,
   EvidenceCard, ExecutiveSummaryCard, ExperimentCard, FeedItemCard, MonitoringAlertCard,
-  OpportunityCard, OpportunityMini, Scorecard,
+  OpportunityCard, OpportunityMini, ResearchPlanCard, Scorecard,
 } from "./cards";
 
 /* ---------------- progress timeline ---------------- */
@@ -81,6 +81,7 @@ function renderOne(b: ChatBlock): JSX.Element | null {
     case "calibration": return <CalibrationCard data={b.data} />;
     case "decision_journal": return <DecisionJournalEntry data={b.data} />;
     case "evidence": return <EvidenceCard data={b.data} />;
+    case "research_plan": return <ResearchPlanCard data={b.data} />;
     case "banner": return <Banner text={b.text || ""} />;
     case "empty": return <div className="empty-state"><div className="empty-state-title">Nothing to show</div>{b.text}</div>;
     default: return null;

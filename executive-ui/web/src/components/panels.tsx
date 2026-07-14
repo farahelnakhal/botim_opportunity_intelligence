@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
 import { useApp } from "../store";
-import { confidenceLabel, tagLabel } from "../lib/format";
+import { confidenceLabel, humanFactorKey, tagLabel } from "../lib/format";
+import { humanize, nameMap } from "../lib/labels";
 import type { Brief, Experiment, JournalPayload, MonitoringPayload, Opportunity } from "../types";
 import Icon from "./Icon";
 import Collapsible from "./Collapsible";
@@ -65,8 +66,8 @@ export function KnowledgePanel() {
               <Icon name="file" size={16} />
             </div>
             <div className="list-row-main">
-              <div className="list-row-title">{e.ev_id}{e.weak && <span className="chip">lead</span>}</div>
-              <div className="list-row-sub">{e.title !== "—" ? e.title : "(no title recorded)"}</div>
+              <div className="list-row-title">{e.title !== "—" ? e.title : "Customer-evidence record"}{e.weak && <span className="chip">lead</span>}</div>
+              <div className="list-row-sub">{humanize(e.segment) !== "—" ? humanize(e.segment) : "Segment not recorded"}</div>
             </div>
             <div className="list-row-meta">strength {String(e.strength)} · {confidenceLabel(e.confidence)}</div>
           </div>
@@ -78,19 +79,79 @@ export function KnowledgePanel() {
 }
 
 /* ---------------- Interviews / experiments ---------------- */
-export function InterviewsPanel() {
+// Turn a scoring dimension into a non-leading customer-interview question.
+const QUESTION_TEMPLATES: Record<string, string> = {
+  pain_severity: "Tell me about the last time this problem cost you — what happened?",
+  pain_frequency: "How often does this situation come up in a typical month?",
+  financial_impact: "Roughly what does this problem cost you when it happens?",
+  workaround_cost: "How do you handle it today, and what does that workaround cost you?",
+  switching_intent: "What would have to be true for you to switch to a new way of doing this?",
+  willingness_to_pay: "If something solved this reliably, what would a fair monthly price feel like?",
+  digital_readiness: "Which tools or apps do you already use to run this part of your business?",
+  payment_volume: "Roughly what monthly payment volume flows through your business?",
+  credit_need: "When cash is tight, how do you currently bridge the gap?",
+  botim_distribution_advantage: "How do you currently discover and sign up for services like this?",
+  transaction_data_advantage: "Would you be comfortable sharing transaction history to get a better offer?",
+  payment_revenue_potential: "What do you pay today to accept or move payments?",
+  lending_revenue_potential: "Have you borrowed for working capital before — on what terms?",
+  credit_risk_visibility: "What causes a bad month for your cash flow?",
+  competitive_defensibility: "Who else offers something like this to you today?",
+  ease_of_validation: "Would you be willing to try an early version and give feedback?",
+  mvp_feasibility_7wk: "What is the one feature that would make this a must-have on day one?",
+};
+
+function suggestedSurvey(opp: Opportunity) {
+  const weak = opp.factors
+    .filter((f) => f.assumption)
+    .sort((a, b) => a.score - b.score)
+    .slice(0, 5);
+  return weak.map((f) => ({ key: f.key, q: QUESTION_TEMPLATES[f.key] || `Tell me about ${f.key.replace(/_/g, " ")}.` }));
+}
+
+export function InterviewsPanel({ opp }: { opp: Opportunity }) {
   const [exps, setExps] = useState<Experiment[] | null>(null);
   useEffect(() => { api.experiments().then(setExps); }, []);
-  if (!exps) return <PanelSkeleton />;
+  const survey = suggestedSurvey(opp);
   return (
     <div className="panel-wrap">
       <div className="panel-title-row">
         <div>
-          <div className="panel-title">Validation experiments</div>
-          <div className="panel-sub">Each experiment has a pre-committed success and kill threshold, set before the run</div>
+          <div className="panel-title">Interviews</div>
+          <div className="panel-sub">Survey customers to validate the assumptions behind this opportunity</div>
         </div>
+        <button className="btn btn-primary"><Icon name="plus" size={14} /> New survey</button>
       </div>
-      {exps.length === 0 ? <EmptyPanel icon="check-circle" title="No experiments" note="No VE specs are committed yet." /> : (
+
+      {survey.length > 0 && (
+        <div className="suggested-survey">
+          <div className="suggested-survey-eyebrow"><Icon name="star" size={14} /> Suggested · closes the weakest assumptions on this opportunity</div>
+          <div className="suggested-survey-title">Customer-validation survey</div>
+          <div className="suggested-survey-desc">
+            Generated from the lowest-scoring, evidence-free dimensions — the questions most likely to change the
+            recommendation. Non-leading, ordered so pain comes before concept.
+          </div>
+          <div className="survey-q-list">
+            {survey.map((s, i) => (
+              <div className="survey-q-row" key={s.key}>
+                <span className="survey-q-num">{String(i + 1).padStart(2, "0")}</span>
+                <span className="survey-q-text">{s.q}</span>
+                <span className="survey-q-type">{humanFactorKey(s.key)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="suggested-survey-foot">
+            <div className="suggested-survey-reach">These five close the biggest evidence gaps before any build commitment.</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn">Edit questions</button>
+              <button className="btn btn-primary">Send to customers</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="section-label" style={{ marginTop: 0 }}>Validation experiments</div>
+      <div className="panel-sub" style={{ marginBottom: 12 }}>Each experiment has a pre-committed success and kill threshold, set before the run.</div>
+      {!exps ? <PanelSkeleton /> : exps.length === 0 ? <EmptyPanel icon="check-circle" title="No experiments yet" note="Committed experiments will appear here." /> : (
         <div className="list-card" style={{ padding: 0 }}>
           {exps.map((e) => {
             const status = (e.result?.status || e.status || "designed").toLowerCase();
@@ -99,11 +160,11 @@ export function InterviewsPanel() {
               <div className="file-row" key={e.id}>
                 <div className="file-thumb"><Icon name="check-circle" size={18} /></div>
                 <div className="file-main">
-                  <div className="file-name">{e.id} — {e.title}</div>
-                  <div className="file-summary">{e.hypothesis}</div>
+                  <div className="file-name">{e.title}</div>
+                  <div className="file-summary">{humanize(e.hypothesis)}</div>
                   <div className="file-tags">
-                    <span className="chip">Success: {truncate(e.success_threshold)}</span>
-                    <span className="chip">Kill: {truncate(e.kill_threshold)}</span>
+                    <span className="chip">Success: {truncate(humanize(e.success_threshold))}</span>
+                    <span className="chip">Kill: {truncate(humanize(e.kill_threshold))}</span>
                   </div>
                 </div>
                 <div className="file-meta-col"><span className={`pill-status ${done ? "complete" : "designed"}`}>{status}</span></div>
@@ -122,6 +183,7 @@ export function ReportsPanel() {
   const [journal, setJournal] = useState<JournalPayload | null>(null);
   useEffect(() => { api.journal().then(setJournal); }, []);
   const briefs: Brief[] = (overview?.briefs ?? []).filter((b) => b.exists);
+  const names = nameMap([...(overview?.opportunities ?? []), ...(overview?.archived ?? [])]);
 
   return (
     <div className="panel-wrap">
@@ -139,11 +201,12 @@ export function ReportsPanel() {
           {briefs.map((b) => (
             <div className="report-card" key={b.opportunity_id}>
               <div className="report-top">
-                <div className="report-title">{b.opportunity_id} — recommendation</div>
+                <div className="report-title">{names[b.opportunity_id] || "Opportunity"} — recommendation</div>
                 <span className="pill-status ready">Committed</span>
               </div>
-              <div className="report-meta">{b.path}</div>
-              <div className="report-preview">{firstPara(b.body)}</div>
+              <div className="report-meta">Executive recommendation brief</div>
+              <div className="report-preview">{humanize(firstPara(b.body))}</div>
+              <div className="report-actions"><button className="btn btn-sm"><Icon name="external" size={12} /> Export</button></div>
             </div>
           ))}
         </div>
@@ -162,6 +225,8 @@ export function ReportsPanel() {
 
 /* ---------------- Monitoring ---------------- */
 export function MonitoringPanel() {
+  const { overview } = useApp();
+  const names = nameMap([...(overview?.opportunities ?? []), ...(overview?.archived ?? [])]);
   const [mon, setMon] = useState<MonitoringPayload | null>(null);
   useEffect(() => { api.monitoring().then(setMon); }, []);
   if (!mon) return <PanelSkeleton />;
@@ -194,12 +259,11 @@ export function MonitoringPanel() {
             <div className="mon-group-label"><span className={`mon-dot ${g.tier}`} />{g.label}</div>
             {items.map((e) => (
               <div className={`mon-card ${g.tier}`} key={e.id}>
-                <div className="mon-card-title">{e.title}</div>
+                <div className="mon-card-title">{humanize(e.title, names)}</div>
                 <div className="mon-fields">
                   <div><div className="mon-field-label">Detected</div><div className="mon-field-value">{e.detected_at}</div></div>
-                  <div><div className="mon-field-label">Signal</div><div className="mon-field-value">{e.signal_type || e.adapter || "—"}</div></div>
-                  {e.kb_links?.length ? <div><div className="mon-field-label">Affected</div><div className="mon-field-value">{e.kb_links.join(", ")}</div></div> : null}
-                  {e.entity && <div><div className="mon-field-label">Source</div><div className="mon-field-value">{e.entity}</div></div>}
+                  <div><div className="mon-field-label">Signal</div><div className="mon-field-value" style={{ textTransform: "capitalize" }}>{String(e.signal_type || e.adapter || "—").replace(/_/g, " ")}</div></div>
+                  {e.kb_links?.length ? <div><div className="mon-field-label">Affected</div><div className="mon-field-value">{humanize(e.kb_links.join(", "), names)}</div></div> : null}
                 </div>
               </div>
             ))}
@@ -267,7 +331,7 @@ export function SourcesPanel({ opp }: { opp: Opportunity }) {
       <div className="panel-title-row">
         <div>
           <div className="panel-title">Sources</div>
-          <div className="panel-sub">Every citation behind {opp.id}'s scorecard, linked to the evidence store</div>
+          <div className="panel-sub">Every source behind this analysis, linked to the evidence on file</div>
         </div>
       </div>
       {refs.length === 0 ? (
@@ -278,8 +342,8 @@ export function SourcesPanel({ opp }: { opp: Opportunity }) {
             <div className="file-row" key={e.ev_id}>
               <div className="file-thumb"><Icon name={e.resolved ? "file" : "alert"} size={18} /></div>
               <div className="file-main">
-                <div className="file-name">{e.ev_id}</div>
-                <div className="file-summary">{e.title !== "—" ? e.title : "(no title recorded)"}</div>
+                <div className="file-name">{e.title !== "—" ? e.title : "Customer-evidence record"}</div>
+                <div className="file-summary">{humanize(e.segment) !== "—" ? humanize(e.segment) : "Segment not recorded"}</div>
                 <div className="file-tags"><span className="chip">{e.role}</span>{e.weak && <span className="chip">lead</span>}</div>
               </div>
               <div className="file-meta-col">
@@ -295,42 +359,116 @@ export function SourcesPanel({ opp }: { opp: Opportunity }) {
 }
 
 /* ---------------- Settings ---------------- */
+const MARKETS: Record<string, { flag: string; name: string; regulator: string; currency: string }> = {
+  AE: { flag: "🇦🇪", name: "United Arab Emirates", regulator: "Central Bank of the UAE (CBUAE)", currency: "AED — UAE Dirham" },
+  SA: { flag: "🇸🇦", name: "Saudi Arabia", regulator: "Saudi Central Bank (SAMA)", currency: "SAR — Saudi Riyal" },
+  EG: { flag: "🇪🇬", name: "Egypt", regulator: "Central Bank of Egypt (CBE)", currency: "EGP — Egyptian Pound" },
+  PK: { flag: "🇵🇰", name: "Pakistan", regulator: "State Bank of Pakistan (SBP)", currency: "PKR — Pakistani Rupee" },
+  JO: { flag: "🇯🇴", name: "Jordan", regulator: "Central Bank of Jordan (CBJ)", currency: "JOD — Jordanian Dinar" },
+};
+
 export function SettingsPanel({ opp }: { opp: Opportunity }) {
+  const [country, setCountry] = useState("AE");
+  const [notify, setNotify] = useState(true);
+  const [autoProcess, setAutoProcess] = useState(true);
+  const [recipients, setRecipients] = useState<string[]>(["strategy@botim.ai", "research@botim.ai"]);
+  const [newEmail, setNewEmail] = useState("");
+  const m = MARKETS[country];
+  const inbox = `${opp.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 28)}@botim.ai`;
+
+  const addRecipient = () => {
+    const e = newEmail.trim();
+    if (e && !recipients.includes(e)) setRecipients((r) => [...r, e]);
+    setNewEmail("");
+  };
+
   return (
     <div className="panel-wrap" style={{ maxWidth: 680 }}>
       <div className="panel-title-row">
         <div>
           <div className="panel-title">Settings</div>
-          <div className="panel-sub">Configuration for {opp.id} — {opp.name}</div>
+          <div className="panel-sub">Configuration for {opp.name}</div>
         </div>
       </div>
+
       <div className="settings-section">
         <div className="settings-section-title">General</div>
-        <div className="field-row"><div className="field-label">Opportunity</div><input className="field-input" value={opp.name} readOnly /></div>
+        <div className="field-row"><div className="field-label">Opportunity</div><input className="field-input" defaultValue={opp.name} /></div>
         <div className="field-row"><div className="field-label">Classification</div><input className="field-input" value={tagLabel(opp.classification)} readOnly /></div>
-        <div className="field-row" style={{ marginBottom: 0 }}><div className="field-label">Segment</div><input className="field-input" value={opp.segment} readOnly /></div>
+        <div className="field-row" style={{ marginBottom: 0 }}><div className="field-label">Segment</div><input className="field-input" value={humanize(opp.segment)} readOnly /></div>
       </div>
+
+      <div className="settings-section">
+        <div className="settings-section-title">Market</div>
+        <div className="field-row">
+          <div className="field-label">Country</div>
+          <select className="field-input" value={country} onChange={(e) => setCountry(e.target.value)}>
+            {Object.entries(MARKETS).map(([code, mk]) => (
+              <option key={code} value={code}>{mk.flag} {mk.name}</option>
+            ))}
+          </select>
+          <div className="toggle-row-sub">Sets the regulator, currency, and comparable market data this analysis references.</div>
+        </div>
+        <div className="field-row"><div className="field-label">Regulator</div><input className="field-input" value={m.regulator} readOnly /></div>
+        <div className="field-row" style={{ marginBottom: 0 }}><div className="field-label">Currency</div><input className="field-input" value={m.currency} readOnly /></div>
+      </div>
+
+      <div className="settings-section">
+        <div className="settings-section-title">Email ingestion</div>
+        <div className="field-row">
+          <div className="field-label">Incoming email address</div>
+          <div className="email-box">
+            <span>{inbox}</span>
+            <button className="btn btn-sm" onClick={() => navigator.clipboard?.writeText(inbox)}>Copy</button>
+          </div>
+          <div className="toggle-row-sub">Forward reports or evidence here — attachments are summarised and filed automatically.</div>
+        </div>
+        <div className="toggle-row">
+          <div>
+            <div className="toggle-row-text">Auto-process incoming attachments</div>
+            <div className="toggle-row-sub">Extract, summarise, and file on arrival</div>
+          </div>
+          <button className={`switch${autoProcess ? " on" : ""}`} onClick={() => setAutoProcess((v) => !v)} />
+        </div>
+      </div>
+
+      <div className="settings-section">
+        <div className="settings-section-title">Notification recipients</div>
+        <div className="toggle-row" style={{ marginBottom: 12 }}>
+          <div>
+            <div className="toggle-row-text">Email members on critical alerts</div>
+            <div className="toggle-row-sub">Send the people below an email when a critical signal fires</div>
+          </div>
+          <button className={`switch${notify ? " on" : ""}`} onClick={() => setNotify((v) => !v)} />
+        </div>
+        <div className="list-card" style={{ marginBottom: 12 }}>
+          {recipients.map((r) => (
+            <div className="list-row" key={r}>
+              <div className="list-row-icon"><Icon name="users" size={16} /></div>
+              <div className="list-row-main"><div className="list-row-title">{r}</div></div>
+              <button className="btn btn-sm" onClick={() => setRecipients((list) => list.filter((x) => x !== r))}>Remove</button>
+            </div>
+          ))}
+          {recipients.length === 0 && <div className="list-row"><div className="list-row-sub">No recipients yet.</div></div>}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            className="field-input" style={{ flex: 1 }} placeholder="name@company.com" value={newEmail}
+            onChange={(e) => setNewEmail(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") addRecipient(); }}
+          />
+          <button className="btn btn-primary" onClick={addRecipient}>Add</button>
+        </div>
+      </div>
+
       <div className="settings-section">
         <div className="settings-section-title">Governance</div>
         <div className="toggle-row">
           <div>
-            <div className="toggle-row-text">Read-only presentation</div>
-            <div className="toggle-row-sub">Scores are computed by the engine. The UI never recomputes or overrides them.</div>
+            <div className="toggle-row-text">Read-only scoring</div>
+            <div className="toggle-row-sub">Scores are computed by the analysis engine. This interface never recomputes or overrides them.</div>
           </div>
-          <button className="switch on" aria-label="read-only" />
-        </div>
-        <div className="toggle-row" style={{ borderTop: "1px solid var(--border)", paddingTop: 12, marginTop: 4 }}>
-          <div>
-            <div className="toggle-row-text">Approval workflow</div>
-            <div className="toggle-row-sub">Score changes are approved via the impact CLI: <code>apply-impact --approver</code>. No approval button exists here by design.</div>
-          </div>
-        </div>
-      </div>
-      <div className="settings-section">
-        <div className="settings-section-title">Provenance</div>
-        <div className="field-row" style={{ marginBottom: 0 }}>
-          <div className="field-label">Profile document</div>
-          <input className="field-input" value={opp.profile_path} readOnly />
+          <button className="switch on" aria-label="read-only" disabled />
         </div>
       </div>
     </div>

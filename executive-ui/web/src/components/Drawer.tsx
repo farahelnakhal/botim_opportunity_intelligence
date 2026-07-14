@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { useApp } from "../store";
 import { confidenceLabel, humanFactorKey, tagClass, tagLabel } from "../lib/format";
+import { humanize } from "../lib/labels";
 import type { CommercialModel } from "../types";
 import Icon from "./Icon";
 import ScoreRing from "./ScoreRing";
@@ -20,8 +21,8 @@ function Section({ title, defaultOpen = false, children }: { title: string; defa
 }
 
 export default function Drawer() {
-  const { drawerOppId, closeDrawer, projects, overview } = useApp();
-  const opp = projects.find((p) => p.id === drawerOppId) ?? null;
+  const { drawerOppId, closeDrawer, projects, generated, overview } = useApp();
+  const opp = [...generated, ...projects].find((p) => p.id === drawerOppId) ?? null;
   const [comm, setComm] = useState<CommercialModel | null>(null);
 
   useEffect(() => {
@@ -49,7 +50,9 @@ export default function Drawer() {
             <div className="drawer-header">
               <div>
                 <div className="drawer-header-title">{opp.name}</div>
-                <div style={{ fontFamily: "var(--font-data)", fontSize: 11, color: "var(--text-tertiary)", marginTop: 4 }}>{opp.id}</div>
+                {opp.generated && (
+                  <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 4 }}>AI-generated · unvalidated hypothesis</div>
+                )}
               </div>
               <button className="drawer-close" onClick={closeDrawer}><Icon name="x" /></button>
             </div>
@@ -68,34 +71,34 @@ export default function Drawer() {
 
             <div className="drawer-body">
               {opp.hypothesis && opp.hypothesis !== "—" && (
-                <Section title="Summary" defaultOpen>{opp.hypothesis}</Section>
+                <Section title="Summary" defaultOpen>{humanize(opp.hypothesis)}</Section>
               )}
               {opp.jtbd && opp.jtbd !== "—" && (
-                <Section title="Job to be done" defaultOpen>{opp.jtbd}</Section>
+                <Section title="Job to be done" defaultOpen>{humanize(opp.jtbd)}</Section>
               )}
               {opp.next_action && opp.next_action !== "—" && (
-                <Section title="Current recommendation" defaultOpen>{opp.next_action}</Section>
+                <Section title="Current recommendation" defaultOpen>{humanize(opp.next_action)}</Section>
               )}
 
               {strongEv.length > 0 && (
                 <Section title="Strongest supporting evidence">
                   <ul className="evidence-list">
                     {strongEv.map((e) => (
-                      <li key={e.ev_id}><span className="dot" /><span>{e.ev_id} — {e.title} <span className="source-tag">strength {String(e.strength)}, {confidenceLabel(e.confidence)}</span></span></li>
+                      <li key={e.ev_id}><span className="dot" /><span>{e.title !== "—" ? e.title : "Customer-evidence record"} <span className="source-tag">strength {String(e.strength)}, {confidenceLabel(e.confidence)}</span></span></li>
                     ))}
                   </ul>
                 </Section>
               )}
 
               {opp.contradictory_evidence && opp.contradictory_evidence !== "—" && (
-                <Section title="Contradictory evidence">{opp.contradictory_evidence}</Section>
+                <Section title="Contradictory evidence">{humanize(opp.contradictory_evidence)}</Section>
               )}
 
               {weak.length > 0 && (
                 <Section title="Weakest assumptions">
                   <ul className="evidence-list">
                     {weak.map((a, i) => (
-                      <li key={i}><span className="dot weak" /><span>{a.text} <span className="source-tag">— {a.status}, importance {a.decision_importance}</span></span></li>
+                      <li key={i}><span className="dot weak" /><span>{humanize(a.text)} <span className="source-tag">— {a.status}, importance {a.decision_importance}</span></span></li>
                     ))}
                   </ul>
                 </Section>

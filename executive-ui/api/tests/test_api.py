@@ -16,7 +16,7 @@ for p in (str(API_PKG_PARENT),):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from api import router, serialize, server  # noqa: E402
+from api import generate, router, serialize, server  # noqa: E402
 
 
 class TestSerialize(unittest.TestCase):
@@ -92,6 +92,67 @@ class TestRouter(unittest.TestCase):
             self.assertTrue(r["stages"] and r["stages"][-1] == "Finished")
 
 
+class TestGenerate(unittest.TestCase):
+    """On-demand analysis of an arbitrary opportunity is honest by construction."""
+
+    @classmethod
+    def setUpClass(cls):
+        # force the deterministic offline path so the test never hits the network
+        cls._saved = generate.API_KEY
+        generate.API_KEY = ""
+        cls.r = generate.analyze("Invoice financing for UAE logistics SMEs waiting 45 days")
+
+    @classmethod
+    def tearDownClass(cls):
+        generate.API_KEY = cls._saved
+
+    def test_produces_a_generated_opportunity(self):
+        o = self.r["generated_opportunity"]
+        self.assertTrue(o["generated"])
+        self.assertTrue(o["id"].startswith("GEN-"))
+        self.assertEqual(len(o["factors"]), 17)
+
+    def test_all_dimensions_are_assumptions(self):
+        o = self.r["generated_opportunity"]
+        self.assertTrue(all(f["assumption"] for f in o["factors"]))
+        self.assertEqual(o["assumption_count"], 17)
+
+    def test_never_strong_and_low_confidence(self):
+        o = self.r["generated_opportunity"]
+        self.assertIn(o["classification"], ("promising", "weak"))  # engine caps: never 'strong'
+        self.assertEqual(o["confidence"], "low")
+
+    def test_engine_scores_it_not_the_caller(self):
+        o = self.r["generated_opportunity"]
+        self.assertEqual(o["raw_score"], sum(f["score"] for f in o["factors"]))
+
+    def test_carries_research_plan_and_banner(self):
+        types = [b["type"] for b in self.r["blocks"]]
+        self.assertIn("research_plan", types)
+        self.assertIn("banner", types)
+        self.assertIn("No product or build decision", self.r["decision_banner"])
+
+    def test_offline_engine_labelled(self):
+        self.assertEqual(self.r["generated_opportunity"]["engine"], "scaffold")
+
+    def test_provider_selection(self):
+        # provider() picks the engine from env with no key -> scaffold here
+        saved_key, saved_local = generate.API_KEY, generate.LOCAL_BASE_URL
+        try:
+            generate.API_KEY, generate.LOCAL_BASE_URL = "", ""
+            self.assertEqual(generate.provider(), "scaffold")
+            generate.LOCAL_BASE_URL = "http://localhost:11434/v1"
+            self.assertEqual(generate.provider(), "local")   # local model, no API key needed
+            generate.API_KEY = "sk-ant-x"
+            self.assertEqual(generate.provider(), "claude")  # key wins
+        finally:
+            generate.API_KEY, generate.LOCAL_BASE_URL = saved_key, saved_local
+
+    def test_history_is_accepted(self):
+        r = generate.analyze("refine for KSA", history=[{"role": "user", "content": "pharmacy lending"}])
+        self.assertTrue(r["generated_opportunity"]["generated"])
+
+
 class TestServerReadOnly(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -117,11 +178,35 @@ class TestServerReadOnly(unittest.TestCase):
         _, data = self._get("/api/chat?q=why%20is%20OPP-010%20leading")
         self.assertEqual(data["intent"], "opportunity")
 
-    def test_no_write_methods(self):
-        # the handler defines no do_POST/do_PUT/do_DELETE — the server is read-only
-        self.assertFalse(hasattr(server.Handler, "do_POST"))
+    def test_no_kb_write_methods(self):
+        # POST exists only for compute endpoints (chat/analyze with history); it
+        # never writes to the knowledge base. No PUT/DELETE at all.
         self.assertFalse(hasattr(server.Handler, "do_PUT"))
         self.assertFalse(hasattr(server.Handler, "do_DELETE"))
+
+    def test_post_only_on_compute_endpoints(self):
+        import urllib.error
+        import urllib.request
+        # POST to a data endpoint is refused (405) — those are read-only GETs
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/api/overview", data=b"{}",
+            method="POST", headers={"content-type": "application/json"})
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            urllib.request.urlopen(req)
+        self.assertEqual(cm.exception.code, 405)
+
+    def test_post_analyze_with_history(self):
+        import urllib.request
+        body = json.dumps({"q": "pharmacy working capital in KSA",
+                           "history": [{"role": "user", "content": "hi"},
+                                       {"role": "assistant", "content": "..."}]}).encode()
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/api/analyze", data=body,
+            method="POST", headers={"content-type": "application/json"})
+        with urllib.request.urlopen(req) as r:
+            data = json.loads(r.read())
+        self.assertEqual(data["intent"], "new_analysis")
+        self.assertTrue(data["generated_opportunity"]["generated"])
 
     def test_unknown_endpoint_404(self):
         try:
