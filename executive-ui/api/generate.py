@@ -132,13 +132,20 @@ def _extract_json(text):
     return json.loads(text)
 
 
+# Some providers sit behind Cloudflare (or similar) with bot-protection that
+# blocks Python's default urllib User-Agent ("Python-urllib/3.x") outright —
+# e.g. Groq returns a Cloudflare 403 ("error code: 1010") for it. A plain,
+# ordinary User-Agent avoids that; it carries no other meaning.
+_UA = "BOTIM-Opportunity-Intelligence/1.0"
+
+
 def _call_anthropic(messages, timeout):
     body = json.dumps({"model": MODEL, "max_tokens": 2000, "system": _SYSTEM,
                        "messages": messages}).encode("utf-8")
     req = urllib.request.Request(
         f"{BASE_URL}/v1/messages", data=body, method="POST",
         headers={"content-type": "application/json", "x-api-key": API_KEY,
-                 "anthropic-version": "2023-06-01"})
+                 "anthropic-version": "2023-06-01", "user-agent": _UA})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         payload = json.loads(r.read())
     text = "".join(b.get("text", "") for b in payload.get("content", []) if b.get("type") == "text")
@@ -146,7 +153,8 @@ def _call_anthropic(messages, timeout):
 
 
 def _call_openai_compatible(messages, timeout):
-    """Ollama / LM Studio / any OpenAI-compatible /chat/completions endpoint. No key needed for Ollama."""
+    """Ollama / LM Studio / Groq / any OpenAI-compatible /chat/completions endpoint.
+    No key needed for Ollama."""
     body = json.dumps({
         "model": LOCAL_MODEL,
         "messages": [{"role": "system", "content": _SYSTEM}] + messages,
@@ -155,7 +163,8 @@ def _call_openai_compatible(messages, timeout):
     }).encode("utf-8")
     req = urllib.request.Request(
         f"{LOCAL_BASE_URL}/chat/completions", data=body, method="POST",
-        headers={"content-type": "application/json", "authorization": f"Bearer {LOCAL_KEY}"})
+        headers={"content-type": "application/json", "authorization": f"Bearer {LOCAL_KEY}",
+                 "user-agent": _UA})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         payload = json.loads(r.read())
     text = payload["choices"][0]["message"]["content"]
