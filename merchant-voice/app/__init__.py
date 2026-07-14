@@ -1,4 +1,4 @@
-"""Merchant Voice & Validation — backend (Phase 1 + 2 + 3 + 4).
+"""Merchant Voice & Validation — backend (Phase 1 + 2 + 3 + 4 + 5).
 
 PROTOTYPE-GRADE AUTHENTICATION. SYNTHETIC-DATA-ONLY. NOT FOR PRODUCTION USE
 AND NOT APPROVED FOR REAL MERCHANT DATA.
@@ -41,6 +41,20 @@ approving a candidate (still NOT authoritative Part A evidence), an
 explicit publish/suppress action, campaign-level analysis (numerator/
 denominator/segment-grouped, never a bare percentage), and full
 withdrawal/revalidation integration with the Phase 2 suppression cascade.
-Still not implemented: Part A proposal generation/preview, synthetic
-export, authoritative EV creation, and Copilot Merchant Voice tools.
+
+Phase 5 implements: a human-reviewed Part A evidence proposal workflow
+(app/part_a_proposal.py — generate only from an approved+published finding,
+draft/edit/submit/approve/reject, a separate export-approval step, and
+withdrawal-driven invalidation mirroring the Phase 4 finding cascade) whose
+suggested_strength is always explicitly non-authoritative and whose
+authoritative_ev_id is always null; a synthetic-only export action that
+writes a server-named, banner-marked demo file to
+knowledge-base/customer-evidence/merchant-voice-candidates/ (never
+.../records/, never real merchant data); and a read-only,
+Copilot-facing query layer (app/published_query.py — never opens
+identity.db) exposing only approved, published, non-superseded content.
+Nothing in Phase 5 mints an EV ID, writes authoritative Part A evidence,
+promotes anything into Part A, or changes a score/assumption/impact/
+monitoring record. Still not implemented (Phase 6+): authoritative EV
+creation, Part A promotion, and any frontend.
 """

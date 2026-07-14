@@ -469,3 +469,52 @@ def validate_candidate_input(data):
         errors.append(f"invalid segment_id: {segment_id!r}")
     if errors:
         raise ValidationError("; ".join(errors))
+
+
+# --- Phase 5: Part A evidence proposals --------------------------------------
+#
+# A proposal is a human-reviewed, non-authoritative DRAFT mapping of an
+# approved+published Merchant Voice finding into the shape Workstream A's
+# Part A evidence-candidate intake expects. It is never authoritative Part A
+# evidence, never mints an EV ID, and approving one never writes to
+# knowledge-base/customer-evidence/records/. See app/part_a_proposal.py.
+
+class Phase5Error(DbError):
+    """Carries one of models.PHASE5_ERROR_CODES for app.api's structured
+    error mapping — the Part A proposal / export equivalent of
+    app.models.Phase4Error."""
+
+    def __init__(self, message, code="invalid_request"):
+        super().__init__(message)
+        self.code = code
+
+
+PROPOSAL_ID_RE = re.compile(r"^MEP-[A-Za-z0-9-]{1,40}$")
+
+PROPOSAL_WORKFLOW_STATUSES = ("draft", "pending_review", "approved", "rejected", "superseded")
+PROPOSAL_TRANSITIONS = {
+    "draft": {"pending_review"},
+    "pending_review": {"approved", "rejected", "draft"},
+    "approved": {"superseded"},
+    "rejected": set(),
+    "superseded": set(),
+}
+
+# Separate from workflow_status by design — see app/db.py's Phase 5 docstring.
+PROPOSAL_PUBLICATION_STATUSES = (
+    "unpublished", "export_approved", "needs_revalidation", "suppressed", "exported_synthetic",
+)
+
+# Only these fields may be edited on a draft proposal; every other payload
+# field (counts, provenance, quotes, denominator, ...) is always
+# server-recomputed from the finding, never hand-edited.
+PROPOSAL_EDITABLE_FIELDS = ("proposed_title", "editor_notes")
+
+EXPORT_STATUSES = ("not_exported", "exported", "export_failed")
+
+PHASE5_ERROR_CODES = (
+    "finding_not_publishable", "finding_needs_revalidation", "proposal_stale", "proposal_not_reviewable",
+    "proposal_not_exportable", "non_synthetic_export_forbidden", "quote_permission_denied",
+    "source_version_changed", "self_approval_forbidden", "export_path_invalid", "not_permitted",
+    "not_found", "forbidden",
+)

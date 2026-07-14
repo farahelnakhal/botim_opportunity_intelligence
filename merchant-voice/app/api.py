@@ -70,19 +70,45 @@ lookups — always published-only regardless of role) and campaign analysis
 (aggregate counts only — no sample statement text; researcher+ see the
 same analysis with sample statements included).
 
-Still not implemented (Phase 5): Part A proposal generation/preview,
-synthetic export, authoritative EV creation, Copilot Merchant Voice tools.
+Phase 5 routes (Part A evidence PROPOSALS — human-reviewed, non-
+authoritative; never writes Part A evidence, never mints an EV ID; plus a
+read-only "published" query surface mirroring app/published_query.py, the
+same seam the Copilot backend calls into):
+
+  POST   /api/merchant-voice/findings/{finding_id}/part-a-proposals
+  GET    /api/merchant-voice/part-a-proposals
+  GET    /api/merchant-voice/part-a-proposals/{proposal_id}
+  PATCH  /api/merchant-voice/part-a-proposals/{proposal_id}
+  POST   /api/merchant-voice/part-a-proposals/{proposal_id}/submit
+  POST   /api/merchant-voice/part-a-proposals/{proposal_id}/approve
+  POST   /api/merchant-voice/part-a-proposals/{proposal_id}/reject
+  POST   /api/merchant-voice/part-a-proposals/{proposal_id}/approve-export
+  POST   /api/merchant-voice/part-a-proposals/{proposal_id}/export
+
+  GET    /api/merchant-voice/published/findings
+  GET    /api/merchant-voice/published/campaigns/{campaign_id}
+  GET    /api/merchant-voice/published/segments/{segment_id}
+  GET    /api/merchant-voice/published/opportunities/{opportunity_id}
+  GET    /api/merchant-voice/published/assumptions/{assumption_id}
+
+No role may create authoritative EV evidence, promote a proposal into Part
+A, or write knowledge-base/customer-evidence/records/ — this service only
+ever produces a synthetic-only demo export under
+knowledge-base/customer-evidence/merchant-voice-candidates/.
+
+Still not implemented (Phase 6+): whatever the next approved phase defines.
 """
 
 import json
 import re
 
 from . import (analysis, campaigns, candidates, csv_import, extraction, findings, guides,
-              observation_review, participants, responses, suppression, transcripts)
+              observation_review, part_a_proposal, participants, published_query, responses,
+              suppression, transcripts)
 from .auth import AuthError, authenticate, require_any_role
 from .db import DbError
 from .eligibility import ExtractionError
-from .models import Phase4Error, ValidationError
+from .models import Phase4Error, Phase5Error, ValidationError
 
 ERROR_STATUS = {
     "invalid_request": 400, "unauthorized": 401, "forbidden": 403, "not_found": 404, "conflict": 409,
@@ -99,6 +125,10 @@ ERROR_STATUS = {
     "candidate_not_reviewable": 409, "finding_not_publishable": 409, "finding_needs_revalidation": 409,
     "quote_permission_denied": 403, "consent_invalid": 403,
     "contradiction_exclusion_requires_reason": 400,
+    # Phase 5 proposal/export error codes
+    "proposal_stale": 409, "proposal_not_reviewable": 409, "proposal_not_exportable": 409,
+    "non_synthetic_export_forbidden": 403, "source_version_changed": 409, "export_path_invalid": 400,
+    "not_permitted": 403,
 }
 
 CAMPAIGN_RE = re.compile(r"^/api/merchant-voice/campaigns/([^/]+)$")
@@ -142,7 +172,21 @@ SEGMENT_FINDINGS_RE = re.compile(r"^/api/merchant-voice/segments/([^/]+)/finding
 OPPORTUNITY_FINDINGS_RE = re.compile(r"^/api/merchant-voice/opportunities/([^/]+)/findings$")
 ASSUMPTION_FINDINGS_RE = re.compile(r"^/api/merchant-voice/assumptions/([^/]+)/findings$")
 
+FINDING_PROPOSALS_RE = re.compile(r"^/api/merchant-voice/findings/([^/]+)/part-a-proposals$")
+PROPOSAL_RE = re.compile(r"^/api/merchant-voice/part-a-proposals/([^/]+)$")
+PROPOSAL_SUBMIT_RE = re.compile(r"^/api/merchant-voice/part-a-proposals/([^/]+)/submit$")
+PROPOSAL_APPROVE_RE = re.compile(r"^/api/merchant-voice/part-a-proposals/([^/]+)/approve$")
+PROPOSAL_REJECT_RE = re.compile(r"^/api/merchant-voice/part-a-proposals/([^/]+)/reject$")
+PROPOSAL_APPROVE_EXPORT_RE = re.compile(r"^/api/merchant-voice/part-a-proposals/([^/]+)/approve-export$")
+PROPOSAL_EXPORT_RE = re.compile(r"^/api/merchant-voice/part-a-proposals/([^/]+)/export$")
+
+PUBLISHED_CAMPAIGN_RE = re.compile(r"^/api/merchant-voice/published/campaigns/([^/]+)$")
+PUBLISHED_SEGMENT_RE = re.compile(r"^/api/merchant-voice/published/segments/([^/]+)$")
+PUBLISHED_OPPORTUNITY_RE = re.compile(r"^/api/merchant-voice/published/opportunities/([^/]+)$")
+PUBLISHED_ASSUMPTION_RE = re.compile(r"^/api/merchant-voice/published/assumptions/([^/]+)$")
+
 RESEARCH_ROLES = ("researcher", "reviewer", "admin")
+REVIEW_ROLES = ("reviewer", "admin")
 
 
 def error_body(code, message):
@@ -468,6 +512,79 @@ class Api:
                     return 200, campaigns.update_draft(self.conn, principal, m.group(1),
                                                        self._json_body(body_bytes), self.config, self.now())
 
+            # --- Phase 5: Part A evidence proposals -----------------------------
+            m = FINDING_PROPOSALS_RE.match(path)
+            if m and method == "POST":
+                data = self._json_body(body_bytes)
+                return 201, part_a_proposal.generate(self.conn, principal, m.group(1), self.now(),
+                                                     reason=data.get("reason"))
+
+            if path == "/api/merchant-voice/part-a-proposals" and method == "GET":
+                require_any_role(principal, RESEARCH_ROLES)
+                return 200, {"schema_version": "1.0", "part_a_proposals": part_a_proposal.list_all(self.conn)}
+
+            m = PROPOSAL_SUBMIT_RE.match(path)
+            if m and method == "POST":
+                return 200, part_a_proposal.submit(self.conn, principal, m.group(1), self.now())
+
+            m = PROPOSAL_APPROVE_RE.match(path)
+            if m and method == "POST":
+                data = self._json_body(body_bytes)
+                return 200, part_a_proposal.approve(self.conn, self.config, principal, m.group(1), self.now(),
+                                                    reason=data.get("reason"))
+
+            m = PROPOSAL_REJECT_RE.match(path)
+            if m and method == "POST":
+                data = self._json_body(body_bytes)
+                reason_code = data.get("reason")
+                if not reason_code:
+                    raise ValidationError("reason is required")
+                return 200, part_a_proposal.reject(self.conn, principal, m.group(1), reason_code, self.now(),
+                                                   reason_detail=data.get("reason_detail"))
+
+            m = PROPOSAL_APPROVE_EXPORT_RE.match(path)
+            if m and method == "POST":
+                data = self._json_body(body_bytes)
+                return 200, part_a_proposal.approve_export(self.conn, self.config, principal, m.group(1),
+                                                           self.now(), reason=data.get("reason"))
+
+            m = PROPOSAL_EXPORT_RE.match(path)
+            if m and method == "POST":
+                return 200, part_a_proposal.export(self.conn, self.config, principal, m.group(1), self.now(),
+                                                   self.config.export_root)
+
+            m = PROPOSAL_RE.match(path)
+            if m:
+                require_any_role(principal, RESEARCH_ROLES)
+                if method == "GET":
+                    return 200, part_a_proposal.get(self.conn, m.group(1))
+                if method == "PATCH":
+                    return 200, part_a_proposal.update_draft(self.conn, principal, m.group(1),
+                                                             self._json_body(body_bytes), self.now())
+
+            # --- Phase 5: read-only "published" query surface (Copilot seam) ----
+            if path == "/api/merchant-voice/published/findings" and method == "GET":
+                return 200, {"schema_version": "1.0", "findings": published_query.list_findings(self.conn)}
+
+            m = PUBLISHED_CAMPAIGN_RE.match(path)
+            if m and method == "GET":
+                return 200, published_query.get_campaign_summary(self.conn, m.group(1))
+
+            m = PUBLISHED_SEGMENT_RE.match(path)
+            if m and method == "GET":
+                return 200, {"schema_version": "1.0",
+                            "findings": published_query.list_findings(self.conn, segment_id=m.group(1))}
+
+            m = PUBLISHED_OPPORTUNITY_RE.match(path)
+            if m and method == "GET":
+                return 200, {"schema_version": "1.0",
+                            "findings": published_query.list_findings(self.conn, opportunity_id=m.group(1))}
+
+            m = PUBLISHED_ASSUMPTION_RE.match(path)
+            if m and method == "GET":
+                return 200, {"schema_version": "1.0",
+                            "findings": published_query.list_findings(self.conn, assumption_id=m.group(1))}
+
             return 404, error_body("not_found", "unknown endpoint")
         except AuthError as exc:
             return ERROR_STATUS.get(exc.code, 403), error_body(exc.code, str(exc))
@@ -478,6 +595,8 @@ class Api:
         except ExtractionError as exc:
             return ERROR_STATUS.get(exc.code, 403), error_body(exc.code, str(exc))
         except Phase4Error as exc:
+            return ERROR_STATUS.get(exc.code, 403), error_body(exc.code, str(exc))
+        except Phase5Error as exc:
             return ERROR_STATUS.get(exc.code, 403), error_body(exc.code, str(exc))
         except DbError as exc:
             msg = str(exc)

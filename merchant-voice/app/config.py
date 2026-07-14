@@ -36,6 +36,11 @@ class Config:
         self.db_path = Path(e.get("MV_DB_PATH", BACKEND_ROOT / "data" / "mv.db"))
         self.identity_db_path = Path(e.get("MV_IDENTITY_DB_PATH", BACKEND_ROOT / "data" / "identity.db"))
         self.transcript_dir = Path(e.get("MV_TRANSCRIPT_DIR", BACKEND_ROOT / "data" / "transcripts"))
+        # Root that Phase 5 synthetic-only export resolves
+        # knowledge-base/customer-evidence/merchant-voice-candidates/ under.
+        # Defaults to the real repo root; tests override this to a tmp dir
+        # so exports never touch the real knowledge-base.
+        self.export_root = Path(e.get("MV_EXPORT_ROOT", REPO_ROOT))
 
         self.max_body_bytes = _int(e, "MV_MAX_BODY_BYTES", 5 * 1024 * 1024)
         self.max_concurrency = _int(e, "MV_MAX_CONCURRENCY", 4)

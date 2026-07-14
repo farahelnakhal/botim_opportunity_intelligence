@@ -10,12 +10,18 @@ INTENTS = ("portfolio_summary", "opportunity_explanation", "opportunity_comparis
            "segment_analysis", "evidence_support", "contradictory_evidence",
            "assumption_analysis", "evidence_gap", "research_recommendation",
            "challenge_hypothesis", "change_summary", "executive_brief",
-           "validation_planning", "unknown_or_unsupported")
+           "validation_planning",
+           # Merchant Voice (Phase 5) — read-only, approved+published findings only.
+           "merchant_feedback", "campaign_summary", "segment_feedback",
+           "merchant_objections", "merchant_workarounds", "concept_reactions",
+           "merchant_wtp_signals", "merchant_contradictions",
+           "unknown_or_unsupported")
 
 OPP_REF = re.compile(r"\bOPP-\d{3}\b", re.I)
 EV_REF = re.compile(r"\bEV-\d{4}-W\d{2}-\d{3}\b", re.I)
 SEG_REF = re.compile(r"\bSEG-[a-z0-9-]+\b", re.I)
 ASM_REF = re.compile(r"\bASM-OPP-\d{3}-[a-z0-9_]+\b", re.I)
+MVC_REF = re.compile(r"\bMVC-[A-Za-z0-9-]+\b", re.I)
 
 _CODE_WORDS = re.compile(
     r"\b(source code|python module|repositor(y|ies)|file path|json structure|parser|"
@@ -26,6 +32,29 @@ _RULES = [
     ("change_summary", re.compile(r"\b(what changed|recent(ly)? chang|latest updates?|what'?s new|change summary)\b", re.I)),
     ("opportunity_comparison", re.compile(r"\b(compare|versus|vs\.?|stronger|strongest|which .*opportunit)\b", re.I)),
     ("challenge_hypothesis", re.compile(r"\b(challenge|should (botim|we) build|devil'?s advocate|poke holes|steelman|stress.test|why might .*fail|reject this)\b", re.I)),
+    # Merchant Voice (Phase 5) — deliberately scoped to explicit merchant-
+    # research phrasing (the word "merchant", an MVC- campaign reference, or
+    # distinctive research-only vocabulary like "concept reaction") so
+    # generic Part A phrasing ("what evidence supports willingness to pay",
+    # "what evidence contradicts OPP-013") keeps routing to the existing
+    # evidence_support/contradictory_evidence intents unchanged.
+    ("campaign_summary", re.compile(r"\b(mvc-[a-z0-9-]+|campaign summary|what did we learn from)\b", re.I)),
+    ("concept_reactions", re.compile(r"\bconcept (reaction|test)s?\b", re.I)),
+    ("merchant_contradictions", re.compile(
+        r"\bmerchants?[^.?!]{0,30}(disagree|contradict)|contradicting merchant|conflicting merchant\b", re.I)),
+    ("merchant_wtp_signals", re.compile(
+        r"\bmerchants?[^.?!]{0,30}(willing(ness)? to pay|would pay|wtp)|"
+        r"(willing(ness)? to pay|wtp)[^.?!]{0,30}merchants?\b", re.I)),
+    ("merchant_objections", re.compile(
+        r"\bmerchants?[^.?!]{0,30}object|objections?[^.?!]{0,30}merchants?\b", re.I)),
+    ("merchant_workarounds", re.compile(
+        r"\bmerchants?[^.?!]{0,30}workaround|workarounds?[^.?!]{0,30}merchants?\b", re.I)),
+    ("segment_feedback", re.compile(
+        r"\bmerchant segment|which (merchant )?segment[^.?!]{0,30}(report|feedback|say)|"
+        r"segment[^.?!]{0,30}merchants?[^.?!]{0,10}(report|say)\b", re.I)),
+    ("merchant_feedback", re.compile(
+        r"\bmerchants? (are )?saying|merchant feedback|supplier.payment (delay|problem|pain)|"
+        r"survey (and|vs\.?) interview findings?|survey vs\.? interview\b", re.I)),
     ("contradictory_evidence", re.compile(r"\b(contradict|against (this|the)|weakens?|counter.evidence|negative signal)\b", re.I)),
     ("evidence_gap", re.compile(r"\b(evidence gaps?|unanswered|unknowns?|what.s missing|no supporting evidence)\b", re.I)),
     ("research_recommendation", re.compile(r"\b(research next|should .*research|next research|research request|validate next|what should part a)\b", re.I)),
@@ -42,7 +71,10 @@ def extract_ids(text):
     return {"opportunities": [m.upper() for m in OPP_REF.findall(text)],
             "evidence": [m.upper() for m in EV_REF.findall(text)],
             "segments": [m if m.startswith("SEG-") else m.lower() for m in SEG_REF.findall(text)],
-            "assumptions": ASM_REF.findall(text)}
+            "assumptions": ASM_REF.findall(text),
+            # not case-normalized: unlike OPP-/EV- ids, campaign ids carry a
+            # lowercase-hex suffix (MVC-4f0cfb3ad4) — preserve exactly as typed
+            "campaigns": MVC_REF.findall(text)}
 
 
 def is_out_of_scope(text):
@@ -55,6 +87,8 @@ def classify(text, ids):
             return intent
     if ids["opportunities"] or ids["evidence"] or ids["segments"]:
         return "opportunity_explanation"
+    if ids.get("campaigns"):
+        return "campaign_summary"
     return "unknown_or_unsupported"
 
 
@@ -114,6 +148,63 @@ def tool_plan(intent, ids, message):
         if opp:
             plan.append(("get_opportunity", {"opp_id": opp}))
         plan.append(("search_product_knowledge", {"query": message[:200]}))
+
+    # --- Merchant Voice (Phase 5) — read-only, approved+published only ------
+    elif intent == "campaign_summary":
+        camp = ids["campaigns"][0] if ids["campaigns"] else None
+        if camp:
+            plan.append(("get_campaign_summary", {"campaign_id": camp}))
+        else:
+            plan.append(("list_merchant_campaigns", {}))
+    elif intent == "segment_feedback":
+        if len(ids["segments"]) >= 2 and ids["campaigns"]:
+            plan.append(("compare_segment_feedback", {"campaign_id": ids["campaigns"][0],
+                                                       "segment_a": ids["segments"][0],
+                                                       "segment_b": ids["segments"][1]}))
+        elif ids["segments"]:
+            plan.append(("get_segment_feedback", {"segment_id": ids["segments"][0]}))
+        else:
+            plan.append(("list_merchant_campaigns", {}))
+    elif intent == "merchant_objections":
+        camp = ids["campaigns"][0] if ids["campaigns"] else None
+        plan.append(("get_merchant_objections", {"campaign_id": camp} if camp else {}))
+    elif intent == "merchant_workarounds":
+        camp = ids["campaigns"][0] if ids["campaigns"] else None
+        plan.append(("get_merchant_workarounds", {"campaign_id": camp} if camp else {}))
+    elif intent == "concept_reactions":
+        camp = ids["campaigns"][0] if ids["campaigns"] else None
+        args = {"finding_type": "concept_reaction"}
+        if camp:
+            args["campaign_id"] = camp
+        plan.append(("get_approved_merchant_findings", args))
+    elif intent == "merchant_wtp_signals":
+        camp = ids["campaigns"][0] if ids["campaigns"] else None
+        args = {"finding_type": "willingness_to_pay_signal"}
+        if camp:
+            args["campaign_id"] = camp
+        plan.append(("get_approved_merchant_findings", args))
+    elif intent == "merchant_contradictions":
+        camp = ids["campaigns"][0] if ids["campaigns"] else None
+        args = {"finding_type": "contradiction"}
+        if camp:
+            args["campaign_id"] = camp
+        plan.append(("get_approved_merchant_findings", args))
+        if opp:
+            plan.append(("get_opportunity_merchant_feedback", {"opportunity_id": opp}))
+    elif intent == "merchant_feedback":
+        camp = ids["campaigns"][0] if ids["campaigns"] else None
+        if camp:
+            plan.append(("get_campaign_summary", {"campaign_id": camp}))
+        elif opp:
+            plan.append(("get_opportunity_merchant_feedback", {"opportunity_id": opp}))
+        elif ids["segments"]:
+            plan.append(("get_segment_feedback", {"segment_id": ids["segments"][0]}))
+        else:
+            plan.append(("list_merchant_campaigns", {}))
+
+    if intent == "contradictory_evidence" and opp:
+        plan.append(("get_opportunity_merchant_feedback", {"opportunity_id": opp}))
+
     return plan[:6]
 
 
@@ -125,5 +216,9 @@ ANSWER_TYPE = {
     "research_recommendation": "research_recommendation",
     "challenge_hypothesis": "challenge", "change_summary": "change_summary",
     "executive_brief": "brief", "validation_planning": "research_recommendation",
+    "merchant_feedback": "merchant_feedback", "campaign_summary": "merchant_feedback",
+    "segment_feedback": "merchant_feedback", "merchant_objections": "merchant_feedback",
+    "merchant_workarounds": "merchant_feedback", "concept_reactions": "merchant_feedback",
+    "merchant_wtp_signals": "merchant_feedback", "merchant_contradictions": "merchant_feedback",
     "unknown_or_unsupported": "analysis",
 }

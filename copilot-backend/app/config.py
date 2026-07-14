@@ -33,6 +33,9 @@ class Config:
         self.debug_trace = e.get("COPILOT_DEBUG_TRACE", "") == "1"
         self.max_concurrency = int(e.get("COPILOT_MAX_CONCURRENCY", 4))
         self.db_path = Path(e.get("COPILOT_DB_PATH", BACKEND_ROOT / "data" / "conversations.db"))
+        # Merchant Voice's mv.db, opened READ-ONLY (see app/mv_tools.py) —
+        # never identity.db, never read-write.
+        self.mv_db_path = Path(e.get("COPILOT_MV_DB_PATH", REPO_ROOT / "merchant-voice" / "data" / "mv.db"))
 
     def require_token(self):
         """Non-local binds require an API token; refuse to start otherwise."""

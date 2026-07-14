@@ -41,7 +41,7 @@
 | `conversation_id` | required | no | string (`conv_…`) |
 | `message_id` | required | no | string (`msg_…`) |
 | `answer_markdown` | required | no | string — natural-language answer ending with an **“Evidence used”** section |
-| `answer_type` | required | no | enum: `analysis, brief, comparison, evidence, challenge, assumptions, research_recommendation, research_request_draft, change_summary` |
+| `answer_type` | required | no | enum: `analysis, brief, comparison, evidence, challenge, assumptions, research_recommendation, research_request_draft, change_summary, merchant_feedback` (`merchant_feedback` added for Merchant Voice research questions — additive, backward compatible, `schema_version` unchanged) |
 | `confidence` | required | no | `{level: "high"|"medium"|"low"|"mixed", basis: string}` — derived deterministically from records/engines, never model-invented |
 | `citations` | required | no | array of citation objects (below); may be empty |
 | `assumptions` | required | no | string[] — working assumptions relevant to the answer |
@@ -55,13 +55,27 @@ Citation object:
 
 ```json
 { "id": "EV-2026-W28-014",
-  "type": "evidence",             // enum: evidence | opportunity | segment | inflection | experiment | assumption
+  "type": "evidence",             // enum: evidence | opportunity | segment | inflection | experiment | assumption | merchant_finding
   "title": "Card rails appear unsuitable for many core supplier-payment transactions…",
-  "role": "primary",              // enum: primary | contextual | contradictory | weak_lead | excluded
-  "target": { "type": "internal_route", "value": "/evidence/EV-2026-W28-014" } }
+  "role": "primary",              // enum: primary | contextual | contradictory | weak_lead | excluded | concept_reaction
+  "target": { "type": "internal_route", "value": "/evidence/EV-2026-W28-014" },
+  "metadata": null }              // additive field; non-null only for merchant_finding citations — see below
 ```
 
-`target.value` is an internal UI route (`/evidence/{id}`, `/opportunity/{id}`, `/segment/{id}`, `/inflection/{id}`, `/experiment/{id}`, `/assumption/{id}`) — never a filesystem path.
+`target.value` is an internal UI route (`/evidence/{id}`, `/opportunity/{id}`, `/segment/{id}`, `/inflection/{id}`, `/experiment/{id}`, `/assumption/{id}`, `/merchant-findings/{id}`) — never a filesystem path.
+
+**`merchant_finding` citations (additive — every other citation type keeps `metadata: null`).** A `merchant_finding` citation points at an approved, **published** Merchant Voice finding (`shared/contracts/merchant-voice-api.schema.md`) — a research signal, never authoritative Part A evidence, never assigned an EV ID. Its `role` is `concept_reaction` when the finding type is a concept reaction (never presented as proof of pain/frequency/willingness-to-pay), `contradictory` for a contradiction finding, `weak_lead` for `single_signal`/`insufficient` strength, otherwise `primary`. `metadata` carries fields that don't fit the generic citation shape:
+
+```json
+{ "id": "MEF-a644d766ab", "type": "merchant_finding", "role": "weak_lead",
+  "title": "Suppliers cancel late payments.",
+  "target": { "type": "internal_route", "value": "/merchant-findings/MEF-a644d766ab" },
+  "metadata": { "campaign_id": "MVC-…", "method": "interview", "segment_id": null,
+               "strength_band": "single_signal", "support_count": 1, "contradiction_count": 0,
+               "denominator": 1, "denominator_definition": "included participants in campaign MVC-…" } }
+```
+
+`metadata` never contains identity fields, participant/response ids, transcript paths, or raw response text — those never leave Merchant Voice's own read-only query layer in the first place.
 
 ## GET /api/conversations/{id} — 200
 
@@ -97,6 +111,7 @@ Citation object:
 - Weak/lead evidence is labelled `weak_lead` and never presented as primary support; contradictory evidence is labelled and never dropped.
 - The answer never claims a product was validated/selected or a build approved; promising-but-unvalidated answers include: *“No product or build decision has been made.”*
 - Repository/code/implementation questions get a polite product-discovery redirect; state-changing requests (apply/approve/rollback/email/shell/file access) are refused — the backend has no such tools.
+- Merchant Voice research questions are grounded only in **approved, published** findings (`merchant_finding` citations) — never unreviewed/rejected/suppressed/`needs_revalidation` content, never identity fields, never raw transcript text. A finding's `suggested_strength` is a Merchant Voice research signal, never authoritative Part A evidence, and is never blended into the response's own `confidence` field. A `concept_reaction` finding is never presented as proof that pain, frequency, or willingness to pay have been established.
 
 ## Example — normal fetch() from the UI
 

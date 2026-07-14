@@ -32,13 +32,22 @@ POST /api/chat → api.py → orchestrator.py
   → intents.py         deterministic product-discovery intent + initial tool plan
   → tools_registry.py  allowlisted read-only tools over EXISTING engines
                        (scoring, evidence parser, impact tracker/gaps/brief/
-                        research-request/history, monitoring outputs)
+                        research-request/history, monitoring outputs) PLUS
+                       app/mv_tools.py — read-only Merchant Voice tools
   → provider.py        provider-neutral ConversationModel (Anthropic | mock);
                        bounded tool loop (max 3 iterations, dedupe)
   → grounding.py       deterministic facts, citations, confidence, unknowns
   → wordguard.py       overclaim validation (falls back to grounded text)
   → store.py           SQLite conversation memory (gitignored data/; not evidence)
 ```
+
+### Merchant Voice tools (Phase 5)
+
+`app/mv_tools.py` exposes 12 read-only tools (`list_merchant_campaigns`, `get_merchant_campaign`, `get_campaign_summary`, `get_approved_merchant_findings`, `get_segment_feedback`, `get_opportunity_merchant_feedback`, `get_assumption_feedback`, `get_merchant_objections`, `get_merchant_workarounds`, `get_merchant_quotes`, `compare_segment_feedback`, `get_campaign_limitations`) that read `merchant-voice/data/mv.db` through a genuinely **read-only** SQLite connection (`mode=ro` — a write attempt raises, it isn't merely a convention) via `merchant-voice/app/published_query.py`, Merchant Voice's own read-only, Copilot-facing query layer. **Never opens `identity.db`.** Only approved, published, non-superseded, non-suppressed, consent/retention-valid content ever surfaces — no unreviewed observations, no draft proposals, no researcher-only review notes, no raw transcripts, no identity fields.
+
+A returned Merchant Voice finding is a research signal, not authoritative Part A evidence — the Copilot never mints an EV ID, never proposes a score/assumption/impact change, and never presents a `concept_reaction` finding as proof of pain, frequency, or willingness to pay. Citations use the new `merchant_finding` type (`/merchant-findings/{id}`, additive — see `shared/contracts/conversation-api.schema.md`).
+
+Because Merchant Voice's `app` package and this backend's own `app` package share a name, `mv_tools.py` loads Merchant Voice's package under the distinct alias `mv_app` (never the bare name `app`) — see that module's docstring.
 
 ## Security defaults
 

@@ -1,13 +1,13 @@
-# merchant-voice-api.schema — v1.3 (Phase 1 + 2 + 3 + 4: campaigns, guides, participants, responses, CSV/transcript ingestion, consent & deletion, AI-assisted extraction, human review, evidence candidates, approved findings)
+# merchant-voice-api.schema — v1.4 (Phase 1 + 2 + 3 + 4 + 5: campaigns, guides, participants, responses, CSV/transcript ingestion, consent & deletion, AI-assisted extraction, human review, evidence candidates, approved findings, Part A evidence proposals, synthetic-only export, read-only Copilot query layer)
 
 > **PROTOTYPE-GRADE AUTHENTICATION. SYNTHETIC-DATA-ONLY. NOT APPROVED FOR REAL MERCHANT DATA. NOT FOR PRODUCTION USE.**
 > Authentication is a static token→role map compared with `hmac.compare_digest` — this is **not** production identity/access management (no user directory, no session revocation, no token rotation, no TLS termination). Real merchant data requires a separate privacy/security review and a hardened deployment before use. All examples in this document use synthetic IDs only (`MVC-TEST-…`, `MVG-TEST-…`, `MVP-TEST-…`, `MVR-TEST-…`).
 
-**Producer:** `merchant-voice/` (stdlib Python HTTP JSON API, port 8020) · **Consumer:** the future Merchant Voice researcher UI (Farah; scheduled after the current Product Discovery frontend is stable — no frontend work is included in this delivery).
+**Producer:** `merchant-voice/` (stdlib Python HTTP JSON API, port 8020) · **Consumer:** the future Merchant Voice researcher UI (Farah; scheduled after the current Product Discovery frontend is stable — no frontend work is included in this delivery) **and** `copilot-backend/` (read-only, via `app/published_query.py` — see the Copilot integration section below).
 
-This document covers **what Phase 1 + 2 + 3 + 4 implement**: research campaigns, versioned research guides, pseudonymous participants (identity kept in a separate `identity.db`), manual and CSV-bulk response ingestion, text-only transcript ingestion, deterministic redaction, consent/privacy gating, withdrawal/retention/deletion, AI-assisted extraction of structured pending-review observations, and the **human-governed review workflow**: observation review/edit/approve/reject/merge, evidence candidates, and immutable approved Merchant Voice findings with deterministic strength bands and campaign-level analysis. **An approved Merchant Voice finding is still NOT authoritative Part A evidence** — nothing in this service writes there. Part A proposal generation/preview, synthetic export, and Copilot integration are **not implemented yet** — see the Future Roadmap section at the end.
+This document covers **what Phase 1 + 2 + 3 + 4 + 5 implement**: research campaigns, versioned research guides, pseudonymous participants (identity kept in a separate `identity.db`), manual and CSV-bulk response ingestion, text-only transcript ingestion, deterministic redaction, consent/privacy gating, withdrawal/retention/deletion, AI-assisted extraction of structured pending-review observations, the **human-governed review workflow** (observation review/edit/approve/reject/merge, evidence candidates, immutable approved Merchant Voice findings with deterministic strength bands and campaign-level analysis), a **human-reviewed Part A evidence-proposal workflow** (draft → submit → approve → approve-export → synthetic-only export), and a **read-only query layer** the Product Discovery Copilot uses for grounded, cited answers. **An approved Merchant Voice finding — and an approved Part A evidence proposal — are still NOT authoritative Part A evidence.** Nothing in this service mints an EV ID, writes `knowledge-base/customer-evidence/records/`, promotes anything into Part A, or changes a score, assumption, impact proposal, or monitoring record. Phase 6+ is **not implemented yet** — see the Future Roadmap section at the end.
 
-**The provenance chain this service preserves at every step:** raw merchant response → AI-extracted observation (never authoritative) → human-reviewed observation → evidence candidate → approved Merchant Voice finding → *(Phase 5, not built)* Part A evidence proposal.
+**The provenance chain this service preserves at every step:** raw merchant response → AI-extracted observation (never authoritative) → human-reviewed observation → evidence candidate → approved Merchant Voice finding → Part A evidence **proposal** (Phase 5, still non-authoritative) → exported synthetic demo candidate *(never Part A evidence)* → authoritative Part A evidence *(a separate, human Workstream A action outside this service, still not built as an automated path — Phase 6+)*.
 
 ## Authentication
 
@@ -17,7 +17,7 @@ Every endpoint except `GET /health` requires `Authorization: Bearer <token>`. To
 
 `viewer < researcher < reviewer < admin` (each role includes everything below it unless a rule says otherwise).
 
-## Endpoint authorization matrix (Phase 1 + 2 + 3 + 4)
+## Endpoint authorization matrix (Phase 1 + 2 + 3 + 4 + 5)
 
 | Endpoint | viewer | researcher | reviewer | admin |
 |---|---|---|---|---|
@@ -51,12 +51,18 @@ Every endpoint except `GET /health` requires `Authorization: Bearer <token>`. To
 | `POST /findings/{id}/publish`, `/suppress` | — (no access) | — | ✅ | ✅ |
 | `GET /campaigns/{id}/analysis` | ✅ (aggregate counts only) | ✅ (+ sample statements) | ✅ (+ sample statements) | ✅ (+ sample statements) |
 | `GET /segments/{id}/findings`, `/opportunities/{id}/findings`, `/assumptions/{id}/findings` | ✅ (published-only) | ✅ (published-only) | ✅ (published-only) | ✅ (published-only) |
+| `POST /findings/{id}/part-a-proposals` (generate), `PATCH /part-a-proposals/{id}` (draft only), `.../submit` | — (no access) | ✅ | ✅ | ✅ |
+| `GET /part-a-proposals`, `GET .../{id}` | — (no access) | ✅ | ✅ | ✅ |
+| `POST /part-a-proposals/{id}/approve`, `/reject`, `/approve-export`, `/export` | — (no access) | — | ✅ | ✅ |
+| `GET /published/findings`, `/published/campaigns/{id}`, `/published/segments/{id}`, `/published/opportunities/{id}`, `/published/assumptions/{id}` | ✅ | ✅ | ✅ | ✅ |
 
 **No approval endpoint exists in Phase 3** for observations created by extraction — Phase 4 adds the actual approve/reject/merge actions, all reviewer+.
 
-**Self-approval:** a creator (of a guide, an observation, or an evidence candidate) cannot approve their own object unless `MV_ALLOW_SELF_APPROVAL=1`, and even then only in synthetic-only mode — every such approval is audited with `self_approval: true` and is never hidden from later reviewers.
+**Self-approval:** a creator (of a guide, an observation, an evidence candidate, or a Part A evidence proposal — including its separate export approval) cannot approve their own object unless `MV_ALLOW_SELF_APPROVAL=1`, and even then only in synthetic-only mode, with a reason required — every such approval is audited with `self_approval: true` and is never hidden from later reviewers.
 
-**Viewer has no access at all** to Phase 2/3 routes, the review queue, observation editing, or evidence-candidate routes — not a filtered view, a hard `403 forbidden`. Viewer's only Phase 4 access is published findings and aggregate (no-raw-source) campaign analysis.
+**Viewer has no access at all** to Phase 2/3 routes, the review queue, observation editing, evidence-candidate routes, or Part A proposal routes — not a filtered view, a hard `403 forbidden`. Viewer's Phase 4/5 access is published findings, aggregate (no-raw-source) campaign analysis, and the read-only `/published/*` surface.
+
+**No role may create authoritative EV evidence, promote a proposal into Part A, or write `knowledge-base/customer-evidence/records/`** — there is no endpoint in this service that does any of these; the only file-writing action anywhere in Phase 5 is the synthetic-only export into `knowledge-base/customer-evidence/merchant-voice-candidates/` (see below).
 
 ## Synthetic-only mode
 
@@ -346,17 +352,83 @@ Uses only reviewed (`approved`), active (non-suppressed) data. Every aggregate c
 
 When a participant is withdrawn, retention-expired, or deletion-requested (`app/suppression.py`): every observation of theirs becomes `suppression_status: "suppressed"` (workflow_status is untouched — a rejected/approved review decision remains visible for audit); every **approved** evidence candidate referencing one of those observations has its counts recalculated from the current (post-suppression) state; that recalculation cascades into the candidate's finding — `numerator`/`denominator`/`strength_band` are recomputed and `publication_status` becomes `needs_revalidation` (some valid support remains) or `suppressed` (none does). A published finding is *never* left stale: the published query layer (`GET /findings` for viewer, and the segment/opportunity/assumption lookups for everyone) excludes it immediately. `approved_statement`/`approved_by`/`approved_at` are historical facts and are never rewritten by this cascade — this is the one narrow, explicitly-required exception to "approved findings are immutable," and every recalculation is audited with safe before/after counts (never source content).
 
-## Errors (Phase 3 + 4 additions)
+## Part A evidence proposal object (Phase 5 — non-authoritative)
+
+A **PROPOSAL** is a human-reviewed draft mapping of an approved+published Merchant Voice finding into the shape Workstream A's Part A evidence-candidate intake expects. It is never itself Part A evidence, never mints an EV ID, and approving one never writes `knowledge-base/customer-evidence/records/`.
+
+| Field | Type / enum |
+|---|---|
+| `proposal_id` | string (`MEP-…`) |
+| `finding_id` | string (`MEF-…`) — the source finding |
+| `campaign_id` | string |
+| `source_finding_version_hash` | string — a fingerprint of the finding's state (workflow/publication status, counts, strength_band) at generation/last-refresh time; recomputed fresh on every submit/approve/export to detect drift even though `merchant_findings.source_version_hash` itself doesn't change on recalculation |
+| `payload` | object — see below |
+| `rendered_markdown` | string — human-readable preview, always carries the synthetic banner when `payload.classification == "synthetic"` |
+| `workflow_status` | `draft` \| `pending_review` \| `approved` \| `rejected` \| `superseded` |
+| `publication_status` | `unpublished` \| `export_approved` \| `needs_revalidation` \| `suppressed` \| `exported_synthetic` — **a separate concept from `workflow_status`**, exactly as with observations/candidates/findings |
+| `reviewer` / `reviewed_at` | string, or `null` |
+| `rejection_reason` | one of the shared rejection-reason codes, or `null` |
+| `created_by` / `created_at` / `updated_at` | string |
+| `export_status` | `not_exported` \| `exported` \| `export_failed` |
+| `export_path` | string, relative to the repo root (e.g. `knowledge-base/customer-evidence/merchant-voice-candidates/MEP-….md`), or `null` |
+| `exported_at` | string, or `null` |
+| `superseded_by_proposal_id` | string, or `null` |
+| `synthetic_only` | boolean — mirrors the source campaign's `data_classification == "synthetic"` at generation time |
+| `needs_revalidation_reason` | string, or `null` — set by the invalidation cascade (never hand-written) |
+
+**`payload` (the proposal's evidence-candidate-shaped mapping):** `proposed_title`, `proposed_evidence_statement` (the finding's own `approved_statement` — the safe, reviewer-authored generalization; never a raw quote), `editor_notes` (the only genuinely free-text field, researcher-editable in draft), `source_type` (`"merchant_voice_research"`), `campaign_method`, `segment_id`, `linked_opportunities`, `linked_assumptions`, `suggested_strength` (copied from the finding's `strength_band` — **never silently relabelled as final Part A evidence strength**), `reviewer_required: true`, `strength_decision_note` (always states "Workstream A decides final evidence strength"), `support_count`, `contradiction_count`, `numerator`, `denominator`, `denominator_definition`, `limitations` (includes an entry for every quote withheld on permission grounds), `provenance` (`finding_id` → `candidate_id` → `campaign_id` → `guide_ids` → per-observation `{observation_id, role, observation_type, response_id, participant_id, source_answer_id, question_id, extraction_run_id}` — pseudonymous participant/response ids only, never a merchant name/company/phone/email/identity.db value, never raw transcript content), `quotes` (only observations that are currently `is_direct_quote`, `approved`+`active`, with `quote_permission` true and consent/retention still valid — otherwise the quote is omitted, a limitation is recorded, and the finding's own approved statement stands in as the safe paraphrase), `contradictory_evidence` (contradicting observations, never dropped), `review_history` (the finding's own audit trail: `action`/`actor_role`/`timestamp` only, never reviewer names beyond role or any content), `classification` (`"synthetic"` or `"live"`, from the campaign's `data_classification`), `authoritative_ev_id` (always `null` — there is no field here that could ever hold a minted EV ID).
+
+**Generation** (`POST /findings/{id}/part-a-proposals`, researcher+) requires the finding to be `workflow_status == "approved"`, `publication_status == "published"` (not `needs_revalidation` or `suppressed`), with every linked observation still consent-valid, retention-valid, and permission-safe. Fails `finding_not_publishable` or `finding_needs_revalidation` otherwise.
+
+**Review workflow:** `draft → pending_review → approved → rejected` (mirrors candidates/observations); `PATCH` only touches `payload.proposed_title`/`payload.editor_notes` on a `draft` — every other field is always server-recomputed, never hand-edited. Approving requires `pending_review` and re-checks the finding's live fingerprint against `source_finding_version_hash` (`proposal_stale` if drifted) and that the proposal hasn't already been cascade-flagged (`source_version_changed` if it has). Self-approval follows the shared rule (`MV_ALLOW_SELF_APPROVAL=1`, synthetic-only, reason required, audited `self_approval: true`). **An approved proposal is immutable** — a later source change produces a new proposal (regenerate) or a superseding one, never an edit of the approved one.
+
+**Export approval is a separate action** (`POST .../approve-export`, reviewer+) from content approval — it moves `publication_status` to `export_approved` and is itself subject to the same self-approval rule.
+
+## Synthetic-only export — `POST /part-a-proposals/{id}/export`
+
+Requires **all** of: the source campaign's `data_classification == "synthetic"`; the finding still `approved`+`published`; the proposal `workflow_status == "approved"`; `publication_status == "export_approved"`; the live fingerprint still matches `source_finding_version_hash` (else `proposal_stale`); caller role reviewer or admin. For any **non-synthetic** campaign, export always returns `non_synthetic_export_forbidden` and lists the future prerequisites: privacy approval, redaction verification, quote-permission verification, human reviewer approval, Workstream A approval, approved production deployment.
+
+The export target is **always** `knowledge-base/customer-evidence/merchant-voice-candidates/` — **never** `knowledge-base/customer-evidence/records/` (the authoritative Part A path). The filename is **always server-generated from the proposal ID** (`{proposal_id}.md`) — there is no path/filename parameter anywhere in the export call, so a caller-supplied path is structurally impossible, not merely rejected. The exported file always opens with the banner:
+
+```
+SYNTHETIC DATA — DEMO ONLY
+NOT AUTHORITATIVE PART A EVIDENCE
+REQUIRES WORKSTREAM A REVIEW
+```
+
+and never contains a minted EV ID (`authoritative_ev_id` is always rendered as `null`). Export never writes anywhere else, never touches `knowledge-base/customer-evidence/records/`, and never mints an EV ID or promotes the proposal into Part A.
+
+## Strength bands (deterministic — the model never assigns these)
+
+`single_signal` (one supporting participant) · `emerging_pattern` (≥2 supporting participants, or ≥3 with notable limitations/segment-method inconsistency) · `repeated_pattern` (≥3 independent supporting participants, consistent segment and method, contradictions don't dominate) · `mixed_pattern` (meaningful support and contradiction coexist) · `contradicted` (contradictions equal or outnumber support) · `insufficient` (no usable support). "Market validated" is never used as a label. See `app/strength.py` for the exact, documented rule order. A proposal's `suggested_strength` copies this value verbatim but is explicitly labelled non-authoritative (see above) — Workstream A decides final Part A evidence strength.
+
+## Campaign analysis — `GET /campaigns/{id}/analysis`
+
+Uses only reviewed (`approved`), active (non-suppressed) data. Every aggregate carries its own `numerator`, `denominator`, `denominator_definition`, `campaign_id`, `method`, `segment_id`, and `contradiction_count` — **no bare percentage by default**; prefer "3 of 8 included interviewed merchants in MVC-TEST-001." Results are always grouped by `segment_id` (`segments: {segment_id: {...}}`) with an explicit `grouping_note` — segments are never silently pooled, and a campaign's method is fixed by construction (analysis is always scoped to one campaign). Categories: `recurring_pains`, `recurring_behaviors`, `common_workarounds`, `objections`, `switching_barriers`, `wtp_signals`, `contradictions`, `adoption_conditions`, `rejection_conditions`, plus `unanswered_follow_up_questions` and `findings_by_strength_band`. Viewer receives the same shape with `sample_statements` omitted (aggregate counts only, no raw-ish source text); researcher/reviewer/admin receive up to 5 sample `normalized_statement`s per category.
+
+## Read-only "published" query surface — `GET /published/*` (Phase 5, the same seam Copilot calls into)
+
+`GET /published/findings`, `GET /published/campaigns/{id}` (a campaign summary grouped by finding type, with aggregated limitations), `GET /published/segments/{id}`, `GET /published/opportunities/{id}`, `GET /published/assumptions/{id}` — all roles including viewer. Backed by `app/published_query.py`, which **never opens `identity.db`** and returns only approved+published, non-superseded, consent/retention-valid, permission-safe content — never unreviewed/rejected/suppressed observations, `needs_revalidation` findings, draft proposals, or researcher-only review notes. `copilot-backend/app/mv_tools.py` calls this exact module directly (loaded under the alias `mv_app` to avoid a package-name collision with its own `app` package) against a genuinely read-only SQLite connection (`mode=ro`).
+
+## Withdrawal & revalidation (integrates with the Phase 2 suppression cascade)
+
+When a participant is withdrawn, retention-expired, or deletion-requested (`app/suppression.py`): every observation of theirs becomes `suppression_status: "suppressed"` (workflow_status is untouched — a rejected/approved review decision remains visible for audit); every **approved** evidence candidate referencing one of those observations has its counts recalculated from the current (post-suppression) state; that recalculation cascades into the candidate's finding — `numerator`/`denominator`/`strength_band` are recomputed and `publication_status` becomes `needs_revalidation` (some valid support remains) or `suppressed` (none does). A published finding is *never* left stale: the published query layer (`GET /findings` for viewer, the segment/opportunity/assumption lookups, and `GET /published/*` for everyone) excludes it immediately. `approved_statement`/`approved_by`/`approved_at` are historical facts and are never rewritten by this cascade — this is the one narrow, explicitly-required exception to "approved findings are immutable," and every recalculation is audited with safe before/after counts (never source content).
+
+**Phase 5 extends this one step further** (`app/part_a_proposal.invalidate_for_finding`, called from the same cascade): every non-terminal proposal for a just-recalculated finding is marked `needs_revalidation` (some support remains) or `suppressed` (none does), with `needs_revalidation_reason` recorded; approval and export are both blocked from that point on; a proposal already `exported_synthetic` keeps its `export_status: "exported"` record (audit history is preserved) but its `publication_status` moves off `export_approved`/`exported_synthetic`, so it reads as based on a superseded version. A proposal preview is never silently left stale.
+
+## Errors (Phase 3 + 4 + 5 additions)
 
 Phase 3: `extraction_not_permitted` 403 · `consent_denied` 403 · `ai_processing_denied` 403 · `retention_expired` 403 · `redaction_incomplete` 409 · `response_purged` 409 · `transcript_pending_deletion` 409 · `provider_timeout` 504 · `provider_error` 502 · `invalid_provider_output` 502 · `unsupported_excerpt` 400 · `duplicate_extraction` 409.
 
 Phase 4: `invalid_transition` 409 · `source_immutable` 400 · `self_approval_forbidden` 403 · `observation_not_approved` 409 · `source_suppressed` 409 · `incompatible_segment` 400 · `incompatible_method` 400 · `missing_support` 400 · `stale_source_version` 409 · `candidate_not_reviewable` 409 · `finding_not_publishable` 409 · `finding_needs_revalidation` 409 · `quote_permission_denied` 403 · `consent_invalid` 403 · `contradiction_exclusion_requires_reason` 400.
 
+Phase 5: `proposal_stale` 409 (the finding drifted since this proposal was generated/last approved) · `proposal_not_reviewable` 409 (wrong `workflow_status` for the attempted action) · `proposal_not_exportable` 409 (not approved, or `publication_status != export_approved`) · `non_synthetic_export_forbidden` 403 (with the future-prerequisites list) · `source_version_changed` 409 (already cascade-flagged `needs_revalidation`/`suppressed`) · `export_path_invalid` 400 (defense-in-depth only — unreachable in practice, since the export path is always server-computed from a regex-validated proposal ID) · `not_permitted` 403 · `not_found` 404 · `forbidden` 403 (reused from Phase 4's shared code set).
+
 None of these ever include a provider response body or a stack trace.
 
-## Audit (Phase 3 + 4)
+## Audit (Phase 3 + 4 + 5)
 
-Audited: extraction requested, eligibility denied (with error code), extraction completed (with proposed/accepted/rejected counts), rerun, supersession (with count); observation edit/approve/reject/merge; candidate create/update/submit/approve/reject/supersede; finding create/publish/suppress/recalculate (with before/after counts). **Never audited:** answer text, transcript text, source excerpt content, review statement text, the provider payload, the prompt text, or token values — safe audit fields are limited to IDs, counts, source/version hashes, provider/model label, error codes, and a `fields_changed` name list (never the changed values) for edits.
+Audited: extraction requested, eligibility denied (with error code), extraction completed (with proposed/accepted/rejected counts), rerun, supersession (with count); observation edit/approve/reject/merge; candidate create/update/submit/approve/reject/supersede; finding create/publish/suppress/recalculate (with before/after counts); proposal generate/edit/submit/approve/reject/approve_export/export_completed/export_blocked/invalidate. **Never audited:** answer text, transcript text, source excerpt content, review/proposal statement text, the provider payload, the prompt text, token values, or full exported file contents — safe audit fields are limited to IDs, counts, source/version hashes, provider/model label, error codes, the export path *relative to the approved intake folder*, and a `fields_changed` name list (never the changed values) for edits.
 
 ## Error shape
 
@@ -402,7 +474,7 @@ Authorization: Bearer <reviewer-token>
 
 ## Schema version
 
-`1.3` (Phase 1 + 2 + 3 + 4 subset). This document will grow additively as later phases land; existing Phase 1/2/3/4 fields will not be renamed or removed without a version bump and cross-workstream agreement.
+`1.4` (Phase 1 + 2 + 3 + 4 + 5 subset). This document will grow additively as later phases land; existing Phase 1/2/3/4/5 fields will not be renamed or removed without a version bump and cross-workstream agreement.
 
 ## Streaming
 
@@ -412,4 +484,4 @@ Not applicable — this is a synchronous CRUD API, not a conversational endpoint
 
 ## Future roadmap (NOT implemented — documented for context only, not active)
 
-The following objects/endpoints are planned for Phase 5 and **must not be treated as available**: a Part A evidence *proposal* preview generated from an approved, published Merchant Voice finding (stored in `mv.db`, never an authoritative write — export to `knowledge-base/customer-evidence/merchant-voice-candidates/` will be gated to synthetic data only, reviewer-approved, with Workstream A sign-off), authoritative Part A evidence-ID minting, and read-only Copilot tools over **approved, published, non-suppressed, permission-safe findings only** (a new `merchant_finding` citation type resolving to anonymized internal routes, never identity/contact/raw-transcript data). An approved Merchant Voice finding (Phase 4, implemented) is explicitly **not** authoritative Part A evidence until a human separately accepts a Phase 5 proposal.
+Phase 6+ is not designed yet. Whatever it turns out to be, it must not be documented here as active until built. What is explicitly **still not implemented** after Phase 5: authoritative Part A evidence-ID minting, promotion of a proposal/candidate/finding into Part A, any write to `knowledge-base/customer-evidence/records/`, automatic outreach to merchants, and any frontend. An approved Merchant Voice finding (Phase 4) and an approved, even exported-synthetic, Part A evidence proposal (Phase 5) are both explicitly **not** authoritative Part A evidence — that step is a separate, human, Workstream A action, and no automated path to it exists in this service.

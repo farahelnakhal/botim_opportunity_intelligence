@@ -60,6 +60,14 @@ def get(conn, finding_id):
     return _row_to_dict(row)
 
 
+def get_for_candidate(conn, candidate_id):
+    """Returns the finding created by approving `candidate_id`, or None if
+    that candidate was never approved (still draft/pending_review/rejected)."""
+    row = conn.execute(f"SELECT {FINDING_COLUMNS} FROM merchant_findings WHERE candidate_id=?",
+                       (candidate_id,)).fetchone()
+    return _row_to_dict(row) if row is not None else None
+
+
 def list_for_campaign(conn, campaign_id, published_only=False):
     query = f"SELECT {FINDING_COLUMNS} FROM merchant_findings WHERE campaign_id=?"
     if published_only:

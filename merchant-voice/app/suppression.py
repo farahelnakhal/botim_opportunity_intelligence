@@ -30,9 +30,17 @@ publication_status update in place; publication_status becomes
 needs_revalidation (if some valid support remains) or suppressed (if none
 does), so a published finding is never left stale. Approved_statement/
 approved_by/approved_at are historical facts and are never touched.
+
+Phase 5 extends the cascade one step further: for every candidate whose
+counts were just recalculated, if it has an approved finding
+(app.findings.get_for_candidate), any non-terminal Part A proposal for that
+finding is invalidated (app.part_a_proposal.invalidate_for_finding) —
+marked needs_revalidation or suppressed, blocking approval/export, with an
+already-exported synthetic candidate flagged as based on a superseded
+version. A proposal preview is never left stale.
 """
 
-from . import audit, candidates
+from . import audit, candidates, findings, part_a_proposal
 from .db import DbError
 from .models import SUPPRESSION_CAUSES, ValidationError
 
@@ -120,11 +128,19 @@ def suppress_participant(conn, principal, participant_id, cause, now, transcript
     recalculated_candidate_ids = candidates.recalculate_for_observations(
         conn, suppressed_observation_ids, now, actor_id=principal["label"], actor_role=principal["role"])
 
+    invalidated_proposal_ids = []
+    for candidate_id in recalculated_candidate_ids:
+        finding = findings.get_for_candidate(conn, candidate_id)
+        if finding is not None:
+            invalidated_proposal_ids += part_a_proposal.invalidate_for_finding(
+                conn, finding["finding_id"], now, actor_id=principal["label"], actor_role=principal["role"])
+
     return {
         "participant_id": participant_id, "cause": cause,
         "affected_responses": len(response_ids), "purged_answers": purged_answers,
         "suppressed_observations": len(suppressed_observation_ids),
         "recalculated_candidates": recalculated_candidate_ids,
+        "invalidated_proposals": invalidated_proposal_ids,
         "scheduled_transcript_deletions": scheduled_transcript_deletions,
         "deletion_results": deletion_results,
     }

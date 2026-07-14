@@ -38,6 +38,17 @@ mv.db carry a `merchant_identity_id` reference and their own per-campaign
 consent snapshot, but never identity.db's other fields — see app/models.py
 and app/participants.py for the enforcement that a participant's consent
 scope can only narrow, never widen, the identity-level grant.
+
+Phase 5 adds part_a_proposals: a human-reviewed, non-authoritative PROPOSAL
+mapping of an approved+published Merchant Voice finding into the shape
+Workstream A's Part A evidence-candidate intake expects. workflow_status
+(draft/pending_review/approved/rejected/superseded) and publication_status
+(unpublished/export_approved/needs_revalidation/suppressed/
+exported_synthetic) are separate concepts, mirroring the observation/
+candidate/finding pattern — never combined into one status field. Approving
+a proposal never mints an EV ID, never writes to
+knowledge-base/customer-evidence/records/, and never promotes anything into
+Part A; see app/part_a_proposal.py.
 """
 
 import json
@@ -308,6 +319,30 @@ MV_MIGRATIONS = [
             published_by TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
+        )""",
+    ]),
+    (5, [
+        """CREATE TABLE IF NOT EXISTS part_a_proposals (
+            proposal_id TEXT PRIMARY KEY,
+            finding_id TEXT NOT NULL REFERENCES merchant_findings(finding_id),
+            campaign_id TEXT NOT NULL REFERENCES campaigns(campaign_id),
+            source_finding_version_hash TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            rendered_markdown TEXT NOT NULL,
+            workflow_status TEXT NOT NULL DEFAULT 'draft',
+            publication_status TEXT NOT NULL DEFAULT 'unpublished',
+            reviewer TEXT,
+            reviewed_at TEXT,
+            rejection_reason TEXT,
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            export_status TEXT NOT NULL DEFAULT 'not_exported',
+            export_path TEXT,
+            exported_at TEXT,
+            superseded_by_proposal_id TEXT,
+            synthetic_only INTEGER NOT NULL DEFAULT 1,
+            needs_revalidation_reason TEXT
         )""",
     ]),
 ]

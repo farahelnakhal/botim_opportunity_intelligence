@@ -9,14 +9,37 @@ never override them.
 
 ROUTE = {"evidence": "/evidence/{id}", "opportunity": "/opportunity/{id}",
          "segment": "/segment/{id}", "inflection": "/inflection/{id}",
-         "experiment": "/experiment/{id}", "assumption": "/assumption/{id}"}
+         "experiment": "/experiment/{id}", "assumption": "/assumption/{id}",
+         # Merchant Voice (Phase 5) — an approved, published finding. Never
+         # authoritative Part A evidence; never an EV-typed citation.
+         "merchant_finding": "/merchant-findings/{id}"}
 
 NO_DECISION = "No product or build decision has been made."
+NOT_VALIDATION = ("A concept reaction is a reaction to a proposed concept, not independent proof that the "
+                  "underlying pain, its frequency, or willingness to pay have been established.")
 
 
-def _cite(cid, ctype, title, role):
+def _cite(cid, ctype, title, role, metadata=None):
     return {"id": cid, "type": ctype, "title": (title or "")[:160], "role": role,
-            "target": {"type": "internal_route", "value": ROUTE[ctype].format(id=cid)}}
+            "target": {"type": "internal_route", "value": ROUTE[ctype].format(id=cid)},
+            "metadata": metadata}
+
+
+def _finding_metadata(f):
+    return {"campaign_id": f["campaign_id"], "method": f["method"], "segment_id": f["segment_id"],
+           "strength_band": f["strength_band"], "support_count": f["support_count"],
+           "contradiction_count": f["contradiction_count"], "denominator": f["denominator"],
+           "denominator_definition": f["denominator_definition"]}
+
+
+def _finding_role(f):
+    if f["finding_type"] == "contradiction":
+        return "contradictory"
+    if f["finding_type"] == "concept_reaction":
+        return "concept_reaction"
+    if f["strength_band"] in ("insufficient", "single_signal"):
+        return "weak_lead"
+    return "primary"
 
 
 class Pack:
@@ -31,11 +54,24 @@ class Pack:
         self.needs_no_decision = False
         self.draft = None
 
-    def cite(self, cid, ctype, title, role):
+    def cite(self, cid, ctype, title, role, metadata=None):
         cur = self.citations.get(cid)
-        rank = {"primary": 3, "contradictory": 3, "weak_lead": 2, "contextual": 1, "excluded": 0}
+        rank = {"primary": 3, "contradictory": 3, "weak_lead": 2, "concept_reaction": 2,
+               "contextual": 1, "excluded": 0}
         if cur is None or rank.get(role, 0) > rank.get(cur["role"], 0):
-            self.citations[cid] = _cite(cid, ctype, title, role)
+            self.citations[cid] = _cite(cid, ctype, title, role, metadata=metadata)
+
+    def cite_merchant_finding(self, f):
+        self.cite(f["finding_id"], "merchant_finding", f["approved_statement"], _finding_role(f),
+                  metadata=_finding_metadata(f))
+        if f["finding_type"] == "concept_reaction":
+            self.warnings.append(
+                f"{f['finding_id']} is a concept reaction — not independent proof of pain, frequency, "
+                "or willingness to pay")
+        if f["contradiction_count"] > 0:
+            self.warnings.append(
+                f"{f['finding_id']} has {f['contradiction_count']} contradicting observation(s) preserved "
+                "— not silently dropped")
 
     def confidence(self):
         levels = {v for v in self.conf_sources.values() if v}
@@ -271,6 +307,70 @@ def build(intent, executed, ids):
                 f"{s['raw_score_prev']}→{s['raw_score_new']}/85. A human must run the real impact workflow.")
             pack.warnings.append("impact-proposal draft is ephemeral; nothing was written or applied")
 
+        elif name == "list_merchant_campaigns":
+            if r["campaigns"]:
+                pack.facts.append("Merchant Voice campaigns with published findings:")
+                for c in r["campaigns"]:
+                    pack.facts.append(f"- {c['campaign_id']} ({c['method']}): "
+                                      f"{c['published_finding_count']} published finding(s)")
+            else:
+                pack.unknowns.append("no Merchant Voice campaigns have a published finding yet")
+
+        elif name == "get_merchant_campaign":
+            pack.facts.append(f"{r['campaign_id']} — {r['title']} ({r['method']}): "
+                              f"{r['published_finding_count']} published finding(s)")
+
+        elif name == "get_campaign_summary":
+            if not r["findings_by_type"]:
+                pack.unknowns.append(f"no published Merchant Voice findings for {r['campaign_id']}")
+            for finding_type, entries in r["findings_by_type"].items():
+                pack.facts.append(f"{r['campaign_id']} ({r['method']}) — {finding_type}:")
+                for f in entries:
+                    pack.facts.append(f"- {f['numerator']} of {f['denominator']} {f['denominator_definition']}: "
+                                      f"{f['approved_statement']} (suggested strength: {f['strength_band']})")
+                    pack.cite_merchant_finding(f)
+            if r["limitations"]:
+                pack.facts.append("Limitations: " + "; ".join(r["limitations"]))
+
+        elif name in ("get_approved_merchant_findings", "get_segment_feedback",
+                      "get_opportunity_merchant_feedback", "get_assumption_feedback",
+                      "get_merchant_objections", "get_merchant_workarounds"):
+            findings = r["findings"]
+            if not findings:
+                pack.unknowns.append(f"no published Merchant Voice findings matched ({name})")
+            for f in findings:
+                pack.facts.append(f"- {f['numerator']} of {f['denominator']} {f['denominator_definition']} "
+                                  f"({f['method']}, {f['finding_type']}): {f['approved_statement']} "
+                                  f"(suggested strength: {f['strength_band']}, "
+                                  f"{f['contradiction_count']} contradicting)")
+                pack.cite_merchant_finding(f)
+                if f["limitations"]:
+                    pack.facts.append(f"  Limitations: {'; '.join(f['limitations'])}")
+
+        elif name == "compare_segment_feedback":
+            for side_key in ("segment_a", "segment_b"):
+                side = r[side_key]
+                pack.facts.append(f"Segment {side['segment_id']} in {r['campaign_id']}:")
+                for f in side["findings"]:
+                    pack.facts.append(f"- {f['numerator']} of {f['denominator']} {f['denominator_definition']}: "
+                                      f"{f['approved_statement']} (suggested strength: {f['strength_band']})")
+                    pack.cite_merchant_finding(f)
+            pack.facts.append(r["grouping_note"])
+
+        elif name == "get_merchant_quotes":
+            if r["quotes"]:
+                pack.facts.append("Permission-verified merchant quotes:")
+                for q in r["quotes"][:5]:
+                    pack.facts.append(f'  "{q["text"]}" ({q["finding_id"]}, {q["role"]})')
+            else:
+                pack.unknowns.append("no permission-eligible direct quotes are currently available")
+
+        elif name == "get_campaign_limitations":
+            if r["limitations"]:
+                pack.facts.append(f"Limitations recorded for {r['campaign_id']}: " + "; ".join(r["limitations"]))
+            else:
+                pack.facts.append(f"No limitations recorded for {r['campaign_id']}.")
+
     # intent-level discipline epilogues (deterministic, not model-generated)
     if intent == "challenge_hypothesis":
         pack.facts.append(
@@ -278,6 +378,15 @@ def build(intent, executed, ids):
             "no product has been selected on the basis of this evidence. Validation before "
             "any development is recommended.")
         pack.actions.append("Run the linked validation experiment(s) before any build decision")
+        pack.needs_no_decision = True
+
+    if intent in ("merchant_feedback", "campaign_summary", "segment_feedback", "merchant_objections",
+                 "merchant_workarounds", "concept_reactions", "merchant_wtp_signals",
+                 "merchant_contradictions"):
+        pack.facts.append(
+            "Merchant Voice discipline: findings above are approved and published research signals, "
+            "not authoritative Part A evidence — Workstream A decides final evidence strength. "
+            + NOT_VALIDATION)
         pack.needs_no_decision = True
 
     return pack

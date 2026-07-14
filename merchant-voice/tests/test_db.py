@@ -28,10 +28,10 @@ class DbMigrationTests(unittest.TestCase):
         for expected in ("schema_meta", "campaigns", "guides", "guide_questions", "audit_events",
                         "participants", "responses", "raw_answers", "transcripts", "csv_import_tokens",
                         "observations", "extraction_runs", "evidence_candidates", "candidate_observations",
-                        "merchant_findings"):
+                        "merchant_findings", "part_a_proposals"):
             self.assertIn(expected, tables)
         version = conn.execute("SELECT version FROM schema_meta").fetchone()[0]
-        self.assertEqual(version, 4)
+        self.assertEqual(version, 5)
 
     def test_identity_schema_phase2_tables(self):
         conn = connect_identity(self.id_path)
@@ -43,7 +43,7 @@ class DbMigrationTests(unittest.TestCase):
         connect_mv(self.mv_path)
         conn2 = connect_mv(self.mv_path)  # reconnect / re-migrate
         version = conn2.execute("SELECT version FROM schema_meta").fetchone()[0]
-        self.assertEqual(version, 4)
+        self.assertEqual(version, 5)
         rows = conn2.execute("SELECT COUNT(*) FROM schema_meta").fetchone()[0]
         self.assertEqual(rows, 1)  # no duplicate schema_meta rows from re-migration
 
