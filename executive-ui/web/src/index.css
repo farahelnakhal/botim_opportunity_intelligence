@@ -226,6 +226,7 @@ button{font-family:inherit;}
 .avatar-stack .avatar:first-child{margin-left:0;}
 .btn{border-radius: var(--radius-sm); font-size:13px; font-weight:600; cursor:pointer; padding:7px 14px; border:1px solid var(--border); background:var(--surface); color:var(--text); display:inline-flex; align-items:center; gap:6px; text-decoration:none; transition: border-color .12s ease, background .12s ease;}
 .btn:hover{border-color:var(--border-strong); background:var(--bg-inset);}
+.btn:focus-visible, .nav-item:focus-visible, .ptab:focus-visible, .opp-card:focus-visible, .opp-mini:focus-visible{outline:2px solid var(--accent); outline-offset:2px;}
 .btn-primary{background:var(--accent); border-color:var(--accent); color:#fff;}
 .btn-primary:hover{background:var(--accent-hover); border-color:var(--accent-hover);}
 .btn-ghost{border-color:transparent; background:none;}
@@ -350,6 +351,28 @@ button{font-family:inherit;}
 .list-row-sub{font-size:12px; color:var(--text-tertiary); margin-top:1px;}
 .list-row-meta{font-size:11.5px; color:var(--text-tertiary); white-space:nowrap;}
 .chip{font-size:10.5px; font-weight:600; color:var(--text-secondary); background:var(--bg-inset); padding:2px 8px; border-radius:20px;}
+
+/* clickable list/file rows (evidence, sources, knowledge, updates) — same visual
+   shape as the static row, but a real <button> underneath for keyboard/SR users */
+.list-row.clickable, .file-row.clickable{
+  width:100%; border:none; background:none; text-align:left; font:inherit; color:inherit; cursor:pointer;
+  transition: background .12s ease;
+}
+.list-row.clickable:hover, .file-row.clickable:hover{background:var(--bg-inset);}
+.list-row.clickable:focus-visible, .file-row.clickable:focus-visible,
+.evidence-list-link:focus-visible{
+  outline:2px solid var(--accent); outline-offset:-2px;
+}
+.evidence-list-link{
+  border:none; background:none; padding:0; margin:0; font:inherit; color:inherit; text-align:left; cursor:pointer;
+}
+.evidence-list-link:hover{color:var(--accent);}
+
+/* generic detail-drawer field list (DetailDrawer.tsx) */
+.detail-fields{display:flex; flex-direction:column; gap:10px; margin:14px 0;}
+.detail-fields > div{display:flex; justify-content:space-between; gap:12px; font-size:12.5px; border-bottom:1px solid var(--border); padding-bottom:8px;}
+.detail-fields dt{color:var(--text-tertiary); font-weight:600;}
+.detail-fields dd{margin:0; color:var(--text-secondary); text-align:right;}
 
 /* files */
 .dropzone{border:1.5px dashed var(--border-strong); border-radius:var(--radius-lg); padding:32px; text-align:center; margin-bottom:24px; color:var(--text-tertiary); font-size:13px; background:var(--surface); transition:border-color .15s ease, background .15s ease;}

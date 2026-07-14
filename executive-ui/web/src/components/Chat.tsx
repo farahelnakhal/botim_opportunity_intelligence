@@ -145,14 +145,20 @@ function ChatInput({ onSend }: { onSend: (t: string) => void }) {
               }
             }}
           />
-          <button className="icon-btn" title="Attach a file for context" onClick={() => fileRef.current?.click()}>
+          <button
+            className="icon-btn"
+            title="Note file names only — files are not uploaded to or read by the analysis engine yet"
+            onClick={() => fileRef.current?.click()}
+          >
             <Icon name="paperclip" />
           </button>
           <input
             ref={fileRef} type="file" multiple hidden
             onChange={(e) => {
               const names = Array.from(e.target.files ?? []).map((f) => f.name);
-              if (names.length) setVal((v) => `${v}${v ? " " : ""}[attached: ${names.join(", ")}] `);
+              if (names.length) {
+                setVal((v) => `${v}${v ? " " : ""}[file names noted, not uploaded or analyzed: ${names.join(", ")}] `);
+              }
               e.target.value = "";
             }}
           />

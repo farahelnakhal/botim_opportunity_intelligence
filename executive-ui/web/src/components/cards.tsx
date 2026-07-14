@@ -313,6 +313,7 @@ export function ResearchPlanCard({ data }: { data: { questions: string[]; gaps: 
 
 /* ---------------- Evidence ---------------- */
 export function EvidenceCard({ data }: { data: EvidenceRef }) {
+  const { openDetail } = useApp();
   const label = data.title && data.title !== "—" ? data.title : "Customer-evidence record";
   return (
     <Collapsible title={`${label}${data.weak ? " · lead, not a finding" : ""}`} icon="file">
@@ -321,6 +322,9 @@ export function EvidenceCard({ data }: { data: EvidenceRef }) {
         {data.segment && data.segment !== "—" ? ` · ${humanize(data.segment)}` : ""}
       </p>
       {!data.resolved && <p style={{ color: "var(--warning)" }}>Referenced but not yet on file.</p>}
+      <button type="button" className="evidence-list-link" onClick={() => openDetail("evidence", data.ev_id)}>
+        View full evidence detail →
+      </button>
     </Collapsible>
   );
 }

@@ -1,0 +1,105 @@
+// Minimal, hand-built OverviewPayload fixture for component/unit tests.
+// Shapes mirror executive-ui/api/serialize.py output (types.ts), scaled down.
+import type { Opportunity, OverviewPayload } from "../types";
+
+function opp(id: string, name: string): Opportunity {
+  return {
+    id,
+    name,
+    raw_score: 42,
+    raw_max: 85,
+    composite: 3.4,
+    classification: "promising",
+    classification_label: "Promising",
+    confidence: "medium",
+    assumption_count: 6,
+    factors: [],
+    critical_flags: [],
+    segment: "Test segment",
+    jtbd: "Test JTBD",
+    hypothesis: "Test hypothesis",
+    strongest_evidence: [],
+    contradictory_evidence: "—",
+    rejection_conditions: "—",
+    validation_plan: "—",
+    score_history: [],
+    latest_change: "—",
+    latest_alert: "—",
+    next_action: "—",
+    profile_path: "(fixture)",
+    is_archived: false,
+    impact_history: [],
+    brief_envelope: null,
+  };
+}
+
+export const overviewFixture: OverviewPayload = {
+  meta: {
+    generated_note: "fixture",
+    decision_banner: "No product or build decision has been made.",
+    impact_available: true,
+    counts: {},
+  },
+  opportunities: [opp("OPP-001", "Test Opportunity One"), opp("OPP-002", "Test Opportunity Two")],
+  archived: [],
+  evidence: [
+    {
+      ev_id: "EV-2026-W28-001",
+      resolved: true,
+      source_type: "interview",
+      evidence_class: "primary",
+      strength: 4,
+      confidence: "high",
+      status: "active",
+      segment: "SEG-test",
+      title: "Merchants report slow settlement",
+      role: "primary",
+      weak: false,
+    },
+  ],
+  assumptions: [
+    {
+      opportunity_id: "OPP-001",
+      factor_key: "willingness_to_pay",
+      text: "Merchants will pay a monthly fee for faster settlement.",
+      status: "untested",
+      evidence_ids: [],
+      sensitivity: "high",
+      validation_method: "interview",
+      owner: "Product",
+      decision_importance: "high",
+      source: "fixture",
+    },
+  ],
+  feed: [
+    {
+      id: "EVT-001",
+      kind: "lead",
+      tier: "informative",
+      title: "New evidence record EV-2026-W28-001",
+      detected_at: "2026-07-12",
+      detail: "EV-2026-W28-001",
+      before_after: null,
+    },
+    {
+      id: "EVT-002",
+      kind: "prediction-resolved",
+      tier: "informative",
+      title: "Prediction resolved",
+      detected_at: "2026-07-13",
+      detail: "Resolved as expected",
+      before_after: { before: "p=60%", after: "true" },
+    },
+    {
+      id: "EVT-003",
+      kind: "score-change",
+      tier: "important",
+      title: "Opportunity rescored",
+      detected_at: "2026-07-14",
+      detail: "OPP-001",
+      before_after: null,
+    },
+  ],
+  briefs: [{ opportunity_id: "OPP-001", exists: true, path: "(fixture)", body: "# Recommendation\n\nDo the thing." }],
+  impact_proposals: [],
+};

@@ -1,19 +1,31 @@
-import { useApp } from "../store";
+import { useApp, type View } from "../store";
 import Icon, { type IconName } from "./Icon";
 
-const WORKSPACE_NAV: { key: string; label: string; icon: IconName; tab?: string }[] = [
-  { key: "updates", label: "Updates", icon: "activity" },
-  { key: "monitoring", label: "Monitoring", icon: "bell", tab: "monitoring" },
-  { key: "reports", label: "Reports", icon: "file", tab: "reports" },
-  { key: "library", label: "Knowledge Base", icon: "book", tab: "knowledge" },
-  { key: "settings", label: "Settings", icon: "settings", tab: "settings" },
+// Global, portfolio-wide destinations — independent of whatever chat/project
+// is currently open. Each maps straight to a top-level `View`, not a project tab.
+const WORKSPACE_NAV: { key: string; label: string; icon: IconName; view: View }[] = [
+  { key: "updates", label: "Updates", icon: "activity", view: "updates" },
+  { key: "monitoring", label: "Monitoring", icon: "bell", view: "monitoring" },
+  { key: "reports", label: "Reports & Briefs", icon: "file", view: "reports" },
+  { key: "library", label: "Knowledge Base", icon: "book", view: "knowledge" },
+  { key: "settings", label: "Settings", icon: "settings", view: "settings" },
 ];
 
 export default function Sidebar() {
   const {
     projects, generated, view, activeProjectId, theme, toggleTheme, sidebarOpen,
-    goHome, goUpdates, openProject,
+    goHome, goUpdates, goMonitoring, goKnowledge, goReports, goSettings, openProject,
   } = useApp();
+
+  const GLOBAL_NAV_ACTIONS: Record<View, (() => void) | undefined> = {
+    home: undefined,
+    project: undefined,
+    updates: goUpdates,
+    monitoring: goMonitoring,
+    knowledge: goKnowledge,
+    reports: goReports,
+    settings: goSettings,
+  };
 
   return (
     <aside className={`sidebar${sidebarOpen ? " open" : ""}`} id="sidebar">
@@ -68,11 +80,8 @@ export default function Sidebar() {
         {WORKSPACE_NAV.map((n) => (
           <button
             key={n.key}
-            className={`nav-item${view === "updates" && n.key === "updates" ? " active" : ""}`}
-            onClick={() => {
-              if (n.key === "updates") goUpdates();
-              else openProject(activeProjectId ?? projects[0]?.id ?? "", n.tab as any);
-            }}
+            className={`nav-item${view === n.view ? " active" : ""}`}
+            onClick={GLOBAL_NAV_ACTIONS[n.view]}
           >
             <Icon name={n.icon} />
             {n.label}

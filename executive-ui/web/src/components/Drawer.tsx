@@ -21,7 +21,7 @@ function Section({ title, defaultOpen = false, children }: { title: string; defa
 }
 
 export default function Drawer() {
-  const { drawerOppId, closeDrawer, projects, generated, overview } = useApp();
+  const { drawerOppId, closeDrawer, projects, generated, overview, openDetail } = useApp();
   const opp = [...generated, ...projects].find((p) => p.id === drawerOppId) ?? null;
   const [comm, setComm] = useState<CommercialModel | null>(null);
 
@@ -84,7 +84,12 @@ export default function Drawer() {
                 <Section title="Strongest supporting evidence">
                   <ul className="evidence-list">
                     {strongEv.map((e) => (
-                      <li key={e.ev_id}><span className="dot" /><span>{e.title !== "—" ? e.title : "Customer-evidence record"} <span className="source-tag">strength {String(e.strength)}, {confidenceLabel(e.confidence)}</span></span></li>
+                      <li key={e.ev_id}>
+                        <span className="dot" />
+                        <button type="button" className="evidence-list-link" onClick={() => openDetail("evidence", e.ev_id)}>
+                          {e.title !== "—" ? e.title : "Customer-evidence record"} <span className="source-tag">strength {String(e.strength)}, {confidenceLabel(e.confidence)}</span>
+                        </button>
+                      </li>
                     ))}
                   </ul>
                 </Section>
@@ -98,7 +103,16 @@ export default function Drawer() {
                 <Section title="Weakest assumptions">
                   <ul className="evidence-list">
                     {weak.map((a, i) => (
-                      <li key={i}><span className="dot weak" /><span>{humanize(a.text)} <span className="source-tag">— {a.status}, importance {a.decision_importance}</span></span></li>
+                      <li key={i}>
+                        <span className="dot weak" />
+                        <button
+                          type="button"
+                          className="evidence-list-link"
+                          onClick={() => openDetail("assumption", `${a.opportunity_id}::${a.factor_key}`)}
+                        >
+                          {humanize(a.text)} <span className="source-tag">— {a.status}, importance {a.decision_importance}</span>
+                        </button>
+                      </li>
                     ))}
                   </ul>
                 </Section>

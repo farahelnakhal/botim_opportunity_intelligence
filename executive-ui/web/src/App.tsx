@@ -5,7 +5,9 @@ import Home from "./components/Home";
 import Updates from "./components/Updates";
 import ProjectWorkspace from "./components/ProjectWorkspace";
 import Drawer from "./components/Drawer";
+import DetailDrawer from "./components/DetailDrawer";
 import Icon from "./components/Icon";
+import { KnowledgePanel, MonitoringPanel, ReportsPanel, SettingsPanel } from "./components/panels";
 
 export default function App() {
   const { view, loading, error, setSidebarOpen } = useApp();
@@ -37,6 +39,12 @@ export default function App() {
             {view === "home" && <Home />}
             {view === "updates" && <Updates />}
             {view === "project" && <ProjectWorkspace />}
+            {/* Global, portfolio-wide destinations — deliberately independent of
+                whatever project/chat is currently open (see store.tsx go*). */}
+            {view === "monitoring" && <section className="view" id="view-monitoring"><MonitoringPanel /></section>}
+            {view === "knowledge" && <section className="view" id="view-knowledge"><KnowledgePanel /></section>}
+            {view === "reports" && <section className="view" id="view-reports"><ReportsPanel /></section>}
+            {view === "settings" && <section className="view" id="view-settings"><SettingsPanel /></section>}
           </>
         )}
 
@@ -49,6 +57,7 @@ export default function App() {
         )}
       </main>
       <Drawer />
+      <DetailDrawer />
     </div>
   );
 }

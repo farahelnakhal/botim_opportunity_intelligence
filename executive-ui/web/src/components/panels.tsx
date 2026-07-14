@@ -12,7 +12,7 @@ import { CalibrationCard, DecisionJournalEntry } from "./cards";
 
 /* ---------------- Knowledge ---------------- */
 export function KnowledgePanel() {
-  const { overview } = useApp();
+  const { overview, openDetail } = useApp();
   const [q, setQ] = useState("");
   if (!overview) return null;
   const ev = overview.evidence.filter((e) =>
@@ -63,7 +63,13 @@ export function KnowledgePanel() {
       <div className="section-label">Evidence records</div>
       <div className="list-card">
         {ev.map((e) => (
-          <div className="list-row" key={e.ev_id}>
+          <button
+            type="button"
+            className="list-row clickable"
+            key={e.ev_id}
+            onClick={() => openDetail("evidence", e.ev_id)}
+            aria-label={`Open evidence detail: ${e.title !== "—" ? e.title : e.ev_id}`}
+          >
             <div className="list-row-icon" style={e.weak ? { background: "var(--warning-soft)", color: "var(--warning)" } : undefined}>
               <Icon name="file" size={16} />
             </div>
@@ -72,7 +78,7 @@ export function KnowledgePanel() {
               <div className="list-row-sub">{humanize(e.segment) !== "—" ? humanize(e.segment) : "Segment not recorded"}</div>
             </div>
             <div className="list-row-meta">strength {String(e.strength)} · {confidenceLabel(e.confidence)}</div>
-          </div>
+          </button>
         ))}
         {ev.length === 0 && <div className="list-row"><div className="list-row-sub">No matching evidence.</div></div>}
       </div>
@@ -343,7 +349,7 @@ export function FilesPanel() {
 
 /* ---------------- Sources (evidence provenance) ---------------- */
 export function SourcesPanel({ opp }: { opp: Opportunity }) {
-  const { overview } = useApp();
+  const { overview, openDetail } = useApp();
   const refs = useMemo(() => {
     const ids = new Set(opp.factors.flatMap((f) => f.evidence_ids));
     return (overview?.evidence ?? []).filter((e) => ids.has(e.ev_id));
@@ -362,7 +368,13 @@ export function SourcesPanel({ opp }: { opp: Opportunity }) {
       ) : (
         <div className="list-card">
           {refs.map((e) => (
-            <div className="file-row" key={e.ev_id}>
+            <button
+              type="button"
+              className="file-row clickable"
+              key={e.ev_id}
+              onClick={() => openDetail("evidence", e.ev_id)}
+              aria-label={`Open source detail: ${e.title !== "—" ? e.title : e.ev_id}`}
+            >
               <div className="file-thumb"><Icon name={e.resolved ? "file" : "alert"} size={18} /></div>
               <div className="file-main">
                 <div className="file-name">{e.title !== "—" ? e.title : "Customer-evidence record"}</div>
@@ -373,7 +385,7 @@ export function SourcesPanel({ opp }: { opp: Opportunity }) {
                 <span className={`pill-status ${e.resolved ? "processed" : "processing"}`}>{e.resolved ? "resolved" : "unresolved"}</span>
                 <span style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>strength {String(e.strength)}</span>
               </div>
-            </div>
+            </button>
           ))}
         </div>
       )}
@@ -390,14 +402,16 @@ const MARKETS: Record<string, { flag: string; name: string; regulator: string; c
   JO: { flag: "🇯🇴", name: "Jordan", regulator: "Central Bank of Jordan (CBJ)", currency: "JOD — Jordanian Dinar" },
 };
 
-export function SettingsPanel({ opp }: { opp: Opportunity }) {
+export function SettingsPanel({ opp }: { opp?: Opportunity }) {
   const [country, setCountry] = useState("AE");
   const [notify, setNotify] = useState(true);
   const [autoProcess, setAutoProcess] = useState(true);
   const [recipients, setRecipients] = useState<string[]>(["strategy@botim.ai", "research@botim.ai"]);
   const [newEmail, setNewEmail] = useState("");
   const m = MARKETS[country];
-  const inbox = `${opp.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 28)}@botim.ai`;
+  const inbox = opp
+    ? `${opp.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 28)}@botim.ai`
+    : "workspace@botim.ai";
 
   const addRecipient = () => {
     const e = newEmail.trim();
@@ -410,16 +424,22 @@ export function SettingsPanel({ opp }: { opp: Opportunity }) {
       <div className="panel-title-row">
         <div>
           <div className="panel-title">Settings</div>
-          <div className="panel-sub">Configuration for {opp.name}</div>
+          <div className="panel-sub">{opp ? `Configuration for ${opp.name}` : "Workspace-wide configuration — not tied to any single chat or opportunity"}</div>
         </div>
       </div>
 
-      <div className="settings-section">
-        <div className="settings-section-title">General</div>
-        <div className="field-row"><div className="field-label">Opportunity</div><input className="field-input" defaultValue={opp.name} /></div>
-        <div className="field-row"><div className="field-label">Classification</div><input className="field-input" value={tagLabel(opp.classification)} readOnly /></div>
-        <div className="field-row" style={{ marginBottom: 0 }}><div className="field-label">Segment</div><input className="field-input" value={humanize(opp.segment)} readOnly /></div>
-      </div>
+      {opp ? (
+        <div className="settings-section">
+          <div className="settings-section-title">General</div>
+          <div className="field-row"><div className="field-label">Opportunity</div><input className="field-input" defaultValue={opp.name} /></div>
+          <div className="field-row"><div className="field-label">Classification</div><input className="field-input" value={tagLabel(opp.classification)} readOnly /></div>
+          <div className="field-row" style={{ marginBottom: 0 }}><div className="field-label">Segment</div><input className="field-input" value={humanize(opp.segment)} readOnly /></div>
+        </div>
+      ) : (
+        <div className="empty-state" style={{ padding: "18px 0 28px" }}>
+          Select an opportunity from the sidebar to configure opportunity-specific settings. The sections below apply workspace-wide.
+        </div>
+      )}
 
       <div className="settings-section">
         <div className="settings-section-title">Market</div>

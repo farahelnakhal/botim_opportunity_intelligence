@@ -11,7 +11,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "chat", label: "Chat" },
   { key: "knowledge", label: "Knowledge" },
   { key: "interviews", label: "Interviews" },
-  { key: "reports", label: "Reports" },
+  { key: "reports", label: "Reports & Briefs" },
   { key: "monitoring", label: "Monitoring" },
   { key: "files", label: "Files" },
   { key: "sources", label: "Sources" },

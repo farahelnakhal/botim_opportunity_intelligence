@@ -10,7 +10,7 @@ function iconForKind(kind: string): IconName {
 }
 
 export default function Updates() {
-  const { overview } = useApp();
+  const { overview, openDetail } = useApp();
   const feed = overview?.feed ?? [];
   const names = nameMap([...(overview?.opportunities ?? []), ...(overview?.archived ?? [])]);
 
@@ -33,7 +33,13 @@ export default function Updates() {
         ) : (
           <div className="list-card">
             {feed.map((f) => (
-              <div className="list-row" key={f.id}>
+              <button
+                type="button"
+                className="list-row clickable"
+                key={f.id}
+                onClick={() => openDetail("monitoring_update", f.id)}
+                aria-label={`Open update detail: ${humanize(f.title, names)}`}
+              >
                 <div
                   className="list-row-icon"
                   style={f.tier === "critical" ? { background: "var(--critical-soft)", color: "var(--critical)" }
@@ -46,12 +52,14 @@ export default function Updates() {
                     {humanize(f.title, names)}
                     {f.detail && f.detail !== "—" && <span className="chip">{humanize(f.detail, names)}</span>}
                   </div>
-                  {f.before_after && (
+                  {f.before_after ? (
                     <div className="list-row-sub">{f.before_after.before} → {f.before_after.after}</div>
+                  ) : (
+                    <div className="list-row-sub">New monitoring information was received. Open for details.</div>
                   )}
                 </div>
                 <div className="list-row-meta">{f.detected_at}</div>
-              </div>
+              </button>
             ))}
           </div>
         )}

@@ -2,9 +2,18 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { api } from "./lib/api";
 import type { ChatBlock, ChatResponse, Opportunity, OverviewPayload } from "./types";
 
-export type View = "home" | "updates" | "project";
+export type View = "home" | "updates" | "project" | "monitoring" | "knowledge" | "reports" | "settings";
 export type Tab =
   | "chat" | "knowledge" | "interviews" | "reports" | "monitoring" | "files" | "sources" | "settings";
+
+// Generic detail-drawer target — a lighter-weight sibling to the opportunity
+// drawer (drawerOppId) for record types that aren't opportunities. Kept
+// separate so the existing opportunity drawer is never touched.
+export type DetailTargetType = "evidence" | "assumption" | "monitoring_update";
+export interface DetailTarget {
+  type: DetailTargetType;
+  id: string;
+}
 
 export interface Message {
   id: string;
@@ -15,7 +24,7 @@ export interface Message {
   streaming?: boolean;
 }
 
-interface AppState {
+export interface AppState {
   theme: "light" | "dark";
   toggleTheme: () => void;
 
@@ -33,14 +42,21 @@ interface AppState {
   conversations: Record<string, Message[]>;
 
   drawerOppId: string | null;
+  detailTarget: DetailTarget | null;
 
   goHome: () => void;
   goUpdates: () => void;
+  goMonitoring: () => void;
+  goKnowledge: () => void;
+  goReports: () => void;
+  goSettings: () => void;
   openProject: (id: string, tab?: Tab) => void;
   setTab: (tab: Tab) => void;
   setSidebarOpen: (open: boolean) => void;
   openDrawer: (id: string) => void;
   closeDrawer: () => void;
+  openDetail: (type: DetailTargetType, id: string) => void;
+  closeDetail: () => void;
   send: (message: string, projectId?: string) => Promise<void>;
   analyzeNew: (prompt: string) => Promise<void>; // start a fresh analysis of ANY opportunity
 }
@@ -79,6 +95,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [conversations, setConversations] = useState<Record<string, Message[]>>(() => load(LS.conv, {}));
   const [drawerOppId, setDrawerOppId] = useState<string | null>(null);
+  const [detailTarget, setDetailTarget] = useState<DetailTarget | null>(null);
   const [generated, setGenerated] = useState<Opportunity[]>(() => load<Opportunity[]>(LS.gen, []));
 
   useEffect(() => {
@@ -123,6 +140,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setView("updates");
     setSidebarOpen(false);
   }, []);
+  // Global, portfolio-wide destinations. These deliberately do NOT touch
+  // activeProjectId/activeTab, so the current chat/project is preserved and
+  // restored exactly as it was when the user navigates back to it.
+  const goMonitoring = useCallback(() => {
+    setView("monitoring");
+    setSidebarOpen(false);
+  }, []);
+  const goKnowledge = useCallback(() => {
+    setView("knowledge");
+    setSidebarOpen(false);
+  }, []);
+  const goReports = useCallback(() => {
+    setView("reports");
+    setSidebarOpen(false);
+  }, []);
+  const goSettings = useCallback(() => {
+    setView("settings");
+    setSidebarOpen(false);
+  }, []);
   const openProject = useCallback((id: string, tab: Tab = "chat") => {
     setActiveProjectId(id);
     setActiveTab(tab);
@@ -132,6 +168,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const setTab = useCallback((tab: Tab) => setActiveTab(tab), []);
   const openDrawer = useCallback((id: string) => setDrawerOppId(id), []);
   const closeDrawer = useCallback(() => setDrawerOppId(null), []);
+  const openDetail = useCallback((type: DetailTargetType, id: string) => setDetailTarget({ type, id }), []);
+  const closeDetail = useCallback(() => setDetailTarget(null), []);
 
   // Shared: append the user turn + a pending assistant turn, reveal progress
   // stages one at a time, then land the final response.
@@ -203,8 +241,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     theme, toggleTheme,
     loading, error, overview, projects, generated,
     view, activeProjectId, activeTab, sidebarOpen,
-    conversations, drawerOppId,
-    goHome, goUpdates, openProject, setTab, setSidebarOpen, openDrawer, closeDrawer, send, analyzeNew,
+    conversations, drawerOppId, detailTarget,
+    goHome, goUpdates, goMonitoring, goKnowledge, goReports, goSettings,
+    openProject, setTab, setSidebarOpen, openDrawer, closeDrawer, openDetail, closeDetail, send, analyzeNew,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
