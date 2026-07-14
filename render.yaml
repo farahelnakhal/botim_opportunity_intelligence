@@ -1,0 +1,33 @@
+# Render Blueprint — one-click free deployment of the BOTIM Opportunity
+# Intelligence assistant (frontend + read-only API). See
+# executive-ui/README.md, "Deploy for free", for the full walkthrough.
+#
+# In the Render dashboard: New + -> Blueprint -> connect this repo -> Render
+# reads this file automatically. Env vars marked `sync: false` are prompted
+# for in the dashboard and never stored in the repo.
+services:
+  - type: web
+    name: botim-opportunity-intelligence
+    runtime: docker
+    region: oregon
+    dockerfilePath: ./executive-ui/deploy/Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /api/overview
+    autoDeployTrigger: commit
+    envVars:
+      # AI generation of new opportunities — pick ONE provider (or leave both
+      # unset to run the honest offline scaffold with no AI at all):
+      #
+      # Option A: a free, no-card-required hosted API (e.g. Groq — an
+      # OpenAI-compatible endpoint at https://api.groq.com/openai/v1):
+      - key: BOTIM_LLM_BASE_URL
+        value: https://api.groq.com/openai/v1
+      - key: BOTIM_LLM_MODEL
+        value: llama-3.1-8b-instant
+      - key: BOTIM_LLM_API_KEY
+        sync: false
+      # Option B: Anthropic Claude (needs a paid key) — set this instead and
+      # leave the three BOTIM_LLM_* vars above blank:
+      - key: ANTHROPIC_API_KEY
+        sync: false
