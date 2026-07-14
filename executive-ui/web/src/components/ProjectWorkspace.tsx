@@ -9,7 +9,7 @@ import {
 const TABS: { key: Tab; label: string }[] = [
   { key: "chat", label: "Chat" },
   { key: "knowledge", label: "Knowledge" },
-  { key: "interviews", label: "Experiments" },
+  { key: "interviews", label: "Interviews" },
   { key: "reports", label: "Reports" },
   { key: "monitoring", label: "Monitoring" },
   { key: "files", label: "Files" },
@@ -34,11 +34,13 @@ export default function ProjectWorkspace() {
             <span className={`status-dot ${status === "reject" ? "paused" : status}`} />
             {statusLabel}
           </div>
-          <div className="market-badge" title="Classification">
-            <span>{opp.id}</span><span>·</span><span>{tagLabel(opp.classification)}</span>
-          </div>
+          <div className="market-badge" title="Market"><span>🇦🇪</span><span>UAE</span></div>
+          {opp.generated
+            ? <div className="ph-updated">AI-generated · unvalidated</div>
+            : <div className="ph-updated">{tagLabel(opp.classification)}</div>}
         </div>
         <div className="ph-right">
+          <button className="btn btn-sm"><Icon name="external" size={14} /> Export</button>
           <button className="btn"><Icon name="share" size={14} /> Share</button>
         </div>
       </div>
@@ -53,7 +55,7 @@ export default function ProjectWorkspace() {
 
       {activeTab === "chat" && <Chat projectId={opp.id} />}
       {activeTab === "knowledge" && <div className="tab-panel"><KnowledgePanel /></div>}
-      {activeTab === "interviews" && <div className="tab-panel"><InterviewsPanel /></div>}
+      {activeTab === "interviews" && <div className="tab-panel"><InterviewsPanel opp={opp} /></div>}
       {activeTab === "reports" && <div className="tab-panel"><ReportsPanel /></div>}
       {activeTab === "monitoring" && <div className="tab-panel"><MonitoringPanel /></div>}
       {activeTab === "files" && <div className="tab-panel"><FilesPanel /></div>}

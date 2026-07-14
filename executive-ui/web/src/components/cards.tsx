@@ -1,4 +1,5 @@
 import { confidenceLabel, humanFactorKey, money, scorePct, tagClass, tagLabel } from "../lib/format";
+import { humanize, humanizeRefs, nameMap } from "../lib/labels";
 import type {
   Assumption, CommercialModel, EvidenceRef, Experiment, FeedItem, JournalPayload, Opportunity, Prediction,
 } from "../types";
@@ -27,10 +28,10 @@ export function OpportunityCard({ opp }: { opp: Opportunity }) {
       <div className="opp-main">
         <div className="opp-top-row">
           <span className={`tag ${tagClass(opp.classification)}`}>{tagLabel(opp.classification)}</span>
-          <span className="opp-id">{opp.id}</span>
+          {opp.generated && <span className="tag neutral">AI-generated · unvalidated</span>}
         </div>
         <div className="opp-title">{opp.name}</div>
-        <div className="opp-recommendation">{rec}</div>
+        <div className="opp-recommendation">{humanize(rec)}</div>
         <div className="opp-meta-row">
           <span>Confidence <b>{confidenceLabel(opp.confidence)}</b></span>
           <span>Assumptions <b>{opp.assumption_count}</b></span>
@@ -96,20 +97,19 @@ export function ExecutiveSummaryCard({ opp }: { opp: Opportunity }) {
       <div className="opp-main">
         <div className="opp-top-row">
           <span className={`tag ${tagClass(opp.classification)}`}>{tagLabel(opp.classification)}</span>
-          <span className="opp-id">{opp.id}</span>
           <span className="tag neutral">Confidence: {confidenceLabel(opp.confidence)}</span>
         </div>
         <div className="opp-title">{opp.name}</div>
         {opp.hypothesis && opp.hypothesis !== "—" && (
-          <div className="opp-recommendation">{opp.hypothesis}</div>
+          <div className="opp-recommendation">{humanize(opp.hypothesis)}</div>
         )}
         <div className="opp-meta-row">
-          <span>Segment <b>{opp.segment}</b></span>
+          <span>Segment <b>{humanize(opp.segment)}</b></span>
           <span>Assumptions <b>{opp.assumption_count}</b></span>
         </div>
         {opp.next_action && opp.next_action !== "—" && (
           <p style={{ fontSize: 13, marginTop: 10, marginBottom: 0, color: "var(--text-secondary)" }}>
-            <b>Next validation action:</b> {opp.next_action}
+            <b>Next validation action:</b> {humanize(opp.next_action)}
           </p>
         )}
       </div>
@@ -187,28 +187,31 @@ export function ExperimentCard({ data }: { data: Experiment }) {
   return (
     <div className="card">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-        <div className="card-head-title"><Icon name="check-circle" /> {data.id} — {data.title}</div>
+        <div className="card-head-title"><Icon name="check-circle" /> {data.title}</div>
         <span className={`pill-status ${status.includes("complete") || status.includes("pass") ? "complete" : "designed"}`}>{status}</span>
       </div>
       <div className="card-body" style={{ paddingTop: 12 }}>
-        <p><b>Hypothesis:</b> {data.hypothesis}</p>
-        <p><b>Success threshold:</b> {data.success_threshold}</p>
-        <p><b>Kill threshold:</b> {data.kill_threshold}</p>
-        {data.linked_opportunity && data.linked_opportunity !== "—" && (
-          <p className="source-tag">Linked: {data.linked_opportunity}</p>
-        )}
+        <p><b>Hypothesis:</b> {humanize(data.hypothesis)}</p>
+        <p><b>Success threshold:</b> {humanize(data.success_threshold)}</p>
+        <p><b>Kill threshold:</b> {humanize(data.kill_threshold)}</p>
       </div>
     </div>
   );
 }
 
 /* ---------------- Monitoring alert ---------------- */
+function useNames(): Record<string, string> {
+  const { overview } = useApp();
+  return nameMap([...(overview?.opportunities ?? []), ...(overview?.archived ?? [])]);
+}
+
 export function MonitoringAlertCard({ data }: { data: Record<string, any> }) {
+  const names = useNames();
   const tier = (data.tier || "info").toLowerCase();
   const cls = tier === "critical" ? "critical" : tier === "important" ? "important" : "info";
   return (
     <div className={`mon-card ${cls}`}>
-      <div className="mon-card-title">{data.title || data.summary || data.id}</div>
+      <div className="mon-card-title">{humanize(data.title || data.summary || "", names)}</div>
       <div className="mon-fields">
         <div>
           <div className="mon-field-label">Detected</div>
@@ -221,13 +224,7 @@ export function MonitoringAlertCard({ data }: { data: Record<string, any> }) {
         {(data.kb_links || data.opportunity_ids) && (
           <div>
             <div className="mon-field-label">Affected</div>
-            <div className="mon-field-value">{(data.kb_links || data.opportunity_ids || []).join(", ") || "—"}</div>
-          </div>
-        )}
-        {data.entity && (
-          <div>
-            <div className="mon-field-label">Source</div>
-            <div className="mon-field-value">{data.entity}</div>
+            <div className="mon-field-value">{humanizeRefs(data.kb_links || data.opportunity_ids, names)}</div>
           </div>
         )}
       </div>
@@ -236,11 +233,12 @@ export function MonitoringAlertCard({ data }: { data: Record<string, any> }) {
 }
 
 export function FeedItemCard({ data }: { data: FeedItem }) {
+  const names = useNames();
   return (
     <div className={`mon-card ${data.tier === "critical" ? "critical" : data.tier === "important" ? "important" : "info"}`}>
-      <div className="mon-card-title">{data.title}</div>
+      <div className="mon-card-title">{humanize(data.title, names)}</div>
       <div className="mon-fields">
-        <div><div className="mon-field-label">Kind</div><div className="mon-field-value">{data.kind}</div></div>
+        <div><div className="mon-field-label">Type</div><div className="mon-field-value" style={{ textTransform: "capitalize" }}>{data.kind.replace(/-/g, " ")}</div></div>
         <div><div className="mon-field-label">Detected</div><div className="mon-field-value">{data.detected_at}</div></div>
         {data.before_after && (
           <div><div className="mon-field-label">Change</div><div className="mon-field-value">{data.before_after.before} → {data.before_after.after}</div></div>
@@ -268,13 +266,13 @@ export function DecisionJournalEntry({ data }: { data: Prediction }) {
   return (
     <div className="card" style={{ marginBottom: 10 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
-        <div className="card-head-title" style={{ fontWeight: 600 }}>{data.id}</div>
+        <div className="card-head-title" style={{ fontWeight: 600 }}>Prediction</div>
         <span className={`pill-status ${resolved ? "complete" : "designed"}`}>
-          {resolved ? (data.outcome ? "resolved · true" : "resolved · false") : "open"}
+          {resolved ? (data.outcome ? "came true" : "did not happen") : "open"}
         </span>
       </div>
       <div className="card-body" style={{ paddingTop: 10 }}>
-        <p style={{ color: "var(--text)" }}>{data.statement}</p>
+        <p style={{ color: "var(--text)" }}>{humanize(data.statement)}</p>
         <p className="source-tag">
           p={Math.round(data.p * 100)}% · logged {data.made} · due {data.resolve_by}
           {data.brier != null && ` · Brier ${data.brier}`}
@@ -315,14 +313,14 @@ export function ResearchPlanCard({ data }: { data: { questions: string[]; gaps: 
 
 /* ---------------- Evidence ---------------- */
 export function EvidenceCard({ data }: { data: EvidenceRef }) {
+  const label = data.title && data.title !== "—" ? data.title : "Customer-evidence record";
   return (
-    <Collapsible title={`${data.ev_id}${data.weak ? " · lead, not a finding" : ""}`} icon="file">
-      <p style={{ color: "var(--text)" }}>{data.title}</p>
+    <Collapsible title={`${label}${data.weak ? " · lead, not a finding" : ""}`} icon="file">
       <p className="source-tag">
-        Strength {String(data.strength)} · confidence {confidenceLabel(data.confidence)} · role {data.role}
-        {data.segment && data.segment !== "—" ? ` · ${data.segment}` : ""}
+        Strength {String(data.strength)} · confidence {confidenceLabel(data.confidence)} · {data.role}
+        {data.segment && data.segment !== "—" ? ` · ${humanize(data.segment)}` : ""}
       </p>
-      {!data.resolved && <p style={{ color: "var(--warning)" }}>Cited but not found in the evidence store.</p>}
+      {!data.resolved && <p style={{ color: "var(--warning)" }}>Referenced but not yet on file.</p>}
     </Collapsible>
   );
 }

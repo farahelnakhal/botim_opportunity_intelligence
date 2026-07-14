@@ -70,7 +70,14 @@ Honesty is enforced **by construction** (`api/generate.py`), not by trusting the
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...      # enables real Claude-generated analysis
 python3 executive-ui/api/server.py --port 8000
+
+# verify your key actually reaches Claude (prints which engine answered):
+python3 executive-ui/api/server.py --check-llm "Invoice financing for UAE logistics SMEs"
 ```
+
+## Plain-language UI (no codes)
+
+The interface is written for a non-technical audience: internal identifiers (opportunity, evidence, experiment, segment, and prediction codes) never appear on screen. Opportunities are shown by name, evidence by its title, experiments by their title, and monitoring "affected" items are mapped back to opportunity names (`web/src/lib/labels.ts`). The identifiers still exist in the engines and API — they're just not surfaced in the UI.
 
 ## Architecture (read-only, single source of truth)
 

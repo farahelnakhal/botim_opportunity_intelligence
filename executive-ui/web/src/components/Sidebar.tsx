@@ -38,7 +38,7 @@ export default function Sidebar() {
                 key={p.id}
                 className={`nav-item${view === "project" && activeProjectId === p.id ? " active" : ""}`}
                 onClick={() => openProject(p.id)}
-                title={`${p.id} — ${p.name} (AI-generated, unvalidated)`}
+                title={`${p.name} — AI-generated, unvalidated`}
               >
                 <Icon name="star" />
                 {p.name}
@@ -55,7 +55,7 @@ export default function Sidebar() {
             key={p.id}
             className={`nav-item${view === "project" && activeProjectId === p.id ? " active" : ""}`}
             onClick={() => openProject(p.id)}
-            title={`${p.id} — ${p.name}`}
+            title={p.name}
           >
             <Icon name="folder" />
             {p.name}

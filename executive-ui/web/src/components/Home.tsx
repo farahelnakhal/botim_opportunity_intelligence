@@ -80,7 +80,7 @@ export default function Home() {
                   <button className="recent-card" key={p.id} onClick={() => openProject(p.id)}>
                     <div className="recent-card-top"><span className={`status-dot ${dot}`} /></div>
                     <div className="recent-card-title">{p.name}</div>
-                    <div className="recent-card-meta">{p.id} · {tagLabel(p.classification)}</div>
+                    <div className="recent-card-meta">{tagLabel(p.classification)}</div>
                   </button>
                 );
               })}

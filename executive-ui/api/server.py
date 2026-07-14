@@ -132,7 +132,25 @@ def main():
     ap = argparse.ArgumentParser(description="Read-only Opportunity Intelligence API")
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--root", default=str(UI_DIR.parents[0]))
+    ap.add_argument("--check-llm", metavar="PROMPT", nargs="?", const="Invoice financing for UAE logistics SMEs",
+                    help="Run one analysis and report whether Claude answered (verifies ANTHROPIC_API_KEY), then exit.")
     args = ap.parse_args()
+
+    if args.check_llm is not None:
+        import os
+        r = generate.analyze(args.check_llm, args.root)
+        o = r["generated_opportunity"]
+        key_set = bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
+        print(f"ANTHROPIC_API_KEY set : {key_set}")
+        print(f"model                 : {generate.MODEL}")
+        print(f"engine used           : {o['engine']}"
+              + ("  ✓ Claude is working" if o["engine"] == "claude"
+                 else "  (offline scaffold)"))
+        if o["engine"] != "claude" and generate._last_error:
+            print(f"llm error             : {generate._last_error}")
+        print(f"result                : {o['name']} — {o['classification']} "
+              f"(composite {o['composite']}, {o['assumption_count']}/17 assumptions)")
+        return 0 if (not key_set or o["engine"] == "claude") else 1
     httpd = make_server(args.port, args.root)
     print(f"Read-only API on http://127.0.0.1:{args.port}  (root={Handler.repo_root})")
     print("Endpoints: /api/overview /api/opportunities/OPP-nnn /api/commercial/OPP-nnn "
