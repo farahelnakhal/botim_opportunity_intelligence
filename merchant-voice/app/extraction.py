@@ -8,10 +8,11 @@ extraction_runs row is created and committed first (status='in_progress'),
 the network call happens with no write lock held, and results are
 persisted in a second, fast transaction.
 
-The model may only PROPOSE observations. It never sets review_status
-(always 'pending_review' on creation here) and it cannot mark anything
-approved, create a finding, or touch Part A/B/impact/assumption state —
-none of that exists in this module at all.
+The model may only PROPOSE observations. It never sets workflow_status
+(always 'pending_review' on creation here — see app/observation_review.py
+for the Phase 4 human review actions that move it to approved/rejected)
+and it cannot mark anything approved, create a finding, or touch Part
+A/B/impact/assumption state — none of that exists in this module at all.
 """
 
 import hashlib
@@ -62,8 +63,9 @@ def _observation_row_to_dict(row):
     (observation_id, response_id, campaign_id, participant_id, source_answer_id, observation_type,
      normalized_statement, source_excerpt, is_direct_quote, extraction_confidence, frequency, severity,
      current_workaround, payment_rail, linked_segments, linked_opportunities, linked_assumptions,
-     contradiction_target, follow_up_question, sensitivity_flags, review_status, workflow_status,
-     superseded_by_run_id, created_by, created_at, updated_at, model_provider, model_name,
+     contradiction_target, follow_up_question, sensitivity_flags, workflow_status, suppression_status,
+     reviewer_notes, rejection_reason, reviewed_by, reviewed_at, self_approval, superseded_by_run_id,
+     superseded_by_observation_id, created_by, created_at, updated_at, model_provider, model_name,
      extraction_run_id, source_hash) = row
     return {
         "observation_id": observation_id, "response_id": response_id, "campaign_id": campaign_id,
@@ -75,8 +77,11 @@ def _observation_row_to_dict(row):
         "linked_segments": loads(linked_segments), "linked_opportunities": loads(linked_opportunities),
         "linked_assumptions": loads(linked_assumptions), "contradiction_target": contradiction_target,
         "follow_up_question": follow_up_question, "sensitivity_flags": loads(sensitivity_flags),
-        "review_status": review_status, "workflow_status": workflow_status,
-        "superseded_by_run_id": superseded_by_run_id, "created_by": created_by, "created_at": created_at,
+        "workflow_status": workflow_status, "suppression_status": suppression_status,
+        "reviewer_notes": reviewer_notes, "rejection_reason": rejection_reason, "reviewed_by": reviewed_by,
+        "reviewed_at": reviewed_at, "self_approval": bool(self_approval),
+        "superseded_by_run_id": superseded_by_run_id, "superseded_by_observation_id": superseded_by_observation_id,
+        "created_by": created_by, "created_at": created_at,
         "updated_at": updated_at, "model_provider": model_provider, "model_name": model_name,
         "extraction_run_id": extraction_run_id, "source_hash": source_hash,
     }
@@ -87,8 +92,15 @@ OBSERVATION_COLUMNS = (
     "normalized_statement, source_excerpt, is_direct_quote, extraction_confidence, frequency, severity, "
     "current_workaround, payment_rail, linked_segments_json, linked_opportunities_json, "
     "linked_assumptions_json, contradiction_target, follow_up_question, sensitivity_flags_json, "
-    "review_status, workflow_status, superseded_by_run_id, created_by, created_at, updated_at, "
+    "workflow_status, suppression_status, reviewer_notes, rejection_reason, reviewed_by, reviewed_at, "
+    "self_approval, superseded_by_run_id, superseded_by_observation_id, created_by, created_at, updated_at, "
     "model_provider, model_name, extraction_run_id, source_hash")
+
+# Immutable once created — never touched by app/observation_review.py's edit
+# path, regardless of role (see models.OBSERVATION_EDITABLE_FIELDS for the
+# fields that ARE editable while pending_review).
+OBSERVATION_SOURCE_FIELDS = ("response_id", "participant_id", "campaign_id", "source_answer_id",
+                            "source_excerpt", "source_hash", "extraction_run_id")
 
 
 def get_observation(conn, observation_id):
@@ -105,6 +117,12 @@ def list_observations_for_response(conn, response_id, include_superseded=False):
         query += " AND workflow_status != 'superseded'"
     query += " ORDER BY created_at"
     rows = conn.execute(query, (response_id,)).fetchall()
+    return [_observation_row_to_dict(r) for r in rows]
+
+
+def list_observations_for_campaign(conn, campaign_id):
+    rows = conn.execute(f"SELECT {OBSERVATION_COLUMNS} FROM observations WHERE campaign_id=? "
+                        "ORDER BY created_at", (campaign_id,)).fetchall()
     return [_observation_row_to_dict(r) for r in rows]
 
 
@@ -187,14 +205,17 @@ def run_extraction(conn, config, principal, response_id, now, rerun=False):
             (extraction_run_id, response_id, config.provider, config.model, now, None, "in_progress",
              source_hash, None, None, None, None, principal["label"]))
         if rerun:
+            # only still-pending observations are superseded by a rerun —
+            # an already-approved/rejected review decision is never
+            # silently invalidated by re-running extraction
             prior = conn.execute(
-                "SELECT observation_id FROM observations WHERE response_id=? AND workflow_status='active' "
-                "AND review_status='pending_review'", (response_id,)).fetchall()
+                "SELECT observation_id FROM observations WHERE response_id=? AND workflow_status='pending_review'",
+                (response_id,)).fetchall()
             superseded_count = len(prior)
             if prior:
                 conn.execute(
                     "UPDATE observations SET workflow_status='superseded', superseded_by_run_id=?, updated_at=? "
-                    "WHERE response_id=? AND workflow_status='active' AND review_status='pending_review'",
+                    "WHERE response_id=? AND workflow_status='pending_review'",
                     (extraction_run_id, now, response_id))
             audit.record(conn, principal["label"], principal["role"], "supersession", "response", response_id,
                         now, safe_diff={"extraction_run_id": extraction_run_id, "superseded_count": superseded_count})
@@ -249,22 +270,26 @@ def run_extraction(conn, config, principal, response_id, now, rerun=False):
             row = {
                 "observation_id": observation_id, "response_id": response_id, "campaign_id": campaign["campaign_id"],
                 "participant_id": participant["participant_id"], **obs,
-                "review_status": "pending_review", "workflow_status": "active", "superseded_by_run_id": None,
+                "workflow_status": "pending_review", "suppression_status": "active", "reviewer_notes": None,
+                "rejection_reason": None, "reviewed_by": None, "reviewed_at": None, "self_approval": False,
+                "superseded_by_run_id": None, "superseded_by_observation_id": None,
                 "created_by": principal["label"], "created_at": now, "updated_at": now,
                 "model_provider": config.provider, "model_name": config.model,
                 "extraction_run_id": extraction_run_id, "source_hash": source_hash,
             }
             conn.execute(
                 f"INSERT INTO observations ({OBSERVATION_COLUMNS}) VALUES "
-                "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (row["observation_id"], row["response_id"], row["campaign_id"], row["participant_id"],
                  row["source_answer_id"], row["observation_type"], row["normalized_statement"],
                  row["source_excerpt"], int(row["is_direct_quote"]), row["extraction_confidence"],
                  row["frequency"], row["severity"], row["current_workaround"], row["payment_rail"],
                  dumps(row["linked_segments"]), dumps(row["linked_opportunities"]),
                  dumps(row["linked_assumptions"]), row["contradiction_target"], row["follow_up_question"],
-                 dumps(row["sensitivity_flags"]), row["review_status"], row["workflow_status"],
-                 row["superseded_by_run_id"], row["created_by"], row["created_at"], row["updated_at"],
+                 dumps(row["sensitivity_flags"]), row["workflow_status"], row["suppression_status"],
+                 row["reviewer_notes"], row["rejection_reason"], row["reviewed_by"], row["reviewed_at"],
+                 int(row["self_approval"]), row["superseded_by_run_id"], row["superseded_by_observation_id"],
+                 row["created_by"], row["created_at"], row["updated_at"],
                  row["model_provider"], row["model_name"], row["extraction_run_id"], row["source_hash"]))
             created.append(observation_id)
             existing_observation_ids.add(observation_id)

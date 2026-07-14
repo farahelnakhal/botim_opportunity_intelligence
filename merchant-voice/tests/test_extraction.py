@@ -88,15 +88,15 @@ class ExtractionOrchestrationTests(unittest.TestCase):
         run, observations = extraction.run_extraction(self.conn, self.config, RESEARCHER,
                                                        self.response["response_id"], self._clock())
         for o in observations:
-            self.assertEqual(o["review_status"], "pending_review")
-            self.assertEqual(o["workflow_status"], "active")
+            self.assertEqual(o["workflow_status"], "pending_review")
+            self.assertEqual(o["suppression_status"], "active")
 
     def test_model_cannot_set_approved_status(self):
         self._patch_provider(StubProvider(observations=[
-            self._valid_observation(review_status="approved")]))  # model tries to smuggle a status
+            self._valid_observation(workflow_status="approved")]))  # model tries to smuggle a status
         run, observations = extraction.run_extraction(self.conn, self.config, RESEARCHER,
                                                        self.response["response_id"], self._clock())
-        self.assertEqual(observations[0]["review_status"], "pending_review")
+        self.assertEqual(observations[0]["workflow_status"], "pending_review")
 
     def test_tool_call_response_parsed(self):
         self._patch_provider(StubProvider(tool_calls=[
@@ -148,7 +148,7 @@ class ExtractionOrchestrationTests(unittest.TestCase):
         self.assertEqual(old["workflow_status"], "superseded")
         self.assertEqual(old["superseded_by_run_id"], run2["extraction_run_id"])
         new = extraction.get_observation(self.conn, obs2[0]["observation_id"])
-        self.assertEqual(new["workflow_status"], "active")
+        self.assertEqual(new["workflow_status"], "pending_review")
 
     def test_list_observations_excludes_superseded_by_default(self):
         self._patch_provider(StubProvider(observations=[self._valid_observation()]))
@@ -157,7 +157,7 @@ class ExtractionOrchestrationTests(unittest.TestCase):
                                   self._clock(), rerun=True)
         visible = extraction.list_observations_for_response(self.conn, self.response["response_id"])
         self.assertEqual(len(visible), 1)
-        self.assertTrue(all(o["workflow_status"] == "active" for o in visible))
+        self.assertTrue(all(o["workflow_status"] == "pending_review" for o in visible))
 
     def test_duplicate_extraction_blocked_while_in_progress(self):
         with self.conn:

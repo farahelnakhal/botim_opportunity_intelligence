@@ -20,6 +20,18 @@ Phase 3 tables:
                review_status='pending_review' and workflow_status='active'
                (superseded on an explicit rerun, never overwritten).
 
+Phase 4: observations.workflow_status is repurposed to carry the human
+review lifecycle directly (pending_review -> approved/rejected, or
+superseded by a rerun or a merge) — the old review_status column (which
+only ever held 'pending_review') is dropped as redundant; existing
+'active' rows become 'pending_review' (their true state — nothing had
+reviewed them yet). A new observations.suppression_status tracks privacy
+suppression independently of the review decision, mirroring the
+participant/response pattern from Phase 2. Adds evidence_candidates,
+candidate_observations (join table), and merchant_findings — approved
+findings are still NOT authoritative Part A evidence; nothing in this
+service writes there.
+
 Merchant identity data (protected_external_reference, identity-level
 consent/permission fields) lives ONLY in identity.db. Participants in
 mv.db carry a `merchant_identity_id` reference and their own per-campaign
@@ -223,6 +235,79 @@ MV_MIGRATIONS = [
             model_name TEXT NOT NULL,
             extraction_run_id TEXT NOT NULL REFERENCES extraction_runs(extraction_run_id),
             source_hash TEXT NOT NULL
+        )""",
+    ]),
+    (4, [
+        # repurpose workflow_status to carry the review lifecycle; drop the
+        # now-redundant review_status column (it only ever held one value)
+        "UPDATE observations SET workflow_status='pending_review' WHERE workflow_status='active'",
+        "ALTER TABLE observations DROP COLUMN review_status",
+        "ALTER TABLE observations ADD COLUMN suppression_status TEXT NOT NULL DEFAULT 'active'",
+        "ALTER TABLE observations ADD COLUMN reviewer_notes TEXT",
+        "ALTER TABLE observations ADD COLUMN rejection_reason TEXT",
+        "ALTER TABLE observations ADD COLUMN reviewed_by TEXT",
+        "ALTER TABLE observations ADD COLUMN reviewed_at TEXT",
+        "ALTER TABLE observations ADD COLUMN self_approval INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE observations ADD COLUMN superseded_by_observation_id TEXT",
+        """CREATE TABLE IF NOT EXISTS evidence_candidates (
+            candidate_id TEXT PRIMARY KEY,
+            campaign_id TEXT NOT NULL REFERENCES campaigns(campaign_id),
+            finding_type TEXT NOT NULL,
+            statement TEXT NOT NULL,
+            segment_id TEXT,
+            linked_opportunities_json TEXT NOT NULL,
+            linked_assumptions_json TEXT NOT NULL,
+            proposed_evidence_role TEXT NOT NULL,
+            workflow_status TEXT NOT NULL DEFAULT 'draft',
+            strength_band TEXT,
+            limitations_json TEXT NOT NULL,
+            denominator_definition TEXT,
+            included_participant_count INTEGER NOT NULL DEFAULT 0,
+            support_count INTEGER NOT NULL DEFAULT 0,
+            contradiction_count INTEGER NOT NULL DEFAULT 0,
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            reviewed_by TEXT,
+            reviewed_at TEXT,
+            rejection_reason TEXT,
+            superseded_by_candidate_id TEXT,
+            supersedes_candidate_id TEXT,
+            source_version_hash TEXT NOT NULL,
+            self_approval INTEGER NOT NULL DEFAULT 0
+        )""",
+        """CREATE TABLE IF NOT EXISTS candidate_observations (
+            candidate_id TEXT NOT NULL REFERENCES evidence_candidates(candidate_id),
+            observation_id TEXT NOT NULL REFERENCES observations(observation_id),
+            role TEXT NOT NULL,
+            PRIMARY KEY (candidate_id, observation_id)
+        )""",
+        """CREATE TABLE IF NOT EXISTS merchant_findings (
+            finding_id TEXT PRIMARY KEY,
+            candidate_id TEXT NOT NULL REFERENCES evidence_candidates(candidate_id),
+            campaign_id TEXT NOT NULL REFERENCES campaigns(campaign_id),
+            approved_statement TEXT NOT NULL,
+            segment_id TEXT,
+            method TEXT NOT NULL,
+            linked_opportunities_json TEXT NOT NULL,
+            linked_assumptions_json TEXT NOT NULL,
+            strength_band TEXT NOT NULL,
+            limitations_json TEXT NOT NULL,
+            numerator INTEGER NOT NULL,
+            denominator INTEGER NOT NULL,
+            denominator_definition TEXT,
+            support_count INTEGER NOT NULL,
+            contradiction_count INTEGER NOT NULL,
+            workflow_status TEXT NOT NULL DEFAULT 'approved',
+            publication_status TEXT NOT NULL DEFAULT 'unpublished',
+            approved_by TEXT NOT NULL,
+            approved_at TEXT NOT NULL,
+            source_version_hash TEXT NOT NULL,
+            superseded_by_finding_id TEXT,
+            published_at TEXT,
+            published_by TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
         )""",
     ]),
 ]

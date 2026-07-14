@@ -1,7 +1,8 @@
-"""Shared synthetic-only test fixtures for Phase 2 tests. Not itself a test
-module (no Test* classes) — imported by the Phase 2 test files to avoid
-duplicating campaign/guide/participant bootstrap boilerplate."""
+"""Shared synthetic-only test fixtures for Phase 2/3/4 tests. Not itself a
+test module (no Test* classes) — imported by test files to avoid
+duplicating campaign/guide/participant/observation bootstrap boilerplate."""
 
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -11,9 +12,10 @@ REPO = BACKEND.parent
 sys.path.insert(0, str(BACKEND))
 sys.path.insert(0, str(REPO))
 
-from app import campaigns, guides, identity, participants, responses  # noqa: E402
+from app import campaigns, extraction, guides, identity, observation_review, participants, responses  # noqa: E402
 from app.config import Config  # noqa: E402
 from app.db import connect_identity, connect_mv  # noqa: E402
+from shared.llm.provider import ConversationModel, ModelResponse  # noqa: E402
 
 RESEARCHER = {"role": "researcher", "label": "researcher-1"}
 REVIEWER = {"role": "reviewer", "label": "reviewer-1"}
@@ -79,3 +81,51 @@ def make_participant(conn, identity_conn, config, clock, campaign_id, **override
     }
     data.update(overrides)
     return participants.create(conn, identity_conn, config, RESEARCHER, data, clock())
+
+
+class _FixtureStubProvider(ConversationModel):
+    def __init__(self, proposals):
+        self.proposals = proposals
+
+    def generate(self, messages, tools, system_prompt, configuration):
+        return ModelResponse(content=json.dumps({"observations": self.proposals}))
+
+
+def make_observation(conn, config, clock, response, answer_index, text, observation_type="pain",
+                     principal=None, rerun=False, **overrides):
+    """Runs a single-observation extraction against `response`'s answer at
+    `answer_index`, using a fixture-local stub provider (not the real
+    MockProvider echo) so the proposed observation content is fully
+    controlled. Returns the created observation dict. Pass `rerun=True` to
+    force a fresh extraction run against a response already extracted once
+    (idempotency would otherwise just return the earlier observations)."""
+    answer_id = response["answers"][answer_index]["answer_id"]
+    proposal = {
+        "observation_type": observation_type, "source_answer_id": answer_id, "source_excerpt": text,
+        "normalized_statement": text, "is_direct_quote": False, "extraction_confidence": "high",
+    }
+    proposal.update(overrides)
+    original = extraction.make_provider
+    extraction.make_provider = lambda cfg: _FixtureStubProvider([proposal])
+    try:
+        run, observations = extraction.run_extraction(conn, config, principal or RESEARCHER,
+                                                       response["response_id"], clock(), rerun=rerun)
+    finally:
+        extraction.make_provider = original
+    return observations[0]
+
+
+def make_approved_observation(conn, identity_conn, config, clock, campaign, guide, text,
+                              question_index=0, observation_type="pain", participant=None,
+                              approver=None, **overrides):
+    """Creates a participant (unless given) + response + extracted
+    observation, then approves it. Returns (observation, participant,
+    response)."""
+    if participant is None:
+        participant = make_participant(conn, identity_conn, config, clock, campaign["campaign_id"])
+    question_id = guide["questions"][question_index]["question_id"]
+    response = make_response(conn, config, clock, campaign, guide, participant,
+                             [{"question_id": question_id, "answer": text}])
+    obs = make_observation(conn, config, clock, response, 0, text, observation_type=observation_type, **overrides)
+    approved = observation_review.approve(conn, config, approver or REVIEWER, obs["observation_id"], clock())
+    return approved, participant, response

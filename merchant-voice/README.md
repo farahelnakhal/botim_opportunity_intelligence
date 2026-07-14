@@ -1,9 +1,9 @@
-# Merchant Voice & Validation — backend (Phase 1 + Phase 2 + Phase 3)
+# Merchant Voice & Validation — backend (Phase 1 + 2 + 3 + 4)
 
 > **PROTOTYPE-GRADE AUTHENTICATION. SYNTHETIC-DATA-ONLY. NOT APPROVED FOR REAL MERCHANT DATA. NOT FOR PRODUCTION USE.**
 > This service uses a static token→role map compared with `hmac.compare_digest` — it is **not** production identity/access management (no user directory, no session revocation, no token rotation, no TLS termination). Real merchant data requires a separate privacy/security review and a hardened deployment before use.
 
-A human-reviewed research-to-evidence pipeline for BOTIM merchant feedback: research campaigns and guides → participants and responses (manual, CSV bulk, and text transcript ingestion — consent-gated and redacted) → AI-assisted extraction of structured **pending-review** observations → (Phase 4+) human review → evidence candidates → approved findings → a **proposal** for Part A evidence (never an authoritative write). The model may only *propose* observations — it never approves, scores, or finalizes anything. **Pure Python 3 standard library — nothing to install**, matching the rest of the repository.
+A human-reviewed research-to-evidence pipeline for BOTIM merchant feedback: research campaigns and guides → participants and responses (manual, CSV bulk, and text transcript ingestion — consent-gated and redacted) → AI-assisted extraction of structured **pending-review** observations → human review (edit/approve/reject/merge) → evidence candidates → immutable approved Merchant Voice findings → (Phase 5) a **proposal** for Part A evidence (never an authoritative write). The model may only *propose* observations — it never approves, scores, or finalizes anything, and an approved finding is still **not** authoritative Part A evidence. **Pure Python 3 standard library — nothing to install**, matching the rest of the repository.
 
 ## Scope so far
 
@@ -13,7 +13,9 @@ A human-reviewed research-to-evidence pipeline for BOTIM merchant feedback: rese
 
 **Phase 3:** the canonical **extraction eligibility gate** (`app/eligibility.py` — every check must pass before any provider call); **provider-backed structured extraction** (`app/extraction.py`, using the shared `shared.llm.provider` abstraction — no second provider); **deterministic output validation** (`app/extraction_validate.py` — exact-substring source verification, quote/paraphrase enforcement, willingness-to-pay/frequency/severity safeguards, single-response aggregate-claim rejection, link/contradiction cleanup); and **observation persistence as `pending_review`** with an idempotent/rerun-aware `extraction_runs` ledger.
 
-**Not yet implemented** (later phases): reviewer approval/rejection, duplicate observation merge, evidence candidates, approved findings, strength bands, campaign aggregation, Part A proposal preview, synthetic export, Copilot Merchant Voice tools.
+**Phase 4:** the human-governed review workflow — **observation review/edit/approve/reject/merge** (`app/observation_review.py`, re-running Phase 3's safeguards on every edit; source fields immutable; separation-of-duties self-approval guard); **evidence candidates** (`app/candidates.py`, scoped to one campaign, counts always computed from linked observations, known-contradiction discovery); **deterministic strength bands** (`app/strength.py` — the model never assigns strength); **immutable approved Merchant Voice findings** (`app/findings.py`, created only by approving a candidate, with an explicit publish/suppress action); **campaign-level analysis** (`app/analysis.py` — always numerator/denominator/segment-grouped, never a bare percentage); and full **withdrawal/revalidation integration** with the Phase 2 suppression cascade (a published finding is never left stale).
+
+**Not yet implemented** (Phase 5): Part A proposal generation/preview, synthetic export, authoritative EV creation, Copilot Merchant Voice tools.
 
 ## Run
 
@@ -75,11 +77,16 @@ merchant-voice/            (separate process, port 8020, own storage — Gate A/
 │   ├── extraction_prompt.py  redacted-content-only prompt + tool schema, never API-exposed (Phase 3)
 │   ├── extraction_validate.py  deterministic acceptance/rejection of model output (Phase 3)
 │   ├── extraction.py      orchestration: eligibility -> provider call -> validate -> persist (Phase 3)
-│   └── api.py             Phase 1 + 2 + 3 routes
+│   ├── observation_review.py  human review: queue/edit/approve/reject/merge (Phase 4)
+│   ├── strength.py        deterministic strength-band computation — model never assigns this (Phase 4)
+│   ├── candidates.py      evidence candidates: draft -> submit -> approve/reject (Phase 4)
+│   ├── findings.py        immutable approved findings; publish/suppress; revalidation (Phase 4)
+│   ├── analysis.py        campaign-level analysis: numerator/denominator, segment-grouped (Phase 4)
+│   └── api.py             Phase 1 + 2 + 3 + 4 routes
 └── tests/
 ```
 
-Storage: `merchant-voice/data/mv.db` (campaigns, guides, questions, participants, responses, raw answers, transcript metadata, CSV import tokens, observations, extraction runs, audit — operational, authoritative for Merchant Voice's own domain) and `merchant-voice/data/identity.db` (a **separate file** holding only merchant identity + its own audit log) plus `merchant-voice/data/transcripts/` (transcript text files, not web-served). All gitignored; nothing here is authoritative Part A evidence, a Part B scorecard, an assumption, or impact state — those systems are untouched by this service.
+Storage: `merchant-voice/data/mv.db` (campaigns, guides, questions, participants, responses, raw answers, transcript metadata, CSV import tokens, observations, extraction runs, evidence candidates, candidate-observation links, merchant findings, audit — operational, authoritative for Merchant Voice's own domain) and `merchant-voice/data/identity.db` (a **separate file** holding only merchant identity + its own audit log) plus `merchant-voice/data/transcripts/` (transcript text files, not web-served). All gitignored; nothing here is authoritative Part A evidence, a Part B scorecard, an assumption, or impact state — those systems are untouched by this service.
 
 ## Shared provider package (Gate E)
 
@@ -91,11 +98,13 @@ The model-provider abstraction (`ConversationModel`, `ModelResponse`, `ProviderE
 - **Consent gate:** enforced before any AI call — consent granted, not suppressed, retention not expired, `ai_processing_permission` true, every answer's redaction `complete`, response not blocked/suppressed, transcript not pending deletion. `app/eligibility.py` is the single function every extraction entry point must call.
 - **Redaction is a floor, not a ceiling:** deterministic regex-based detection — it does not claim perfect PII detection.
 - **Suppression:** withdrawal blocks read access without deleting storage; retention-expiry and deletion-requests purge raw content and schedule transcript deletion (recoverable, with a maintenance retry).
-- **Extraction never trusts the model:** source excerpts are exact-substring-verified against the redacted answer they claim to come from (never fuzzy); a model-claimed direct quote is downgraded unless it is materially identical to the source *and* the participant's `quote_permission` is true; willingness-to-pay/frequency/severity claims require explicit source support or are cleared/downgraded; a single-response statement that reads as a market-wide generalization is rejected outright; invalid segment/opportunity/assumption links are removed (never replaced with an invented ID); every observation is created `pending_review` — nothing here can approve itself, and no route in Phase 3 changes that status.
+- **Extraction never trusts the model:** source excerpts are exact-substring-verified against the redacted answer they claim to come from (never fuzzy); a model-claimed direct quote is downgraded unless it is materially identical to the source *and* the participant's `quote_permission` is true; willingness-to-pay/frequency/severity claims require explicit source support or are cleared/downgraded; a single-response statement that reads as a market-wide generalization is rejected outright; invalid segment/opportunity/assumption links are removed (never replaced with an invented ID); every observation is created `pending_review` — nothing here can approve itself.
+- **Human review is never bypassable:** approved/rejected observations and approved candidates/findings are immutable to normal edits — a correction always creates a new reviewed revision or superseding object, never a silent overwrite. Every edit re-runs the Phase 3 safeguards. Self-approval requires `MV_ALLOW_SELF_APPROVAL=1` *and* synthetic-only mode, and is always audited with `self_approval: true`.
+- **Withdrawal cascades all the way through:** a suppressed participant's observations are excluded from candidate/finding counts immediately; a published finding whose support has weakened becomes `needs_revalidation`, and one with zero remaining support becomes `suppressed` — never left stale.
 
-## Security (Phase 1 + 2 + 3)
+## Security (Phase 1 + 2 + 3 + 4)
 
-Mandatory bearer-token auth with four roles (`viewer < researcher < reviewer < admin`) — **viewer has no access at all** to any Phase 2/3 route; `hmac.compare_digest` comparison; token values never logged, returned, or exposed; CORS restricted to the configured frontend origin; request-body size caps; bounded concurrency (including a `duplicate_extraction` guard against concurrent runs on the same response); parameterized SQL only; structured JSON errors with no stack traces or provider payloads; no shell/code execution anywhere; the extraction system prompt and tool schema are never returned by any endpoint.
+Mandatory bearer-token auth with four roles (`viewer < researcher < reviewer < admin`) — **viewer has no access at all** to Phase 2/3 routes, the review queue, observation editing, or evidence-candidate routes (viewer may only read published findings and aggregate campaign analysis); `hmac.compare_digest` comparison; token values never logged, returned, or exposed; CORS restricted to the configured frontend origin; request-body size caps; bounded concurrency (including a `duplicate_extraction` guard against concurrent runs on the same response); parameterized SQL only; structured JSON errors with no stack traces or provider payloads; no shell/code execution anywhere; the extraction system prompt and tool schema are never returned by any endpoint; no identity.db access from the analysis or finding query layers.
 
 ## Tests
 

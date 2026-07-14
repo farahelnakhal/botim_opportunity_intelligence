@@ -120,7 +120,7 @@ class Phase3ApiTests(unittest.TestCase):
 
         status, obs = self._call("GET", f"/api/merchant-voice/observations/{obs_id}", "tok-res")
         self.assertEqual(status, 200)
-        self.assertEqual(obs["review_status"], "pending_review")
+        self.assertEqual(obs["workflow_status"], "pending_review")
 
     def test_ineligible_response_returns_structured_error(self):
         cid, gid, pid, rid, answer_id = self._bootstrap()

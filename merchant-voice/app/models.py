@@ -45,6 +45,16 @@ class ValidationError(DbError):
     pass
 
 
+class Phase4Error(DbError):
+    """Carries one of models.PHASE4_ERROR_CODES for app.api's structured
+    error mapping — the review/candidate/finding equivalent of
+    app.eligibility.ExtractionError and app.csv_import.CsvTokenError."""
+
+    def __init__(self, message, code="invalid_request"):
+        super().__init__(message)
+        self.code = code
+
+
 def validate_campaign_input(data, synthetic_only):
     errors = []
     title = data.get("title")
@@ -272,13 +282,20 @@ FREQUENCY_VALUES = ("daily", "weekly", "monthly", "every_order", "most_transacti
                    "twice_monthly", "recurring", "rarely", "once")
 SEVERITY_VALUES = ("low", "medium", "high")
 
-# review_status is a HUMAN review outcome — Phase 3 never sets anything but
-# pending_review (reviewer approve/reject lands in Phase 4). workflow_status
-# is the observation's own system lifecycle — 'superseded' happens only as
-# an automatic side effect of an explicit extraction rerun, never a human
-# review action.
-REVIEW_STATUSES = ("pending_review",)
-OBSERVATION_WORKFLOW_STATUSES = ("active", "superseded")
+# Phase 4: workflow_status carries the full human-review lifecycle directly
+# (there is no separate review_status column — see app/db.py migration 4).
+# 'superseded' is reachable from pending_review (an extraction rerun) or
+# from pending_review/approved (a Phase 4 duplicate merge) — never a
+# silent edit. suppression_status is independent of the review decision,
+# mirroring the participant/response pattern from Phase 2.
+OBSERVATION_WORKFLOW_STATUSES = ("pending_review", "approved", "rejected", "superseded")
+OBSERVATION_SUPPRESSION_STATUSES = ("active", "suppressed")
+OBSERVATION_TRANSITIONS = {
+    "pending_review": {"approved", "rejected", "superseded"},
+    "approved": {"superseded"},
+    "rejected": set(),
+    "superseded": set(),
+}
 
 EXTRACTION_RUN_STATUSES = ("in_progress", "completed", "failed")
 
@@ -340,5 +357,115 @@ def validate_answer_input(answer, position):
     language = answer.get("language", "en")
     if language not in SUPPORTED_LANGUAGES:
         errors.append(f"answers[{position}].language must be one of {SUPPORTED_LANGUAGES}")
+    if errors:
+        raise ValidationError("; ".join(errors))
+
+
+# --- Phase 4: observation review, evidence candidates, findings -------------
+#
+# Reviewers govern observations and candidates; the model never does. An
+# approved Merchant Voice finding is still NOT authoritative Part A
+# evidence — nothing in this service writes there. See app/observation_review.py,
+# app/candidates.py, app/findings.py, app/strength.py, app/analysis.py.
+
+REJECTION_REASONS = (
+    "unsupported_by_source", "fabricated_or_inaccurate", "duplicate", "wrong_category",
+    "privacy_or_consent_issue", "insufficient_context", "irrelevant", "other",
+)
+
+# Editable by a reviewer/researcher on a pending_review observation; every
+# other observation column (response_id, participant_id, campaign_id,
+# source_answer_id, source_excerpt, source_hash, extraction_run_id, ...) is
+# immutable and never touched by app/observation_review.py's edit path.
+OBSERVATION_EDITABLE_FIELDS = (
+    "normalized_statement", "observation_type", "is_direct_quote", "linked_segments",
+    "linked_opportunities", "linked_assumptions", "contradiction_target", "frequency",
+    "severity", "current_workaround", "payment_rail", "follow_up_question",
+    "sensitivity_flags", "reviewer_notes",
+)
+
+CANDIDATE_OBSERVATION_ROLES = ("supporting", "contradicting", "contextual")
+PROPOSED_EVIDENCE_ROLES = ("supporting", "contradicting", "contextual")
+# finding_type mirrors OBSERVATION_TYPES — a candidate summarizes a theme
+# across observations of that same type.
+FINDING_TYPES = OBSERVATION_TYPES
+
+CANDIDATE_ID_RE = re.compile(r"^MEC-[A-Za-z0-9-]{1,40}$")
+FINDING_ID_RE = re.compile(r"^MEF-[A-Za-z0-9-]{1,40}$")
+
+CANDIDATE_WORKFLOW_STATUSES = ("draft", "pending_review", "approved", "rejected", "superseded")
+CANDIDATE_TRANSITIONS = {
+    "draft": {"pending_review"},
+    "pending_review": {"approved", "rejected", "draft"},
+    "approved": {"superseded"},
+    "rejected": set(),
+    "superseded": set(),
+}
+
+FINDING_WORKFLOW_STATUSES = ("approved", "superseded")
+FINDING_PUBLICATION_STATUSES = ("unpublished", "published", "needs_revalidation", "suppressed")
+
+STRENGTH_BANDS = (
+    "single_signal", "emerging_pattern", "repeated_pattern", "mixed_pattern",
+    "contradicted", "insufficient",
+)
+
+# For concept_test campaigns, a candidate/finding may only describe one of
+# these — a concept reaction alone can never independently claim the
+# underlying pain exists, is frequent, or that willingness to pay is proven.
+CONCEPT_TEST_ALLOWED_FINDING_TYPES = (
+    "concept_reaction", "objection", "adoption_condition", "rejection_condition",
+    "willingness_to_pay_signal",
+)
+
+PHASE4_ERROR_CODES = (
+    "invalid_transition", "source_immutable", "self_approval_forbidden", "observation_not_approved",
+    "source_suppressed", "incompatible_segment", "incompatible_method", "missing_support",
+    "stale_source_version", "candidate_not_reviewable", "finding_not_publishable",
+    "finding_needs_revalidation", "quote_permission_denied", "consent_invalid", "retention_expired",
+    "contradiction_exclusion_requires_reason", "not_found", "forbidden",
+)
+
+
+def validate_observation_edit(data):
+    errors = []
+    if "observation_type" in data and data["observation_type"] not in OBSERVATION_TYPES:
+        errors.append(f"observation_type must be one of {OBSERVATION_TYPES}")
+    if "frequency" in data and data["frequency"] is not None and data["frequency"] not in FREQUENCY_VALUES:
+        errors.append(f"frequency must be one of {FREQUENCY_VALUES} or null")
+    if "severity" in data and data["severity"] is not None and data["severity"] not in SEVERITY_VALUES:
+        errors.append(f"severity must be one of {SEVERITY_VALUES} or null")
+    if "normalized_statement" in data and (
+            not isinstance(data["normalized_statement"], str) or not data["normalized_statement"].strip()):
+        errors.append("normalized_statement must be a non-empty string")
+    for field in ("linked_segments", "linked_opportunities", "linked_assumptions"):
+        if field in data and not isinstance(data[field], list):
+            errors.append(f"{field} must be a list")
+    if errors:
+        raise ValidationError("; ".join(errors))
+
+
+def validate_candidate_input(data):
+    errors = []
+    if not isinstance(data.get("campaign_id"), str) or not data["campaign_id"]:
+        errors.append("campaign_id is required")
+    if data.get("finding_type") not in FINDING_TYPES:
+        errors.append(f"finding_type must be one of {FINDING_TYPES}")
+    if not isinstance(data.get("statement"), str) or not data["statement"].strip():
+        errors.append("statement is required")
+    if data.get("proposed_evidence_role") not in PROPOSED_EVIDENCE_ROLES:
+        errors.append(f"proposed_evidence_role must be one of {PROPOSED_EVIDENCE_ROLES}")
+    observations = data.get("observations")
+    if not isinstance(observations, list) or not observations:
+        errors.append("observations must be a non-empty list of {observation_id, role}")
+    else:
+        for i, o in enumerate(observations):
+            if not isinstance(o, dict) or not isinstance(o.get("observation_id"), str):
+                errors.append(f"observations[{i}].observation_id is required")
+            if o.get("role") not in CANDIDATE_OBSERVATION_ROLES:
+                errors.append(f"observations[{i}].role must be one of {CANDIDATE_OBSERVATION_ROLES}")
+    segment_id = data.get("segment_id")
+    if segment_id is not None and (not isinstance(segment_id, str) or not SEG_RE.match(segment_id)):
+        errors.append(f"invalid segment_id: {segment_id!r}")
     if errors:
         raise ValidationError("; ".join(errors))

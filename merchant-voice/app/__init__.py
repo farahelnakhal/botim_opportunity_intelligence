@@ -1,4 +1,4 @@
-"""Merchant Voice & Validation — backend (Phase 1 + Phase 2).
+"""Merchant Voice & Validation — backend (Phase 1 + 2 + 3 + 4).
 
 PROTOTYPE-GRADE AUTHENTICATION. SYNTHETIC-DATA-ONLY. NOT FOR PRODUCTION USE
 AND NOT APPROVED FOR REAL MERCHANT DATA.
@@ -28,8 +28,19 @@ quote/paraphrase enforcement, willingness-to-pay/frequency/severity
 safeguards, single-response aggregate-claim rejection), and persistence of
 every proposed observation as pending_review — the model may never approve
 its own output, assign final evidence strength, create a finding, or touch
-Part A/B/impact/assumption state. Still not implemented: reviewer
-approval/rejection, duplicate observation merge, evidence candidates,
-approved findings, strength bands, campaign aggregation, Part A proposals,
-synthetic export, and Copilot Merchant Voice tools.
+Part A/B/impact/assumption state.
+
+Phase 4 implements: the human review workflow for those observations
+(queue, edit with safeguard re-validation, approve/reject/merge — source
+fields immutable, approved/rejected observations never silently edited,
+separation-of-duties self-approval guard), evidence candidates (scoped to
+one campaign, counts always computed from linked observations, known-
+contradiction discovery), deterministic strength bands (the model never
+assigns these), immutable approved Merchant Voice findings created only by
+approving a candidate (still NOT authoritative Part A evidence), an
+explicit publish/suppress action, campaign-level analysis (numerator/
+denominator/segment-grouped, never a bare percentage), and full
+withdrawal/revalidation integration with the Phase 2 suppression cascade.
+Still not implemented: Part A proposal generation/preview, synthetic
+export, authoritative EV creation, and Copilot Merchant Voice tools.
 """

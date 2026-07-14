@@ -35,25 +35,54 @@ the model may only PROPOSE; there is no approval endpoint in this phase):
   GET    /api/merchant-voice/responses/{response_id}/observations
   GET    /api/merchant-voice/observations/{observation_id}
 
-Viewer has NO access to any Phase 2/3 route (participants/responses/CSV/
-transcripts/maintenance/extraction are all researcher+ at minimum) —
-enforced here, before dispatching to the service layer, in addition to
-whatever role checks the service functions themselves apply.
+Phase 4 routes (human review of observations, evidence candidates, approved
+findings, campaign analysis — no Part A write anywhere in this service):
 
-Still not implemented (Phase 4+): reviewer approval/rejection workflows,
-duplicate observation merge, evidence candidates, approved findings,
-strength bands, campaign aggregation, Part A proposals, synthetic export,
-Copilot tools.
+  GET    /api/merchant-voice/review/observations
+  PATCH  /api/merchant-voice/observations/{observation_id}
+  POST   /api/merchant-voice/observations/{observation_id}/approve
+  POST   /api/merchant-voice/observations/{observation_id}/reject
+  POST   /api/merchant-voice/observations/{observation_id}/merge
+
+  POST   /api/merchant-voice/evidence-candidates
+  GET    /api/merchant-voice/evidence-candidates
+  GET    /api/merchant-voice/evidence-candidates/{candidate_id}
+  PATCH  /api/merchant-voice/evidence-candidates/{candidate_id}
+  POST   /api/merchant-voice/evidence-candidates/{candidate_id}/submit
+  POST   /api/merchant-voice/evidence-candidates/{candidate_id}/approve
+  POST   /api/merchant-voice/evidence-candidates/{candidate_id}/reject
+
+  GET    /api/merchant-voice/findings
+  GET    /api/merchant-voice/findings/{finding_id}
+  POST   /api/merchant-voice/findings/{finding_id}/publish
+  POST   /api/merchant-voice/findings/{finding_id}/suppress
+
+  GET    /api/merchant-voice/campaigns/{campaign_id}/analysis
+  GET    /api/merchant-voice/segments/{segment_id}/findings
+  GET    /api/merchant-voice/opportunities/{opportunity_id}/findings
+  GET    /api/merchant-voice/assumptions/{assumption_id}/findings
+
+Viewer has NO access to Phase 2/3 routes, review-queue/observation-edit
+routes, or evidence-candidate routes (all researcher+ at minimum) —
+enforced here. Viewer MAY read published findings (GET /findings,
+GET /findings/{id}, and the segment/opportunity/assumption finding
+lookups — always published-only regardless of role) and campaign analysis
+(aggregate counts only — no sample statement text; researcher+ see the
+same analysis with sample statements included).
+
+Still not implemented (Phase 5): Part A proposal generation/preview,
+synthetic export, authoritative EV creation, Copilot Merchant Voice tools.
 """
 
 import json
 import re
 
-from . import campaigns, csv_import, extraction, guides, participants, responses, suppression, transcripts
+from . import (analysis, campaigns, candidates, csv_import, extraction, findings, guides,
+              observation_review, participants, responses, suppression, transcripts)
 from .auth import AuthError, authenticate, require_any_role
 from .db import DbError
 from .eligibility import ExtractionError
-from .models import ValidationError
+from .models import Phase4Error, ValidationError
 
 ERROR_STATUS = {
     "invalid_request": 400, "unauthorized": 401, "forbidden": 403, "not_found": 404, "conflict": 409,
@@ -63,6 +92,13 @@ ERROR_STATUS = {
     "retention_expired": 403, "redaction_incomplete": 409, "response_purged": 409,
     "transcript_pending_deletion": 409, "provider_timeout": 504, "provider_error": 502,
     "invalid_provider_output": 502, "unsupported_excerpt": 400, "duplicate_extraction": 409,
+    # Phase 4 review/candidate/finding error codes
+    "invalid_transition": 409, "source_immutable": 400, "self_approval_forbidden": 403,
+    "observation_not_approved": 409, "source_suppressed": 409, "incompatible_segment": 400,
+    "incompatible_method": 400, "missing_support": 400, "stale_source_version": 409,
+    "candidate_not_reviewable": 409, "finding_not_publishable": 409, "finding_needs_revalidation": 409,
+    "quote_permission_denied": 403, "consent_invalid": 403,
+    "contradiction_exclusion_requires_reason": 400,
 }
 
 CAMPAIGN_RE = re.compile(r"^/api/merchant-voice/campaigns/([^/]+)$")
@@ -87,6 +123,24 @@ RESPONSE_EXTRACTION_RUNS_RE = re.compile(r"^/api/merchant-voice/responses/([^/]+
 EXTRACTION_RUN_RE = re.compile(r"^/api/merchant-voice/extraction-runs/([^/]+)$")
 RESPONSE_OBSERVATIONS_RE = re.compile(r"^/api/merchant-voice/responses/([^/]+)/observations$")
 OBSERVATION_RE = re.compile(r"^/api/merchant-voice/observations/([^/]+)$")
+
+OBSERVATION_APPROVE_RE = re.compile(r"^/api/merchant-voice/observations/([^/]+)/approve$")
+OBSERVATION_REJECT_RE = re.compile(r"^/api/merchant-voice/observations/([^/]+)/reject$")
+OBSERVATION_MERGE_RE = re.compile(r"^/api/merchant-voice/observations/([^/]+)/merge$")
+
+CANDIDATE_RE = re.compile(r"^/api/merchant-voice/evidence-candidates/([^/]+)$")
+CANDIDATE_SUBMIT_RE = re.compile(r"^/api/merchant-voice/evidence-candidates/([^/]+)/submit$")
+CANDIDATE_APPROVE_RE = re.compile(r"^/api/merchant-voice/evidence-candidates/([^/]+)/approve$")
+CANDIDATE_REJECT_RE = re.compile(r"^/api/merchant-voice/evidence-candidates/([^/]+)/reject$")
+
+FINDING_RE = re.compile(r"^/api/merchant-voice/findings/([^/]+)$")
+FINDING_PUBLISH_RE = re.compile(r"^/api/merchant-voice/findings/([^/]+)/publish$")
+FINDING_SUPPRESS_RE = re.compile(r"^/api/merchant-voice/findings/([^/]+)/suppress$")
+
+CAMPAIGN_ANALYSIS_RE = re.compile(r"^/api/merchant-voice/campaigns/([^/]+)/analysis$")
+SEGMENT_FINDINGS_RE = re.compile(r"^/api/merchant-voice/segments/([^/]+)/findings$")
+OPPORTUNITY_FINDINGS_RE = re.compile(r"^/api/merchant-voice/opportunities/([^/]+)/findings$")
+ASSUMPTION_FINDINGS_RE = re.compile(r"^/api/merchant-voice/assumptions/([^/]+)/findings$")
 
 RESEARCH_ROLES = ("researcher", "reviewer", "admin")
 
@@ -275,10 +329,124 @@ class Api:
                 return 200, {"schema_version": "1.0",
                             "observations": extraction.list_observations_for_response(self.conn, m.group(1))}
 
-            m = OBSERVATION_RE.match(path)
-            if m and method == "GET":
+            m = OBSERVATION_APPROVE_RE.match(path)
+            if m and method == "POST":
+                data = self._json_body(body_bytes)
+                return 200, observation_review.approve(self.conn, self.config, principal, m.group(1),
+                                                       self.now(), reason=data.get("reason"))
+
+            m = OBSERVATION_REJECT_RE.match(path)
+            if m and method == "POST":
+                data = self._json_body(body_bytes)
+                reason_code = data.get("reason")
+                if not reason_code:
+                    raise ValidationError("reason is required")
+                return 200, observation_review.reject(self.conn, principal, m.group(1), reason_code,
+                                                      self.now(), reason_detail=data.get("reason_detail"))
+
+            m = OBSERVATION_MERGE_RE.match(path)
+            if m and method == "POST":
+                data = self._json_body(body_bytes)
+                duplicates = data.get("duplicate_observation_ids", [])
+                canonical, superseded = observation_review.merge(
+                    self.conn, principal, m.group(1), duplicates, self.now(), reason=data.get("reason"))
+                return 200, {"schema_version": "1.0", "canonical": canonical, "superseded": superseded}
+
+            if path == "/api/merchant-voice/review/observations" and method == "GET":
                 require_any_role(principal, RESEARCH_ROLES)
-                return 200, extraction.get_observation(self.conn, m.group(1))
+                return 200, {"schema_version": "1.0",
+                            "observations": observation_review.list_review_queue(self.conn)}
+
+            m = OBSERVATION_RE.match(path)
+            if m:
+                require_any_role(principal, RESEARCH_ROLES)
+                if method == "GET":
+                    return 200, extraction.get_observation(self.conn, m.group(1))
+                if method == "PATCH":
+                    return 200, observation_review.edit(self.conn, principal, m.group(1),
+                                                       self._json_body(body_bytes), self.now())
+
+            # --- Phase 4: evidence candidates -----------------------------------
+            if path == "/api/merchant-voice/evidence-candidates":
+                if method == "POST":
+                    return 201, candidates.create(self.conn, principal, self.config,
+                                                  self._json_body(body_bytes), self.now())
+                if method == "GET":
+                    require_any_role(principal, RESEARCH_ROLES)
+                    return 200, {"schema_version": "1.0",
+                                "evidence_candidates": candidates.list_all(self.conn)}
+
+            m = CANDIDATE_SUBMIT_RE.match(path)
+            if m and method == "POST":
+                return 200, candidates.submit(self.conn, principal, m.group(1), self.now())
+
+            m = CANDIDATE_APPROVE_RE.match(path)
+            if m and method == "POST":
+                data = self._json_body(body_bytes)
+                candidate, finding = candidates.approve(self.conn, self.config, principal, m.group(1),
+                                                        self.now(), reason=data.get("reason"))
+                return 200, {"schema_version": "1.0", "evidence_candidate": candidate, "finding": finding}
+
+            m = CANDIDATE_REJECT_RE.match(path)
+            if m and method == "POST":
+                data = self._json_body(body_bytes)
+                reason_code = data.get("reason")
+                if not reason_code:
+                    raise ValidationError("reason is required")
+                return 200, candidates.reject(self.conn, principal, m.group(1), reason_code, self.now(),
+                                              reason_detail=data.get("reason_detail"))
+
+            m = CANDIDATE_RE.match(path)
+            if m:
+                require_any_role(principal, RESEARCH_ROLES)
+                if method == "GET":
+                    return 200, candidates.get(self.conn, m.group(1))
+                if method == "PATCH":
+                    return 200, candidates.update_draft(self.conn, principal, m.group(1),
+                                                        self._json_body(body_bytes), self.now())
+
+            # --- Phase 4: findings -----------------------------------------------
+            m = FINDING_PUBLISH_RE.match(path)
+            if m and method == "POST":
+                return 200, findings.publish(self.conn, principal, m.group(1), self.now())
+
+            m = FINDING_SUPPRESS_RE.match(path)
+            if m and method == "POST":
+                data = self._json_body(body_bytes)
+                return 200, findings.suppress(self.conn, principal, m.group(1), self.now(),
+                                             reason=data.get("reason"))
+
+            m = FINDING_RE.match(path)
+            if m and method == "GET":
+                if principal["role"] == "viewer":
+                    return 200, findings.get_published(self.conn, m.group(1))
+                return 200, findings.get(self.conn, m.group(1))
+
+            if path == "/api/merchant-voice/findings" and method == "GET":
+                published_only = principal["role"] == "viewer"
+                return 200, {"schema_version": "1.0",
+                            "findings": findings.list_all(self.conn, published_only=published_only)}
+
+            # --- Phase 4: analysis / cross-cutting finding lookups ----------------
+            m = CAMPAIGN_ANALYSIS_RE.match(path)
+            if m and method == "GET":
+                include_detail = principal["role"] != "viewer"
+                return 200, {"schema_version": "1.0",
+                            **analysis.compute_campaign_analysis(self.conn, m.group(1), include_detail=include_detail)}
+
+            m = SEGMENT_FINDINGS_RE.match(path)
+            if m and method == "GET":
+                return 200, {"schema_version": "1.0", "findings": findings.list_for_segment(self.conn, m.group(1))}
+
+            m = OPPORTUNITY_FINDINGS_RE.match(path)
+            if m and method == "GET":
+                return 200, {"schema_version": "1.0",
+                            "findings": findings.list_for_opportunity(self.conn, m.group(1))}
+
+            m = ASSUMPTION_FINDINGS_RE.match(path)
+            if m and method == "GET":
+                return 200, {"schema_version": "1.0",
+                            "findings": findings.list_for_assumption(self.conn, m.group(1))}
 
             # --- Phase 2: maintenance ------------------------------------------
             if path == "/api/merchant-voice/maintenance/expire-retention" and method == "POST":
@@ -308,6 +476,8 @@ class Api:
         except csv_import.CsvTokenError as exc:
             return 409, error_body("conflict", str(exc))
         except ExtractionError as exc:
+            return ERROR_STATUS.get(exc.code, 403), error_body(exc.code, str(exc))
+        except Phase4Error as exc:
             return ERROR_STATUS.get(exc.code, 403), error_body(exc.code, str(exc))
         except DbError as exc:
             msg = str(exc)
