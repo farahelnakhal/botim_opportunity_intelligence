@@ -20,15 +20,24 @@ const S = seed as any;
 
 let liveOk: boolean | null = null;
 
-async function get<T>(path: string, fallback: () => T): Promise<T> {
+// Read endpoints all have a real-data seed fallback, so if the API is slow
+// (e.g. a free-tier host cold-starting) we don't hang the whole UI on a
+// spinner — we time out and render the bundled snapshot instead.
+const READ_TIMEOUT_MS = 8000;
+
+async function get<T>(path: string, fallback: () => T, timeoutMs = READ_TIMEOUT_MS): Promise<T> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(`/api${path}`, { headers: { Accept: "application/json" } });
+    const res = await fetch(`/api${path}`, { headers: { Accept: "application/json" }, signal: ctrl.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     liveOk = true;
     return (await res.json()) as T;
   } catch {
     liveOk = false;
     return fallback();
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -65,11 +74,16 @@ export const api = {
   // or the Python scaffold — chosen server-side. Conversation history is sent so
   // follow-ups refine the same analysis in context. Offline: a client scaffold.
   analyze: async (prompt: string, history?: { role: string; content: string }[]): Promise<ChatResponse> => {
+    // Generation is legitimately slow (LLM + possible cold start), so allow up
+    // to 90s before falling back to the client-side scaffold.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 90000);
     try {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "content-type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ q: prompt, history: history ?? [] }),
+        signal: ctrl.signal,
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       liveOk = true;
@@ -77,6 +91,8 @@ export const api = {
     } catch {
       liveOk = false;
       return analyzeOffline(prompt);
+    } finally {
+      clearTimeout(timer);
     }
   },
 };

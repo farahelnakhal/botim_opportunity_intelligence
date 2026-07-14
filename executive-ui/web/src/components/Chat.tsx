@@ -116,6 +116,7 @@ function MessageView({ m }: { m: Message }) {
 function ChatInput({ onSend }: { onSend: (t: string) => void }) {
   const [val, setVal] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const submit = () => {
     const t = val.trim();
     if (!t) return;
@@ -144,7 +145,17 @@ function ChatInput({ onSend }: { onSend: (t: string) => void }) {
               }
             }}
           />
-          <button className="icon-btn" title="Attach"><Icon name="paperclip" /></button>
+          <button className="icon-btn" title="Attach a file for context" onClick={() => fileRef.current?.click()}>
+            <Icon name="paperclip" />
+          </button>
+          <input
+            ref={fileRef} type="file" multiple hidden
+            onChange={(e) => {
+              const names = Array.from(e.target.files ?? []).map((f) => f.name);
+              if (names.length) setVal((v) => `${v}${v ? " " : ""}[attached: ${names.join(", ")}] `);
+              e.target.value = "";
+            }}
+          />
           <button className="send-btn" style={{ margin: 4 }} disabled={!val.trim()} onClick={submit}>
             <Icon name="send" size={15} />
           </button>

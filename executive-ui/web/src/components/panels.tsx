@@ -3,8 +3,10 @@ import { api } from "../lib/api";
 import { useApp } from "../store";
 import { confidenceLabel, humanFactorKey, tagLabel } from "../lib/format";
 import { humanize, nameMap } from "../lib/labels";
+import { copyText, downloadText } from "../lib/actions";
 import type { Brief, Experiment, JournalPayload, MonitoringPayload, Opportunity } from "../types";
 import Icon from "./Icon";
+import ActionButton from "./ActionButton";
 import Collapsible from "./Collapsible";
 import { CalibrationCard, DecisionJournalEntry } from "./cards";
 
@@ -100,18 +102,28 @@ const QUESTION_TEMPLATES: Record<string, string> = {
   mvp_feasibility_7wk: "What is the one feature that would make this a must-have on day one?",
 };
 
-function suggestedSurvey(opp: Opportunity) {
-  const weak = opp.factors
+function suggestedSurvey(opp: Opportunity, offset = 0) {
+  const ranked = opp.factors
     .filter((f) => f.assumption)
-    .sort((a, b) => a.score - b.score)
-    .slice(0, 5);
-  return weak.map((f) => ({ key: f.key, q: QUESTION_TEMPLATES[f.key] || `Tell me about ${f.key.replace(/_/g, " ")}.` }));
+    .sort((a, b) => a.score - b.score);
+  if (ranked.length === 0) return [];
+  // Rotate through the weak dimensions so "New survey" yields a fresh set.
+  const start = offset % ranked.length;
+  const rotated = [...ranked.slice(start), ...ranked.slice(0, start)].slice(0, 5);
+  return rotated.map((f) => ({ key: f.key, q: QUESTION_TEMPLATES[f.key] || `Tell me about ${f.key.replace(/_/g, " ")}.` }));
 }
 
 export function InterviewsPanel({ opp }: { opp: Opportunity }) {
   const [exps, setExps] = useState<Experiment[] | null>(null);
+  const [offset, setOffset] = useState(0); // "New survey" rotates through weakest assumptions
   useEffect(() => { api.experiments().then(setExps); }, []);
-  const survey = suggestedSurvey(opp);
+  const survey = suggestedSurvey(opp, offset);
+
+  const surveyText = () =>
+    `Customer-validation survey — ${opp.name}\n\n` +
+    survey.map((s, i) => `${i + 1}. ${s.q}  [${humanFactorKey(s.key)}]`).join("\n") +
+    `\n\nNo product or build decision has been made.\n`;
+
   return (
     <div className="panel-wrap">
       <div className="panel-title-row">
@@ -119,7 +131,11 @@ export function InterviewsPanel({ opp }: { opp: Opportunity }) {
           <div className="panel-title">Interviews</div>
           <div className="panel-sub">Survey customers to validate the assumptions behind this opportunity</div>
         </div>
-        <button className="btn btn-primary"><Icon name="plus" size={14} /> New survey</button>
+        <ActionButton
+          className="btn btn-primary" icon="plus" label="New survey" doneLabel="Regenerated"
+          title="Regenerate from the next set of weak assumptions"
+          onAct={() => setOffset((o) => o + 5)}
+        />
       </div>
 
       {survey.length > 0 && (
@@ -140,10 +156,12 @@ export function InterviewsPanel({ opp }: { opp: Opportunity }) {
             ))}
           </div>
           <div className="suggested-survey-foot">
-            <div className="suggested-survey-reach">These five close the biggest evidence gaps before any build commitment.</div>
+            <div className="suggested-survey-reach">These questions close the biggest evidence gaps before any build commitment.</div>
             <div style={{ display: "flex", gap: 8 }}>
-              <button className="btn">Edit questions</button>
-              <button className="btn btn-primary">Send to customers</button>
+              <ActionButton className="btn" label="Copy questions" doneLabel="Copied"
+                onAct={() => copyText(surveyText())} />
+              <ActionButton className="btn btn-primary" icon="external" label="Download survey" doneLabel="Saved"
+                onAct={() => downloadText(`survey-${opp.id}.md`, surveyText())} />
             </div>
           </div>
         </div>
@@ -206,7 +224,12 @@ export function ReportsPanel() {
               </div>
               <div className="report-meta">Executive recommendation brief</div>
               <div className="report-preview">{humanize(firstPara(b.body))}</div>
-              <div className="report-actions"><button className="btn btn-sm"><Icon name="external" size={12} /> Export</button></div>
+              <div className="report-actions">
+                <ActionButton className="btn btn-sm" icon="external" label="Export" doneLabel="Saved"
+                  onAct={() => downloadText(`${b.opportunity_id.toLowerCase()}-recommendation.md`, b.body)} />
+                <ActionButton className="btn btn-sm" label="Copy" doneLabel="Copied"
+                  onAct={() => copyText(b.body)} />
+              </div>
             </div>
           ))}
         </div>
@@ -419,7 +442,7 @@ export function SettingsPanel({ opp }: { opp: Opportunity }) {
           <div className="field-label">Incoming email address</div>
           <div className="email-box">
             <span>{inbox}</span>
-            <button className="btn btn-sm" onClick={() => navigator.clipboard?.writeText(inbox)}>Copy</button>
+            <ActionButton className="btn btn-sm" label="Copy" doneLabel="Copied" onAct={() => copyText(inbox)} />
           </div>
           <div className="toggle-row-sub">Forward reports or evidence here — attachments are summarised and filed automatically.</div>
         </div>

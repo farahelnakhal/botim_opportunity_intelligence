@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useApp } from "../store";
 import { tagLabel } from "../lib/format";
 import Icon from "./Icon";
@@ -22,6 +22,7 @@ function greeting(): string {
 export default function Home() {
   const { projects, openProject, analyzeNew } = useApp();
   const [val, setVal] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const submit = (text?: string) => {
     const t = (text ?? val).trim();
@@ -55,7 +56,17 @@ export default function Home() {
           />
           <div className="home-input-actions">
             <div className="input-tools">
-              <button className="icon-btn" title="Attach file"><Icon name="paperclip" /></button>
+              <button className="icon-btn" title="Attach a file for context" onClick={() => fileRef.current?.click()}>
+                <Icon name="paperclip" />
+              </button>
+              <input
+                ref={fileRef} type="file" multiple hidden
+                onChange={(e) => {
+                  const names = Array.from(e.target.files ?? []).map((f) => f.name);
+                  if (names.length) setVal((v) => `${v}${v ? " " : ""}[attached: ${names.join(", ")}] `);
+                  e.target.value = "";
+                }}
+              />
             </div>
             <button className="send-btn" disabled={!val.trim()} onClick={() => submit()}>
               <Icon name="send" size={15} />

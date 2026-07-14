@@ -1,6 +1,7 @@
 import { useApp, type Tab } from "../store";
 import { statusFromClassification, tagLabel } from "../lib/format";
-import Icon from "./Icon";
+import { copyText, downloadText, opportunityFilename, opportunityMarkdown } from "../lib/actions";
+import ActionButton from "./ActionButton";
 import Chat from "./Chat";
 import {
   FilesPanel, InterviewsPanel, KnowledgePanel, MonitoringPanel, ReportsPanel, SettingsPanel, SourcesPanel,
@@ -40,8 +41,16 @@ export default function ProjectWorkspace() {
             : <div className="ph-updated">{tagLabel(opp.classification)}</div>}
         </div>
         <div className="ph-right">
-          <button className="btn btn-sm"><Icon name="external" size={14} /> Export</button>
-          <button className="btn"><Icon name="share" size={14} /> Share</button>
+          <ActionButton
+            className="btn btn-sm" icon="external" label="Export" doneLabel="Saved"
+            title="Download this analysis as a Markdown file"
+            onAct={() => downloadText(opportunityFilename(opp), opportunityMarkdown(opp))}
+          />
+          <ActionButton
+            className="btn" icon="share" label="Share" doneLabel="Copied"
+            title="Copy a shareable text summary to the clipboard"
+            onAct={() => copyText(opportunityMarkdown(opp))}
+          />
         </div>
       </div>
 
