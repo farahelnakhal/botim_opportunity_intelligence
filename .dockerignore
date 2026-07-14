@@ -1,0 +1,12 @@
+# Keep the Hugging Face Space build context (executive-ui/deploy/Dockerfile)
+# small and free of stale local artifacts.
+.git/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+executive-ui/web/node_modules/
+executive-ui/web/dist/
+executive-ui/dist/
+**/tests/
+# NOTE: do NOT exclude *.md — knowledge-base/ stores real data (opportunity
+# profiles, VE-*.md experiment specs, recommendation briefs) as markdown.

@@ -90,6 +90,55 @@ python3 executive-ui/api/server.py --check-llm "Invoice financing for UAE logist
 
 **Conversation memory.** Follow-up questions inside a generated analysis send the full conversation history to the model, so it refines the same opportunity in context (e.g. "now focus on Saudi Arabia" updates the segment, market, and scores). Conversations and generated analyses are persisted in the browser (`localStorage`), so they survive a page reload.
 
+## Deploy for free (a public link, no paid API key, no card)
+
+`executive-ui/deploy/Dockerfile` bundles the built React app and the
+read-only API into one lightweight container (no local model — small enough
+to run comfortably on any free tier). AI analysis of new opportunities is
+delegated to a **free, hosted, OpenAI-compatible LLM API** at runtime instead
+of self-hosting a model — self-hosting an actual model (e.g. Ollama) for free
+turns out to be impractical: every free Docker-capable host either requires a
+card on file for verification (Hugging Face Docker Spaces, Fly.io, GCP,
+Oracle) or gives too little RAM to run it reliably. Using a hosted API
+sidesteps that entirely.
+
+**Recommended stack — both steps are genuinely free, no card, ~10 minutes:**
+
+1. **LLM: [Groq](https://console.groq.com)** — sign up (email only, no
+   card *as far as we could confirm — if it asks you for one, stop and tell
+   us, we'll switch providers*), then **API Keys → Create API Key**. Copy it.
+2. **Hosting: [Render](https://render.com)** — sign up, then **New + →
+   Blueprint**, connect this GitHub repo. Render reads `render.yaml` at the
+   repo root automatically and asks you to fill in:
+   - `BOTIM_LLM_API_KEY` = the Groq key from step 1
+   - `ANTHROPIC_API_KEY` — leave blank (that's the alternative, paid path)
+
+   Click **Apply**. Render builds the Docker image and gives you a public
+   URL like `https://botim-opportunity-intelligence.onrender.com` — share
+   that link with anyone.
+
+Render auto-redeploys on every push to your connected branch. Honest
+tradeoffs: the free web service **sleeps after ~15 minutes of inactivity**
+(the next visitor waits ~30-60s for it to wake), and it's one shared
+lightweight instance, not built for heavy concurrent traffic — fine for a
+team or a demo, not for a public launch.
+
+Every honesty guarantee still holds: the **real scoring engine**, not the
+LLM, computes and caps every generated opportunity (never "strong", always
+"low confidence" — see "Analyze any opportunity" above).
+
+**Alternative model providers.** Swap `BOTIM_LLM_BASE_URL`/`BOTIM_LLM_MODEL`
+in `render.yaml` (or the Render dashboard) for any other OpenAI-compatible
+endpoint — a self-hosted Ollama if you later get access to a Docker-capable
+host, or a different free/paid provider.
+
+**If you *do* get Docker-Space access on Hugging Face later** (e.g. after
+card verification), `executive-ui/deploy/space_readme.md` and
+`.github/workflows/deploy-huggingface.yml` still work unchanged — same
+Dockerfile, same environment variables, auto-mirrored from this repo on push
+to `main` (needs repo secret `HF_TOKEN` + variable `HF_SPACE`; see that
+workflow file for details).
+
 ## Plain-language UI (no codes)
 
 The interface is written for a non-technical audience: internal identifiers (opportunity, evidence, experiment, segment, and prediction codes) never appear on screen. Opportunities are shown by name, evidence by its title, experiments by their title, and monitoring "affected" items are mapped back to opportunity names (`web/src/lib/labels.ts`). The identifiers still exist in the engines and API — they're just not surfaced in the UI.

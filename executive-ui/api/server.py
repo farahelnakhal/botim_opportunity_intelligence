@@ -1,12 +1,17 @@
 """Read-only JSON API + static host for the assistant UI.
 
 Serves the engines' read-models as JSON under /api/* and (optionally) the built
-React app from web/dist. Strictly read-only: every handler is a GET that reads
-engine output; there are no POST/PUT/DELETE routes, so the server cannot mutate
-scorecards, evidence, the knowledge base, or impact state.
+React app from web/dist. Read-only with respect to the knowledge base: GET
+endpoints read engine output; the only POST routes are /api/chat and
+/api/analyze, which accept a request body (conversation history) and compute a
+response — they never write to a scorecard, evidence record, or any file.
+There are no PUT/DELETE routes at all.
 
 Run:
-    python3 executive-ui/api/server.py [--port 8000] [--root <repo>]
+    python3 executive-ui/api/server.py [--port 8000] [--host 127.0.0.1] [--root <repo>]
+
+PORT/HOST env vars are honored (the convention most container platforms use),
+so `PORT=7860 HOST=0.0.0.0 python3 executive-ui/api/server.py` also works.
 
 During development the Vite dev server (port 5173) proxies /api here. For a
 single-process deploy, build the web app (`npm run build` in executive-ui/web)
@@ -15,6 +20,7 @@ and this server will also serve web/dist.
 
 import argparse
 import json
+import os
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -153,14 +159,18 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def make_server(port=8000, root="."):
+def make_server(port=8000, root=".", host="127.0.0.1"):
     Handler.repo_root = str(Path(root).resolve())
-    return ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    return ThreadingHTTPServer((host, port), Handler)
 
 
 def main():
+    # PORT is the convention most PaaS/container platforms (Hugging Face Spaces,
+    # Render, Railway, ...) use to tell the app which port to bind.
     ap = argparse.ArgumentParser(description="Read-only Opportunity Intelligence API")
-    ap.add_argument("--port", type=int, default=8000)
+    ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)))
+    ap.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"),
+                    help="Bind address. Use 0.0.0.0 to be reachable from outside a container.")
     ap.add_argument("--root", default=str(UI_DIR.parents[0]))
     ap.add_argument("--check-llm", metavar="PROMPT", nargs="?", const="Invoice financing for UAE logistics SMEs",
                     help="Run one analysis and report whether Claude answered (verifies ANTHROPIC_API_KEY), then exit.")
@@ -180,8 +190,8 @@ def main():
         print(f"result                : {o['name']} — {o['classification']} "
               f"(composite {o['composite']}, {o['assumption_count']}/17 assumptions)")
         return 0 if (want == "scaffold" or o["engine"] == want) else 1
-    httpd = make_server(args.port, args.root)
-    print(f"Read-only API on http://127.0.0.1:{args.port}  (root={Handler.repo_root})")
+    httpd = make_server(args.port, args.root, args.host)
+    print(f"Read-only API on http://{args.host}:{args.port}  (root={Handler.repo_root})")
     print("Endpoints: /api/overview /api/opportunities/OPP-nnn /api/commercial/OPP-nnn "
           "/api/experiments /api/journal /api/monitoring /api/chat?q=")
     try:
