@@ -94,9 +94,9 @@ same seam the Copilot backend calls into):
 No role may create authoritative EV evidence, promote a proposal into Part
 A, or write knowledge-base/customer-evidence/records/ — this service only
 ever produces a synthetic-only demo export under
-knowledge-base/customer-evidence/merchant-voice-candidates/.
-
-Still not implemented (Phase 6+): whatever the next approved phase defines.
+knowledge-base/customer-evidence/merchant-voice-candidates/. Authoritative
+EV creation and Part A promotion are a separate, human Workstream A action
+this service never automates — not a deferred feature.
 """
 
 import json

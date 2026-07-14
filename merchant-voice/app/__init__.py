@@ -55,6 +55,8 @@ Copilot-facing query layer (app/published_query.py — never opens
 identity.db) exposing only approved, published, non-superseded content.
 Nothing in Phase 5 mints an EV ID, writes authoritative Part A evidence,
 promotes anything into Part A, or changes a score/assumption/impact/
-monitoring record. Still not implemented (Phase 6+): authoritative EV
-creation, Part A promotion, and any frontend.
+monitoring record. Authoritative EV creation and Part A promotion are not
+deferred future work for this service — they are a separate, human
+Workstream A action that this service never automates, now or later. The
+only remaining out-of-scope item is a researcher-facing frontend.
 """
