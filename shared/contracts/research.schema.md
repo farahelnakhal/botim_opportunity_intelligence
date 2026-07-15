@@ -1,15 +1,15 @@
-# Research runs (Phase R1) — schema v1
+# Research runs (Phases R1–R2) — schema v1
 
-Persistence contract for external-research runs. Implementation:
-`shared/research/store.py` (runtime SQLite at `RESEARCH_DB_PATH`, default
-`runtime/research.db`, gitignored). Read-only HTTP exposure:
-`GET /executive-api/research/runs` and `GET /executive-api/research/runs/{id}`.
-Changes to this contract are **additive only**.
+Persistence + execution contract for external-research runs. Implementation:
+`shared/research/` (`store.py` — runtime SQLite at `RESEARCH_DB_PATH`, default
+`runtime/research.db`, gitignored; `providers.py` — search-provider seam;
+`retrieval.py` — safe bounded page fetch; `profiles.py` — deterministic query
+generation; `runner.py` — the executor). Changes to this contract are
+**additive only**.
 
-Phase R1 is storage + read-only display. **Nothing creates runs over HTTP yet**;
-run creation/execution arrives with the research runner (Phase R2 — see
-`docs/roadmap.md`). Nothing here is authoritative knowledge: candidate evidence
-is pending human review and never auto-promotes into `knowledge-base/`.
+Nothing here is authoritative knowledge: candidate evidence is pending human
+review and never auto-promotes into `knowledge-base/`. Claim extraction and
+the review workflow arrive in Phase R3.
 
 ## ID namespaces
 
@@ -81,12 +81,38 @@ existing record/claim it contradicts), `created_at`, `updated_at`.
 → research_runs`: every claim is traceable to sources, the query that found
 them, and the run that executed it. Cross-run references are rejected.
 
-## HTTP (read-only, both `/api/` and `/executive-api/` aliases)
+## HTTP (both `/api/` and `/executive-api/` aliases)
 
-| Route | Returns |
+| Route | Behavior |
 |---|---|
 | `GET /research/runs[?status=…&opportunity_ref=…&limit=…]` | `{runs: [run…]}` — summaries with counts, newest first; honest empty list when nothing exists |
 | `GET /research/runs/{RRUN-id}` | full run with `queries`, `sources`, `candidate_evidence`; 404 if absent; 400 on malformed id |
+| `POST /research/runs` (R2) | create a pending run; body `{title, objective?, objectives?, profile?, context?, queries?, opportunity_ref?, notes?}`. A `profile` pre-plans queries deterministically (`shared/research/profiles.py`; unknown profile → 400 listing available ones); otherwise `queries` (string list) may be supplied. Returns 201 with the full run |
+| `POST /research/runs/{RRUN-id}/execute` (R2) | execute pending queries with the configured provider. **No provider configured → the run finishes `failed` with "no search provider configured"** — never fabricated results. Returns the finished run (`complete`/`partial`/`failed` with reasons) |
 
-No write routes exist in R1. Errors are structured `{error: message}` with no
-SQL/paths/fetched content in messages.
+No PUT/DELETE routes exist. Errors are structured `{error: message}` with no
+SQL/paths/keys/fetched content in messages.
+
+## Execution rules (Phase R2)
+
+- **Provider seam** (`providers.py`): selected via `RESEARCH_SEARCH_PROVIDER`
+  (currently `brave`, requiring `BRAVE_SEARCH_API_KEY` — sent only as a
+  request header, never logged/stored/echoed). Unset ⇒ no provider ⇒ honest
+  failure. The deterministic `MockSearchProvider` is injectable in code for
+  tests but **deliberately not reachable via environment configuration** —
+  a deployment can never serve synthetic results as real.
+- **Bounded**: per-run caps (default 20 queries, 8 results/query, 12 page
+  fetches), 10s timeouts, at most one retry per request, politeness delay
+  between fetches, 500 KB page cap (truncation recorded).
+- **Safe retrieval** (`retrieval.py`): http(s)-only (`shared.source_urls`),
+  text-ish content types only, scripts/styles stripped, fetched text stored
+  verbatim as DATA — never interpreted as instructions.
+- **Dedup**: normalized-URL (tracking params/fragments stripped) and
+  content-hash duplicates are stored with `duplicate_of`, never re-fetched.
+- **Quality signals**: recorded observations only (has_title,
+  has_publication_date, page_fetched, excerpt_chars, preferred/excluded
+  domain flags) — no invented scores; interpretation belongs to review (R3).
+- **Honest outcomes**: all queries executed → `complete`; some queries or
+  page fetches failed → `partial` with the counts in `error`; nothing
+  succeeded → `failed`. Failed pages keep their search-result metadata
+  (title/snippet) with `page_fetched: false`.

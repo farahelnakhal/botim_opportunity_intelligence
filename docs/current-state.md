@@ -16,7 +16,8 @@
 | Phase 3 | `553f04d`, PR #32 | Intent-classification fixes (no junk stubs), stale-conversation recovery, scroll/composer/mobile fixes, safe Markdown, demo-mode disclosure badge, start.sh process lifecycle, legacy-route gating, proxy hardening |
 | Phase 4 | `1bcff92`, PR #33 | Evidence provenance (SRC ids, source-log join) + deterministic freshness (`shared/freshness.py`), safe source links (`shared/source_urls.py` + `safeUrl.ts`), monitoring summary/detail + `GET /monitoring/summary/{id}`, clickable predictions, web reports `/report/OPP-nnn` + `GET /brief/{id}` |
 | Phases 5–7 | `4b2655c`, PR #34 | `BOTIM_APP_MODE=normal\|demo\|test` (backend authoritative; normal hides demo corpus), SQLite user opportunities (`UOPP-`, draft→saved→archived, restart-safe), user reports `/report/UOPP-…`, copilot `context.user_opportunity`, monitoring configs (`MCFG-`, pause/resume/remove, honest never-run) |
-| Phase R1 | this branch | Research platform core: `shared/research/store.py` (runtime SQLite at `RESEARCH_DB_PATH`; `RRUN-/RQRY-/RSRC-/RCAND-` namespaces; pending→running→complete\|partial\|failed with mandatory reasons; candidate claims require ≥1 same-run source; http(s)-only source URLs; absent metadata stays null), contract `shared/contracts/research.schema.md`, read-only `GET /research/runs[/{id}]`. **No live fetching yet** — the runner is Phase R2 |
+| Phase R1 | PR #36 (`fd054d8`) | Research platform core: `shared/research/store.py` (runtime SQLite at `RESEARCH_DB_PATH`; `RRUN-/RQRY-/RSRC-/RCAND-` namespaces; pending→running→complete\|partial\|failed with mandatory reasons; candidate claims require ≥1 same-run source; http(s)-only source URLs; absent metadata stays null), contract `shared/contracts/research.schema.md`, read-only `GET /research/runs[/{id}]` |
+| Phase R2 | this branch | Bounded research execution: provider seam (`providers.py`, Brave adapter via `RESEARCH_SEARCH_PROVIDER`/`BRAVE_SEARCH_API_KEY`; mock injectable in tests only, never via env), safe bounded retrieval (`retrieval.py`: http(s)-only, 500 KB cap, content-type allowlist, scripts stripped, injection stored as data), deterministic profiles (`profiles.py`: `generic` + `sme-financial-product`), executor (`runner.py`: dedup by normalized URL + content hash, recorded quality signals, honest complete/partial/failed), `POST /research/runs` + `POST /research/runs/{id}/execute`. Claim extraction/review = R3 |
 
 Handoff corrections found during verification:
 - "Removal of fake report recipients" is **mode-gated, not deleted**: demo mode still
@@ -66,10 +67,11 @@ deploy 1 · frontend Vitest 23 files. Gate: `python3 shared/integration_check.py
 
 ## Current limitations (verified)
 
-- **No live external research.** The only external fetch is the regulator-feed
-  monitoring adapter (network-injected, offline-testable). No search API and no
-  page retrieval; the research-run **persistence** layer exists (Phase R1) but
-  nothing creates or executes runs yet.
+- **Live research requires operator configuration.** The research platform
+  (R1+R2) can create and execute runs, but only when `RESEARCH_SEARCH_PROVIDER`
+  + key are configured; otherwise execution fails honestly. No claim
+  extraction, no candidate review UI, no chat/report integration yet (R3);
+  no KB-contradiction flagging yet (deferred R2→R3).
 - **No monitoring runner/scheduler.** `MCFG-` configs are stored intent only.
 - **No PDF export** (web reports only).
 - **No real attachment processing** (file names noted only, disclosed in the UI).
