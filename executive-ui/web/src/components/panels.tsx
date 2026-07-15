@@ -203,7 +203,7 @@ export function InterviewsPanel({ opp }: { opp: Opportunity }) {
 
 /* ---------------- Reports / briefs + decision journal ---------------- */
 export function ReportsPanel() {
-  const { overview } = useApp();
+  const { overview, openReport } = useApp();
   const [journal, setJournal] = useState<JournalPayload | null>(null);
   useEffect(() => { api.journal().then(setJournal); }, []);
   const briefs: Brief[] = (overview?.briefs ?? []).filter((b) => b.exists);
@@ -225,7 +225,16 @@ export function ReportsPanel() {
           {briefs.map((b) => (
             <div className="report-card" key={b.opportunity_id}>
               <div className="report-top">
-                <div className="report-title">{names[b.opportunity_id] || "Opportunity"} — recommendation</div>
+                {/* Phase 4 — the title is a semantic button opening the web
+                    report route (/report/OPP-nnn); Export stays separate. */}
+                <button
+                  type="button"
+                  className="report-title report-title-link"
+                  onClick={() => openReport(b.opportunity_id)}
+                  aria-label={`Open web report: ${names[b.opportunity_id] || b.opportunity_id} — recommendation`}
+                >
+                  {names[b.opportunity_id] || "Opportunity"} — recommendation
+                </button>
                 <span className="pill-status ready">Committed</span>
               </div>
               <div className="report-meta">Executive recommendation brief</div>
@@ -253,8 +262,51 @@ export function ReportsPanel() {
 }
 
 /* ---------------- Monitoring ---------------- */
+// Phase 4 — current-state summary card. Every number comes from the backend's
+// summary_state (committed artefacts only); a null count renders as "—",
+// never as an invented value.
+function MonitoringSummaryCard({ state }: { state: NonNullable<MonitoringPayload["summary_state"]> }) {
+  const n = (v: number | null) => (v == null ? "—" : String(v));
+  const stats: [string, string][] = [
+    [n(state.event_count), "Events this period"],
+    [n(state.open_alert_count), "Open alerts"],
+    [n(state.unresolved_warning_count), "Unresolved warnings"],
+    [n(state.monitored_entity_count), "Monitored entities"],
+  ];
+  const statusLabel: Record<string, string> = {
+    "active": "Monitoring active",
+    "no-recent-updates": "No recent updates",
+    "no-events": "No events yet",
+    "never-run": "Never run",
+    "unavailable": "Monitoring unavailable",
+  };
+  return (
+    <div className="health-card" data-testid="monitoring-summary" style={{ marginBottom: 18 }}>
+      <div className="health-top">
+        <div style={{ fontSize: 13.5, fontWeight: 650 }}>
+          {statusLabel[state.status] ?? state.status}
+          {state.internal_only && <span className="chip" style={{ marginLeft: 8 }}>internal knowledge-base changes only</span>}
+        </div>
+        <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
+          {state.latest_event_at ? `Latest event ${state.latest_event_at}` : "No events"}
+          {state.last_checked ? ` · last checked ${state.last_checked}` : " · no run timestamp recorded"}
+        </div>
+      </div>
+      <div className="stat-grid" style={{ marginTop: 12 }}>
+        {stats.map(([v, l]) => (
+          <div className="stat-card" key={l}>
+            <div className="stat-num">{v}</div>
+            <div className="stat-label">{l}</div>
+          </div>
+        ))}
+      </div>
+      <div className="health-note">{state.status_note}</div>
+    </div>
+  );
+}
+
 export function MonitoringPanel() {
-  const { overview } = useApp();
+  const { overview, openDetail } = useApp();
   const names = nameMap([...(overview?.opportunities ?? []), ...(overview?.archived ?? [])]);
   const [mon, setMon] = useState<MonitoringPayload | null>(null);
   useEffect(() => { api.monitoring().then(setMon); }, []);
@@ -279,6 +331,7 @@ export function MonitoringPanel() {
           <div className="panel-sub">Meaningful changes only — {mon.events.length} signals, {mon.alerts.length} alerts</div>
         </div>
       </div>
+      {mon.summary_state && <MonitoringSummaryCard state={mon.summary_state} />}
       {mon.events.length === 0 && <EmptyPanel icon="bell" title="No monitoring events" note="The monitoring engine has produced no signals for this period." />}
       {groups.map((g) => {
         const items = byTier(g.tier);
@@ -287,14 +340,20 @@ export function MonitoringPanel() {
           <div key={g.tier}>
             <div className="mon-group-label"><span className={`mon-dot ${g.tier}`} />{g.label}</div>
             {items.map((e) => (
-              <div className={`mon-card ${g.tier}`} key={e.id}>
+              <button
+                type="button"
+                className={`mon-card ${g.tier} clickable`}
+                key={e.id}
+                onClick={() => openDetail("monitoring_update", e.id)}
+                aria-label={`Open monitoring detail: ${humanize(e.title, names)}`}
+              >
                 <div className="mon-card-title">{humanize(e.title, names)}</div>
                 <div className="mon-fields">
                   <div><div className="mon-field-label">Detected</div><div className="mon-field-value">{e.detected_at}</div></div>
                   <div><div className="mon-field-label">Signal</div><div className="mon-field-value" style={{ textTransform: "capitalize" }}>{String(e.signal_type || e.adapter || "—").replace(/_/g, " ")}</div></div>
                   {e.kb_links?.length ? <div><div className="mon-field-label">Affected</div><div className="mon-field-value">{humanize(e.kb_links.join(", "), names)}</div></div> : null}
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         );

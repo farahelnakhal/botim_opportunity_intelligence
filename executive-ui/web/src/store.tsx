@@ -4,14 +4,25 @@ import { copilotApi } from "./lib/copilotApi";
 import { fromCopilotResult } from "./components/AssistantAnswer";
 import type { ChatBlock, Citation, CopilotChatResult, Opportunity, OverviewPayload } from "./types";
 
-export type View = "home" | "updates" | "project" | "monitoring" | "knowledge" | "reports" | "settings";
+export type View =
+  | "home" | "updates" | "project" | "monitoring" | "knowledge" | "reports" | "settings" | "report";
+
+// Phase 4 — the web-report route. The report view is the only URL-addressed
+// view (/report/OPP-nnn) so a brief can be refreshed, bookmarked, and opened
+// directly; everything else stays state-based exactly as before.
+const REPORT_PATH_RE = /^\/report\/(OPP-\d{3})$/;
+export function matchReportPath(pathname: string): string | null {
+  const m = REPORT_PATH_RE.exec(pathname);
+  return m ? m[1] : null;
+}
 export type Tab =
   | "chat" | "knowledge" | "interviews" | "reports" | "monitoring" | "files" | "sources" | "settings";
 
 // Generic detail-drawer target — a lighter-weight sibling to the opportunity
 // drawer (drawerOppId) for record types that aren't opportunities. Kept
 // separate so the existing opportunity drawer is never touched.
-export type DetailTargetType = "evidence" | "assumption" | "monitoring_update" | "merchant_finding";
+export type DetailTargetType =
+  | "evidence" | "assumption" | "monitoring_update" | "merchant_finding" | "prediction";
 export interface DetailTarget {
   type: DetailTargetType;
   id: string;
@@ -52,6 +63,8 @@ export interface AppState {
   activeProjectId: string | null;
   activeTab: Tab;
   sidebarOpen: boolean;
+  reportOppId: string | null;
+  openReport: (id: string) => void;
 
   conversations: Record<string, Message[]>;
 
@@ -111,7 +124,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
-  const [view, setView] = useState<View>("home");
+  // Phase 4 — direct navigation / refresh on /report/OPP-nnn lands straight
+  // in the report view; any other path starts at home as before.
+  const [reportOppId, setReportOppId] = useState<string | null>(
+    () => matchReportPath(window.location.pathname),
+  );
+  const [view, setView] = useState<View>(
+    () => (matchReportPath(window.location.pathname) ? "report" : "home"),
+  );
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("chat");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -187,6 +207,38 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setView("settings");
     setSidebarOpen(false);
   }, []);
+  // Phase 4 — open the web report for one opportunity, with a real URL so
+  // refresh/back/bookmark work. Invalid ids are ignored (never navigated).
+  const openReport = useCallback((id: string) => {
+    if (!/^OPP-\d{3}$/.test(id)) return;
+    if (window.location.pathname !== `/report/${id}`) {
+      window.history.pushState({ report: id }, "", `/report/${id}`);
+    }
+    setReportOppId(id);
+    setView("report");
+    setSidebarOpen(false);
+  }, []);
+  // Back/forward: re-derive the view from the URL. Leaving a report entry
+  // returns to the Reports & Briefs list (the report's launch surface).
+  useEffect(() => {
+    const onPop = () => {
+      const id = matchReportPath(window.location.pathname);
+      if (id) {
+        setReportOppId(id);
+        setView("report");
+      } else {
+        setView((v) => (v === "report" ? "reports" : v));
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  // Navigating anywhere else clears a stale /report/... URL.
+  useEffect(() => {
+    if (view !== "report" && matchReportPath(window.location.pathname)) {
+      window.history.replaceState({}, "", "/");
+    }
+  }, [view]);
   const openProject = useCallback((id: string, tab: Tab = "chat") => {
     setActiveProjectId(id);
     setActiveTab(tab);
@@ -341,7 +393,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const value: AppState = {
     theme, toggleTheme,
     loading, error, overview, projects, generated,
-    view, activeProjectId, activeTab, sidebarOpen,
+    view, activeProjectId, activeTab, sidebarOpen, reportOppId, openReport,
     conversations, drawerOppId, detailTarget,
     goHome, goUpdates, goMonitoring, goKnowledge, goReports, goSettings,
     openProject, setTab, setSidebarOpen, openDrawer, closeDrawer, openDetail, closeDetail,

@@ -9,6 +9,11 @@ export interface Factor {
   evidence_ids: string[];
 }
 
+// Deterministic freshness bands — computed ONLY by the backend
+// (shared/freshness.py, single home for the thresholds); the UI displays
+// the status, it never re-derives one.
+export type FreshnessStatus = "fresh" | "aging" | "stale" | "unknown";
+
 export interface EvidenceRef {
   ev_id: string;
   resolved: boolean;
@@ -21,6 +26,25 @@ export interface EvidenceRef {
   title: string;
   role: string;
   weak: boolean;
+  // --- provenance (Phase 4; all optional so legacy payloads/seed still work,
+  // null/undefined = not recorded, never invented) ---
+  source_title?: string | null;
+  source_url?: string | null; // backend emits http(s) only; UI re-validates before rendering
+  publisher?: string | null;
+  publication_date?: string | null;
+  date_of_evidence?: string | null;
+  retrieved_at?: string | null;
+  created_at?: string | null;
+  last_verified_at?: string | null;
+  excerpt?: string | null;
+  access_label?: string | null;
+  contradictory_evidence?: string | null;
+  freshness_status?: FreshnessStatus;
+  freshness_reference_date?: string | null;
+  freshness_age_days?: number | null;
+  freshness_reason?: string;
+  linked_opportunity_ids?: string[];
+  linked_assumption_ids?: string[]; // "OPP-nnn::factor_key"
 }
 
 export interface Assumption {
@@ -170,10 +194,91 @@ export interface JournalPayload {
   note?: string;
 }
 
+// Phase 4 — monitoring event shape (mirrors the monitoring engine's event
+// schema; required fields per intelligence-monitoring events.py, optional
+// fields preserved end-to-end instead of being dropped).
+export interface MonitoringEvent {
+  id: string;
+  entity: string;
+  detected_at: string;
+  adapter: string; // "kb-watcher" = internal knowledge-base change
+  signal_type: string;
+  fingerprint?: string;
+  title: string;
+  scores: Record<string, number>;
+  tier: string;
+  status: string;
+  facts?: Record<string, unknown> | unknown[];
+  kb_links?: string[];
+  thread_id?: string;
+  dedup_of?: string;
+  details?: Record<string, unknown>;
+  score_note?: string;
+  summary_ref?: string | null;
+  [key: string]: unknown;
+}
+
+// Phase 4 — current-state monitoring summary. Computed by the backend from
+// committed artefacts only; null = the backend cannot calculate it.
+export interface MonitoringSummaryState {
+  status: "active" | "no-recent-updates" | "no-events" | "never-run" | "unavailable";
+  status_note: string;
+  last_checked: string | null;
+  latest_event_at: string | null;
+  event_count: number | null;
+  open_alert_count: number | null;
+  unresolved_warning_count: number | null;
+  monitored_entity_count: number | null;
+  external_source_count: number | null;
+  internal_only: boolean | null;
+}
+
 export interface MonitoringPayload {
-  events: Record<string, any>[];
+  events: MonitoringEvent[];
   alerts: Record<string, any>[];
-  summaries: { id: string; text: string }[];
+  summaries: { id: string; available: boolean; flags?: Record<string, unknown> | null }[];
+  summary_state?: MonitoringSummaryState | null;
+}
+
+// Phase 4 — GET /executive-api/brief/{opportunity_id} (web report read model)
+export interface BriefPayload {
+  opportunity_id: string;
+  title: string;
+  generated_at: string;
+  classification: string;
+  classification_label: string;
+  is_archived: boolean;
+  segment: string;
+  jtbd: string;
+  hypothesis: string;
+  confidence: string;
+  score_summary: {
+    raw_score: number | null;
+    raw_max: number;
+    composite: number | null;
+    assumption_count: number;
+    critical_flags: string[];
+  };
+  brief_envelope: Record<string, any> | null;
+  brief_markdown: string | null;
+  evidence: EvidenceRef[];
+  contradictory_evidence: string;
+  assumptions: Assumption[];
+  predictions: Prediction[];
+  monitoring: { state: MonitoringSummaryState | null; events: MonitoringEvent[] };
+  merchant_voice: { available: boolean; findings: Record<string, unknown>[]; note: string };
+  risks: string[];
+  unknowns: string[];
+  recommended_next_actions: string[];
+  sources: {
+    source_title: string | null;
+    publisher: string | null;
+    source_url: string | null;
+    retrieved_at: string | null;
+    access_label: string | null;
+    evidence_ids: string[];
+  }[];
+  decision_banner: string;
 }
 
 // Chat routing

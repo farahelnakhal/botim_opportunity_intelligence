@@ -44,11 +44,18 @@ describe("Updates clickability and change explanation (Phase 1E)", () => {
     expect(row).toHaveTextContent("true");
   });
 
-  it("clicking a row opens the monitoring-update detail for that row's id", async () => {
+  it("clicking a monitoring row opens the monitoring-update detail for that row's id", async () => {
+    await mount();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /New evidence record/ }));
+    expect(state.detailTarget).toEqual(expect.objectContaining({ type: "monitoring_update", id: "EVT-001" }));
+  });
+
+  it("clicking a resolved-prediction row opens the prediction detail (Phase 4)", async () => {
     await mount();
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /Prediction resolved/ }));
-    expect(state.detailTarget).toEqual({ type: "monitoring_update", id: "EVT-002" });
+    expect(state.detailTarget).toEqual(expect.objectContaining({ type: "prediction", id: "EVT-002" }));
   });
 
   it("every rendered row is a real button (keyboard accessible)", async () => {

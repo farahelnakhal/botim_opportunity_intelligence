@@ -376,6 +376,10 @@ button{font-family:inherit;}
 
 /* evidence / expandable card */
 .card{background:var(--surface); border:1px solid var(--border); border-radius: var(--radius-md); padding:16px 18px; margin-bottom:16px;}
+/* Phase 4 — cards that are semantic buttons (predictions, report titles) */
+.card-clickable{display:block; width:100%; text-align:left; cursor:pointer; font:inherit; color:inherit; transition:background .12s ease;}
+.card-clickable:hover{background:var(--bg-inset);}
+.card-clickable:focus-visible{outline:2px solid var(--accent); outline-offset:2px;}
 .card-head{display:flex; align-items:center; justify-content:space-between; cursor:pointer;}
 .card-head-title{font-size:13.5px; font-weight:650; display:flex; align-items:center; gap:8px;}
 .card-head-title .icon{color:var(--accent); width:16px;height:16px;}
@@ -460,6 +464,25 @@ button{font-family:inherit;}
 .detail-fields dt{color:var(--text-tertiary); font-weight:600;}
 .detail-fields dd{margin:0; color:var(--text-secondary); text-align:right;}
 
+/* Phase 4 — evidence freshness badge (status computed by the backend only) */
+.freshness-badge{display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:650; padding:2px 9px; border-radius:20px; white-space:nowrap;}
+.freshness-badge.fresh{background:var(--success-soft); color:var(--success);}
+.freshness-badge.aging{background:var(--warning-soft); color:var(--warning);}
+.freshness-badge.stale{background:var(--critical-soft); color:var(--critical);}
+.freshness-badge.unknown{background:var(--bg-inset); color:var(--text-tertiary);}
+
+/* Phase 4 — provenance blocks in the detail drawer / report page */
+.excerpt-quote{margin:10px 0; padding:10px 14px; border-left:3px solid var(--border-strong); background:var(--bg-inset); border-radius:0 var(--radius-md) var(--radius-md) 0; font-size:12.5px; color:var(--text-secondary); font-style:italic; line-height:1.55;}
+.external-source-link{display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:650; color:var(--accent); text-decoration:none; margin-top:6px;}
+.external-source-link:hover{text-decoration:underline;}
+.external-source-link:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:4px;}
+.no-source-note{font-size:12px; color:var(--text-tertiary); background:var(--bg-inset); border-radius:var(--radius-md); padding:10px 12px; margin-top:6px; line-height:1.5;}
+.linked-chip-row{display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 2px;}
+.linked-chip{font-size:11.5px; font-weight:600; color:var(--accent); background:var(--accent-soft); border:none; padding:4px 10px; border-radius:20px; cursor:pointer; text-align:left;}
+.linked-chip:hover{filter:brightness(0.96);}
+.linked-chip:focus-visible{outline:2px solid var(--accent); outline-offset:1px;}
+.citation-stale-flag{color:var(--critical); font-weight:700;}
+
 /* files */
 .dropzone{border:1.5px dashed var(--border-strong); border-radius:var(--radius-lg); padding:32px; text-align:center; margin-bottom:24px; color:var(--text-tertiary); font-size:13px; background:var(--surface); transition:border-color .15s ease, background .15s ease;}
 .dropzone.drag{border-color:var(--accent); background:var(--accent-soft);}
@@ -486,6 +509,10 @@ button{font-family:inherit;}
 .mon-dot.important{background:var(--warning);}
 .mon-dot.info{background:var(--text-tertiary);}
 .mon-card{background:var(--surface); border:1px solid var(--border); border-left-width:3px; border-radius:var(--radius-md); padding:16px 18px; margin-bottom:10px;}
+/* Phase 4 — monitoring cards are semantic buttons that open the detail view */
+.mon-card.clickable{display:block; width:100%; text-align:left; cursor:pointer; font:inherit; color:inherit; transition:background .12s ease, border-color .12s ease;}
+.mon-card.clickable:hover{background:var(--bg-inset);}
+.mon-card.clickable:focus-visible{outline:2px solid var(--accent); outline-offset:2px;}
 .mon-card.critical{border-left-color:var(--critical);}
 .mon-card.important{border-left-color:var(--warning);}
 .mon-card.info{border-left-color:var(--text-tertiary);}
@@ -499,6 +526,14 @@ button{font-family:inherit;}
 .report-card{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-md); padding:18px 20px; display:flex; flex-direction:column; gap:10px;}
 .report-top{display:flex; justify-content:space-between; align-items:flex-start; gap:10px;}
 .report-title{font-size:14.5px; font-weight:650; line-height:1.4;}
+/* Phase 4 — clickable report title opening /report/OPP-nnn */
+.report-title-link{background:none; border:none; padding:0; cursor:pointer; color:var(--accent); text-align:left; font:inherit; font-size:14.5px; font-weight:650; line-height:1.4;}
+.report-title-link:hover{text-decoration:underline;}
+.report-title-link:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:4px;}
+/* Phase 4 — web report page */
+.report-page{max-width:860px;}
+.report-section{margin-bottom:6px;}
+.report-page h1.panel-title{font-size:22px; line-height:1.3;}
 .report-meta{font-size:12px; color:var(--text-tertiary);}
 .report-preview{font-size:12.5px; color:var(--text-secondary); line-height:1.5;}
 .report-actions{display:flex; gap:8px; margin-top:4px; flex-wrap:wrap;}

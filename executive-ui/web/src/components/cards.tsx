@@ -262,9 +262,18 @@ export function CalibrationCard({ data }: { data: JournalPayload["calibration"] 
 }
 
 export function DecisionJournalEntry({ data }: { data: Prediction }) {
+  const { openDetail } = useApp();
   const resolved = data.outcome !== null;
   return (
-    <div className="card" style={{ marginBottom: 10 }}>
+    // Phase 4 — a semantic button opening the full prediction detail
+    // (rationale, linked records, outcome) in the DetailDrawer.
+    <button
+      type="button"
+      className="card card-clickable"
+      style={{ marginBottom: 10 }}
+      onClick={() => openDetail("prediction", data.id)}
+      aria-label={`Open prediction detail: ${humanize(data.statement)}`}
+    >
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
         <div className="card-head-title" style={{ fontWeight: 600 }}>Prediction</div>
         <span className={`pill-status ${resolved ? "complete" : "designed"}`}>
@@ -278,7 +287,7 @@ export function DecisionJournalEntry({ data }: { data: Prediction }) {
           {data.brier != null && ` · Brier ${data.brier}`}
         </p>
       </div>
-    </div>
+    </button>
   );
 }
 

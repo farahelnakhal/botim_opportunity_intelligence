@@ -28,6 +28,25 @@ class EvidenceRef:
     title: str = UNKNOWN
     role: str = CONTEXTUAL         # primary | contextual | excluded
     weak: bool = False             # strength<3 or needs-more-evidence → lead, not finding
+    # --- provenance (Integration Phase 4; additive, None = not recorded) ---
+    source_title: str = None       # source-log name, e.g. "Trustpilot — Telr"
+    source_url: str = None         # SAFE absolute http(s) URL or None (shared/source_urls.py)
+    publisher: str = None
+    publication_date: str = None   # ISO date parsed from date-of-evidence, or None
+    date_of_evidence: str = None   # raw stored text (may be "Undated (…)")
+    retrieved_at: str = None       # source-log "Date added" for the primary source
+    created_at: str = None         # record Created date
+    last_verified_at: str = None   # record Last verified date
+    excerpt: str = None            # exact customer wording, verbatim
+    access_label: str = None       # direct | search-snippet | api | …
+    contradictory_evidence: str = None  # record's own contradiction field
+    # deterministic freshness (shared/freshness.py — bands documented there)
+    freshness_status: str = "unknown"
+    freshness_reference_date: str = None
+    freshness_age_days: object = None   # int or None
+    freshness_reason: str = ""
+    linked_opportunity_ids: list = field(default_factory=list)
+    linked_assumption_ids: list = field(default_factory=list)  # "OPP-nnn::factor_key"
 
 
 @dataclass
