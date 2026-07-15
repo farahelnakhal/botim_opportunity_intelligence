@@ -19,6 +19,8 @@ INTENTS = ("portfolio_summary", "opportunity_explanation", "opportunity_comparis
            # no OPP record yet. Never fabricates repository evidence; never
            # persists anything (see grounding.py + system_prompt.py).
            "new_opportunity_analysis",
+           # Phase R3 — human-approved external web-research candidates.
+           "external_research_summary",
            # Phase 3 — deterministic, non-product-analysis fallbacks so a
            # greeting or a methodology question is never mistaken for a new
            # product idea (see classify()).
@@ -72,6 +74,14 @@ _RULES = [
     ("change_summary", re.compile(
         r"\b(what changed|recent(ly)? chang|latest updates?|what'?s new|change summary|"
         r"monitoring update|show .*monitoring|recent (developments?|updates?)|monitoring status)\b", re.I)),
+    # Phase R3 — approved external web-research candidates. Scoped to
+    # explicitly external/web phrasing so existing internal-evidence and
+    # research_recommendation ("what should we research next") intents keep
+    # their routing unchanged.
+    ("external_research_summary", re.compile(
+        r"\b(external research|web research|internet research|online research|"
+        r"research run|research (findings?|results?|sources?)( |$)|"
+        r"what did (the |our )?(external |web )?research (find|say|show))\b", re.I)),
     ("opportunity_comparison", re.compile(r"\b(compare|versus|vs\.?|stronger|strongest|which .*opportunit)\b", re.I)),
     ("challenge_hypothesis", re.compile(r"\b(challenge|should (botim|we) build|devil'?s advocate|poke holes|steelman|stress.test|why might .*fail|reject this)\b", re.I)),
     # Merchant Voice (Phase 5) — deliberately scoped to explicit merchant-
@@ -227,6 +237,9 @@ def tool_plan(intent, ids, message):
         plan.append(("get_recent_changes", {}))
         if opp:
             plan.append(("get_score_history", {"opp_id": opp}))
+    elif intent == "external_research_summary":
+        plan.append(("get_external_research",
+                     {"opportunity_ref": opp} if opp else {}))
     elif intent == "executive_brief":
         if opp:
             plan.append(("get_executive_brief", {"opp_id": opp}))
@@ -328,6 +341,7 @@ ANSWER_TYPE = {
     "merchant_workarounds": "merchant_feedback", "concept_reactions": "merchant_feedback",
     "merchant_wtp_signals": "merchant_feedback", "merchant_contradictions": "merchant_feedback",
     "new_opportunity_analysis": "new_opportunity_analysis",
+    "external_research_summary": "analysis",
     "clarification_needed": "clarification", "general_explanation": "analysis",
     "unknown_or_unsupported": "analysis",
 }

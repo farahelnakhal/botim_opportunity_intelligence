@@ -423,9 +423,93 @@ export interface ChatResponse {
 export type CitationType =
   | "opportunity" | "evidence" | "segment" | "inflection" | "experiment"
   | "assumption" | "merchant_finding" | "competitor"
-  | "monitoring_update" | "knowledge_source";
+  | "monitoring_update" | "knowledge_source"
+  | "research_candidate"; // Phase R3 — approved external web-research claim
 
-export type CitationRole = "primary" | "contextual" | "contradictory" | "weak_lead" | "excluded" | "concept_reaction";
+export type CitationRole =
+  | "primary" | "contextual" | "contradictory" | "weak_lead" | "excluded"
+  | "concept_reaction"
+  | "external_research"; // Phase R3
+
+// --- research platform (shared/contracts/research.schema.md, Phases R1-R3) ---
+export type ResearchRunStatus = "pending" | "running" | "partial" | "complete" | "failed";
+export type ResearchCandidateStatus = "pending_review" | "approved" | "rejected";
+
+export interface ResearchRunSummary {
+  id: string;
+  title: string;
+  objective: string | null;
+  objectives: string[];
+  profile: string | null;
+  opportunity_ref: string | null;
+  status: ResearchRunStatus;
+  error: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  counts?: { queries: number; sources: number; candidates: number };
+}
+
+export interface ResearchQuery {
+  id: string;
+  run_id: string;
+  objective: string | null;
+  query_text: string;
+  provider: string | null;
+  status: "pending" | "executed" | "failed";
+  error: string | null;
+  result_count: number | null;
+  created_at: string;
+  executed_at: string | null;
+}
+
+export interface ResearchSource {
+  id: string;
+  run_id: string;
+  query_id: string | null;
+  canonical_url: string;
+  domain: string;
+  title: string | null;
+  publisher: string | null;
+  author: string | null;
+  published_at: string | null;
+  retrieved_at: string | null;
+  language: string | null;
+  excerpt: string | null;
+  content_hash: string | null;
+  duplicate_of: string | null;
+  quality_signals: Record<string, string | number | boolean>;
+  created_at: string;
+  // computed deterministically server-side from the stored publication date
+  freshness_status?: "fresh" | "aging" | "stale" | "unknown";
+  freshness_reference_date?: string | null;
+  freshness_age_days?: number | null;
+  freshness_reason?: string;
+}
+
+export interface ResearchCandidate {
+  id: string;
+  run_id: string;
+  claim: string;
+  source_ids: string[];
+  status: ResearchCandidateStatus;
+  review_note: string | null;
+  contradicts: string | null;
+  created_at: string;
+  updated_at: string;
+  // present on cross-run listings (review queue)
+  run_title?: string;
+  run_status?: ResearchRunStatus;
+  opportunity_ref?: string | null;
+}
+
+export interface ResearchRun extends ResearchRunSummary {
+  queries?: ResearchQuery[];
+  sources?: ResearchSource[];
+  candidate_evidence?: ResearchCandidate[];
+}
 
 export interface Citation {
   id: string;

@@ -17,7 +17,8 @@
 | Phase 4 | `1bcff92`, PR #33 | Evidence provenance (SRC ids, source-log join) + deterministic freshness (`shared/freshness.py`), safe source links (`shared/source_urls.py` + `safeUrl.ts`), monitoring summary/detail + `GET /monitoring/summary/{id}`, clickable predictions, web reports `/report/OPP-nnn` + `GET /brief/{id}` |
 | Phases 5–7 | `4b2655c`, PR #34 | `BOTIM_APP_MODE=normal\|demo\|test` (backend authoritative; normal hides demo corpus), SQLite user opportunities (`UOPP-`, draft→saved→archived, restart-safe), user reports `/report/UOPP-…`, copilot `context.user_opportunity`, monitoring configs (`MCFG-`, pause/resume/remove, honest never-run) |
 | Phase R1 | PR #36 (`fd054d8`) | Research platform core: `shared/research/store.py` (runtime SQLite at `RESEARCH_DB_PATH`; `RRUN-/RQRY-/RSRC-/RCAND-` namespaces; pending→running→complete\|partial\|failed with mandatory reasons; candidate claims require ≥1 same-run source; http(s)-only source URLs; absent metadata stays null), contract `shared/contracts/research.schema.md`, read-only `GET /research/runs[/{id}]` |
-| Phase R2 | this branch | Bounded research execution: provider seam (`providers.py`, Brave adapter via `RESEARCH_SEARCH_PROVIDER`/`BRAVE_SEARCH_API_KEY`; mock injectable in tests only, never via env), safe bounded retrieval (`retrieval.py`: http(s)-only, 500 KB cap, content-type allowlist, scripts stripped, injection stored as data), deterministic profiles (`profiles.py`: `generic` + `sme-financial-product`), executor (`runner.py`: dedup by normalized URL + content hash, recorded quality signals, honest complete/partial/failed), `POST /research/runs` + `POST /research/runs/{id}/execute`. Claim extraction/review = R3 |
+| Phase R2 | PR #37 (`83687d0`) | Bounded research execution: provider seam (`providers.py`, Brave adapter via `RESEARCH_SEARCH_PROVIDER`/`BRAVE_SEARCH_API_KEY`; mock injectable in tests only, never via env), safe bounded retrieval (`retrieval.py`: http(s)-only, 500 KB cap, content-type allowlist, scripts stripped, injection stored as data), deterministic profiles (`profiles.py`: `generic` + `sme-financial-product`), executor (`runner.py`: dedup by normalized URL + content hash, recorded quality signals, honest complete/partial/failed), `POST /research/runs` + `POST /research/runs/{id}/execute` |
+| Phase R3 | this branch | Research integration: human-authored candidate claims (`POST …/candidates`, sources must belong to the run) + one-shot review (`POST /research/candidates/{id}/review`, approved ≠ authoritative, no EV ids) + review queue (`GET /research/candidates`); copilot tool `get_external_research` (approved-only) with `external_research_summary` intent, `research_candidate` citations, EXTERNAL-labelled grounding, deterministic stale-source warnings (freshness from publication date only); frontend Research workspace (runs list/create/execute, sources with freshness + safe links, review + claim entry), external-research citation chip, report appendix on both OPP and UOPP reports. Manual claims only — LLM-assisted extraction is a possible later enhancement |
 
 Handoff corrections found during verification:
 - "Removal of fake report recipients" is **mode-gated, not deleted**: demo mode still
@@ -68,10 +69,12 @@ deploy 1 · frontend Vitest 23 files. Gate: `python3 shared/integration_check.py
 ## Current limitations (verified)
 
 - **Live research requires operator configuration.** The research platform
-  (R1+R2) can create and execute runs, but only when `RESEARCH_SEARCH_PROVIDER`
-  + key are configured; otherwise execution fails honestly. No claim
-  extraction, no candidate review UI, no chat/report integration yet (R3);
-  no KB-contradiction flagging yet (deferred R2→R3).
+  (R1–R3) can create, execute, review, and cite runs, but live execution needs
+  `RESEARCH_SEARCH_PROVIDER` + key; otherwise it fails honestly. Claims are
+  human-authored from sources (no LLM-assisted extraction); contradiction
+  notes are manual (`contradicts` field) — automated KB-contradiction
+  detection remains future work; the citation chip is informational (full
+  traceability lives in the Research view, not a chip click-through).
 - **No monitoring runner/scheduler.** `MCFG-` configs are stored intent only.
 - **No PDF export** (web reports only).
 - **No real attachment processing** (file names noted only, disclosed in the UI).

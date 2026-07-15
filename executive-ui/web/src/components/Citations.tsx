@@ -56,6 +56,28 @@ export default function Citations({ citations }: { citations: Citation[] }) {
             </button>
           );
         }
+        if (c.type === "research_candidate") {
+          // Phase R3 — an approved EXTERNAL web-research claim. Visually
+          // distinct from repository evidence; the tooltip carries the claim
+          // and its recorded sources. Traceability detail (claim → sources →
+          // run) lives in the Research view.
+          const meta = (c.metadata ?? {}) as {
+            sources?: { url?: string; title?: string; freshness_status?: string }[];
+          };
+          const srcBits = (meta.sources ?? [])
+            .map((s) => `${s.title || s.url || "source"}${s.freshness_status === "stale" ? " [stale]" : ""}`)
+            .join("; ");
+          const hasStale = (meta.sources ?? []).some((s) => s.freshness_status === "stale");
+          return (
+            <span key={c.id} className="citation-chip citation-external"
+              title={`External research (candidate): ${c.title}${srcBits ? ` — sources: ${srcBits}` : ""}`}
+              data-testid="citation-research-candidate">
+              <Icon name="search" size={12} /> {c.id}
+              <span className="citation-role">external research</span>
+              {hasStale && <span className="citation-stale-flag" data-testid="citation-stale-flag">stale</span>}
+            </span>
+          );
+        }
         if (c.type === "merchant_finding") {
           return (
             <button key={c.id} type="button" className="citation-chip clickable"

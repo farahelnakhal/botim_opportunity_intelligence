@@ -39,6 +39,7 @@ except ImportError:  # run directly as a script (python3 executive-ui/api/server
 # the runner/monitoring), not under executive-ui — make the root importable
 # when run as a script.
 try:
+    from shared import freshness
     from shared.research import store as research_store
     from shared.research import profiles as research_profiles
     from shared.research import providers as research_providers
@@ -46,6 +47,7 @@ try:
 except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from shared import freshness
     from shared.research import store as research_store
     from shared.research import profiles as research_profiles
     from shared.research import providers as research_providers
@@ -226,6 +228,22 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             return self._error(500, f"{type(exc).__name__}: {exc}")
 
+    # -- Phase R2/R3: research helpers -------------------------------------- #
+    @staticmethod
+    def _research_run_detail(store, run_id):
+        """Full run with deterministic freshness computed on each source from
+        its STORED publication date (same pure date math as Phase 4 evidence
+        freshness — computed, never invented). Retrieval time is deliberately
+        excluded: automated retrieval is always recent, so counting it would
+        mark every external source permanently 'fresh'; a source without a
+        publication date is honestly 'unknown'."""
+        run = store.get_run(run_id, include_children=True)
+        for source in run.get("sources", []):
+            source.update(freshness.compute({
+                "publication_date": source.get("published_at"),
+            }))
+        return run
+
     # -- Phase R2: research-run writes -------------------------------------- #
     def _research_post(self, sub):
         store = get_research_store()
@@ -258,7 +276,18 @@ class Handler(BaseHTTPRequestHandler):
                 except research_providers.SearchProviderError as exc:
                     return self._error(400, str(exc))
                 finished = research_runner.execute_run(store, m.group(1), provider)
-                return self._json(store.get_run(finished["id"], include_children=True))
+                return self._json(self._research_run_detail(store, finished["id"]))
+            # Phase R3 — human-authored candidate claims + review decisions.
+            # Approval never mints an EV id or touches the knowledge base.
+            m = re.match(r"^/research/runs/(RRUN-[0-9a-f]{12})/candidates$", sub)
+            if m:
+                body = self._read_json_body()
+                return self._json(store.add_candidate(m.group(1), body), status=201)
+            m = re.match(r"^/research/candidates/(RCAND-[0-9a-f]{12})/review$", sub)
+            if m:
+                body = self._read_json_body()
+                return self._json(store.review_candidate(
+                    m.group(1), body.get("action"), note=body.get("note")))
             return self._error(404, "unknown research endpoint")
         except research_store.ResearchStoreError as exc:
             return self._error(exc.status, str(exc))
@@ -459,11 +488,19 @@ class Handler(BaseHTTPRequestHandler):
                 except research_store.ResearchStoreError as exc:
                     return self._error(exc.status, str(exc))
                 return self._json({"runs": runs})
+            if path == "/research/candidates":
+                status_f = (query.get("status") or [None])[0]
+                opp_ref = (query.get("opportunity_ref") or [None])[0]
+                try:
+                    return self._json({"candidates": get_research_store().list_candidates(
+                        status=status_f, opportunity_ref=opp_ref)})
+                except research_store.ResearchStoreError as exc:
+                    return self._error(exc.status, str(exc))
             m = re.match(r"^/research/runs/([A-Za-z0-9-]{1,40})$", path)
             if m:
                 try:
-                    return self._json(get_research_store().get_run(
-                        m.group(1), include_children=True))
+                    return self._json(self._research_run_detail(
+                        get_research_store(), m.group(1)))
                 except research_store.ResearchStoreError as exc:
                     return self._error(exc.status, str(exc))
             if path in ("", "/", "/overview"):

@@ -65,7 +65,7 @@ market sizing / competitor benchmarking.
 - **Risks:** prompt injection via fetched pages (mitigate: existing non-negotiable
   #6 patterns, wordguard-style validation); provider cost/rate control.
 
-## Phase R3 — Research integration (chat, review, reports)
+## Phase R3 — Research integration (chat, review, reports) — ✅ DONE
 
 **Value:** research becomes usable in the product, not just stored.
 **Depends on:** R2.
@@ -76,6 +76,13 @@ market sizing / competitor benchmarking.
 - Reports include a sources appendix from research runs.
 - **Acceptance:** claim-to-source traceability visible end-to-end; internal vs
   external evidence visually distinct; stale external sources flagged.
+- **Delivered:** claim entry + one-shot review + review-queue routes; copilot
+  `get_external_research` tool / `external_research_summary` intent /
+  `research_candidate` citations with stale warnings; Research workspace UI;
+  external-research appendix on OPP and UOPP reports. **Still open (moved to
+  H1/backlog):** automated KB-contradiction detection (manual `contradicts`
+  notes exist), LLM-assisted claim extraction, citation-chip click-through to
+  the run detail.
 
 ## Phase R4 — Monitoring runner + evidence revalidation
 
