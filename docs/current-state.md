@@ -1,8 +1,8 @@
 # Current state — verified 2026-07-15
 
-> Baseline: `main` @ `38dee97` (merge of PR #34). Every claim below was verified
-> against code/git, not copied from handoff prompts. Update this file at the end of
-> each merged phase.
+> Baseline: `main` @ `38dee97` (merge of PR #34) + Phase R1. Every claim below was
+> verified against code/git, not copied from handoff prompts. Update this file at
+> the end of each merged phase.
 
 ## Verified completed work
 
@@ -16,6 +16,7 @@
 | Phase 3 | `553f04d`, PR #32 | Intent-classification fixes (no junk stubs), stale-conversation recovery, scroll/composer/mobile fixes, safe Markdown, demo-mode disclosure badge, start.sh process lifecycle, legacy-route gating, proxy hardening |
 | Phase 4 | `1bcff92`, PR #33 | Evidence provenance (SRC ids, source-log join) + deterministic freshness (`shared/freshness.py`), safe source links (`shared/source_urls.py` + `safeUrl.ts`), monitoring summary/detail + `GET /monitoring/summary/{id}`, clickable predictions, web reports `/report/OPP-nnn` + `GET /brief/{id}` |
 | Phases 5–7 | `4b2655c`, PR #34 | `BOTIM_APP_MODE=normal\|demo\|test` (backend authoritative; normal hides demo corpus), SQLite user opportunities (`UOPP-`, draft→saved→archived, restart-safe), user reports `/report/UOPP-…`, copilot `context.user_opportunity`, monitoring configs (`MCFG-`, pause/resume/remove, honest never-run) |
+| Phase R1 | this branch | Research platform core: `shared/research/store.py` (runtime SQLite at `RESEARCH_DB_PATH`; `RRUN-/RQRY-/RSRC-/RCAND-` namespaces; pending→running→complete\|partial\|failed with mandatory reasons; candidate claims require ≥1 same-run source; http(s)-only source URLs; absent metadata stays null), contract `shared/contracts/research.schema.md`, read-only `GET /research/runs[/{id}]`. **No live fetching yet** — the runner is Phase R2 |
 
 Handoff corrections found during verification:
 - "Removal of fake report recipients" is **mode-gated, not deleted**: demo mode still
@@ -66,8 +67,9 @@ deploy 1 · frontend Vitest 23 files. Gate: `python3 shared/integration_check.py
 ## Current limitations (verified)
 
 - **No live external research.** The only external fetch is the regulator-feed
-  monitoring adapter (network-injected, offline-testable). No search API, no page
-  retrieval, no research runs.
+  monitoring adapter (network-injected, offline-testable). No search API and no
+  page retrieval; the research-run **persistence** layer exists (Phase R1) but
+  nothing creates or executes runs yet.
 - **No monitoring runner/scheduler.** `MCFG-` configs are stored intent only.
 - **No PDF export** (web reports only).
 - **No real attachment processing** (file names noted only, disclosed in the UI).

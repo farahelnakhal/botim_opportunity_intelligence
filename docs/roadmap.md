@@ -12,7 +12,7 @@ market/competitor research all depend on one missing platform capability: **safe
 persisted, traceable external research**. Everything else (PDF, attachments, auth) is
 independent polish or hardening that neither blocks nor is blocked by research.
 
-## Phase R1 — Research platform core (foundations, no live network yet)
+## Phase R1 — Research platform core (foundations, no live network yet) — ✅ DONE
 
 **Value:** the schema and persistence layer every later research feature reuses.
 **Depends on:** nothing new. Reuses `shared/freshness.py`, `shared/source_urls.py`.
@@ -28,6 +28,9 @@ independent polish or hardening that neither blocks nor is blocked by research.
   claim→source→run traceability fields exist; zero fabricated fields (absent = null).
 - **Exclusions:** no live fetching yet; no UI beyond minimal state display.
 - **Risks:** schema churn — keep additive, version the schema like user-opportunities.
+- **Delivered:** `shared/research/store.py` + `shared/contracts/research.schema.md`
+  + read-only `GET /research/runs[/{id}]`; namespaces `RRUN-/RQRY-/RSRC-/RCAND-`;
+  25 new tests (20 store + 5 routes). Acceptance criteria all verified by test.
 
 ## Phase R2 — Bounded retrieval + provider adapters (first live capability)
 
