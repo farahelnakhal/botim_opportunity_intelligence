@@ -35,6 +35,16 @@ except ImportError:  # run directly as a script (python3 executive-ui/api/server
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from api import generate, modes, router, serialize, user_store
 
+# shared.research lives at the repo root (the platform layer, reused later by
+# the runner/monitoring), not under executive-ui — make the root importable
+# when run as a script.
+try:
+    from shared.research import store as research_store
+except ImportError:
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from shared.research import store as research_store
+
 UI_DIR = Path(__file__).resolve().parents[1]
 WEB_DIST = UI_DIR / "web" / "dist"
 
@@ -81,6 +91,18 @@ def get_user_store():
     if _USER_STORE is None:
         _USER_STORE = user_store.UserStore()
     return _USER_STORE
+
+
+# Phase R1 — shared runtime store for research runs (path from
+# RESEARCH_DB_PATH, default runtime/research.db). Lazy for the same reason.
+_RESEARCH_STORE = None
+
+
+def get_research_store():
+    global _RESEARCH_STORE
+    if _RESEARCH_STORE is None:
+        _RESEARCH_STORE = research_store.ResearchStore()
+    return _RESEARCH_STORE
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -373,6 +395,27 @@ class Handler(BaseHTTPRequestHandler):
             # user records are real product data in every mode)
             if path.startswith("/user-opportunities"):
                 return self._user_api("GET", path, query)
+            # Phase R1 — read-only research-run state (runtime store; real
+            # product data in every mode, like user opportunities). No write
+            # routes exist until the research runner (Phase R2).
+            if path == "/research/runs":
+                status = (query.get("status") or [None])[0]
+                opp_ref = (query.get("opportunity_ref") or [None])[0]
+                limit = (query.get("limit") or ["100"])[0]
+                try:
+                    runs = get_research_store().list_runs(
+                        status=status, opportunity_ref=opp_ref,
+                        limit=int(limit) if str(limit).isdigit() else 100)
+                except research_store.ResearchStoreError as exc:
+                    return self._error(exc.status, str(exc))
+                return self._json({"runs": runs})
+            m = re.match(r"^/research/runs/([A-Za-z0-9-]{1,40})$", path)
+            if m:
+                try:
+                    return self._json(get_research_store().get_run(
+                        m.group(1), include_children=True))
+                except research_store.ResearchStoreError as exc:
+                    return self._error(exc.status, str(exc))
             if path in ("", "/", "/overview"):
                 return self._json(self._mode_overview(root, mode))
             if path == "/experiments":
