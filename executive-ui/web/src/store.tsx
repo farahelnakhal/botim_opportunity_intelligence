@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { api } from "./lib/api";
 import { copilotApi } from "./lib/copilotApi";
+import { fromCopilotResult } from "./components/AssistantAnswer";
 import type { ChatBlock, Citation, CopilotChatResult, Opportunity, OverviewPayload } from "./types";
 
 export type View = "home" | "updates" | "project" | "monitoring" | "knowledge" | "reports" | "settings";
@@ -33,6 +34,8 @@ export interface Message {
   copilotWarnings?: string[];
   recommendedNextActions?: string[];
   copilotUnavailable?: boolean;
+  // Phase 3 — "deterministic_demo" | "live_model"; absent/unknown renders no badge.
+  runtimeMode?: "deterministic_demo" | "live_model";
 }
 
 export interface AppState {
@@ -69,7 +72,11 @@ export interface AppState {
   openDetail: (type: DetailTargetType, id: string, payload?: Citation) => void;
   closeDetail: () => void;
   send: (message: string, projectId?: string) => Promise<void>;
-  analyzeNew: (prompt: string) => Promise<void>; // start a fresh analysis of ANY opportunity
+  // Phase 3 — returns the raw result so the caller (Home.tsx) can tell
+  // whether a genuine new-product analysis was started (a stub/project was
+  // created and this resolves after navigating there) or not (nothing was
+  // created/navigated; the caller renders the reply itself, e.g. inline).
+  analyzeNew: (prompt: string) => Promise<CopilotChatResult>;
   clearConversation: (projectId: string) => Promise<void>; // Phase 2I — end the copilot conversation for this chat
 }
 
@@ -215,21 +222,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }));
     }
     // Phase 2L/2J — never silently substitute a router/generate.py answer when
-    // copilot-backend is unreachable; say so honestly instead.
-    const text = result.unavailable
-      ? "Grounded analysis is temporarily unavailable right now (the copilot backend could not be reached). "
-        + "No repository-grounded answer was generated for this message — please try again shortly."
-      : result.answerMarkdown;
+    // copilot-backend is unreachable; say so honestly instead. Shared adapter
+    // (AssistantAnswer.fromCopilotResult) so the wording/mapping can't drift
+    // between the chat list and Home's inline quick-replies.
+    const adapted = fromCopilotResult(result);
     setConversations((c) => ({
       ...c,
       [pid]: (c[pid] ?? []).map((m) => (m.id === pendingId ? {
-        ...m, text, stages, streaming: false,
-        citations: result.citations,
-        copilotAssumptions: result.assumptions,
-        unknowns: result.unknowns,
-        copilotWarnings: result.warnings,
-        recommendedNextActions: result.recommendedNextActions,
-        copilotUnavailable: result.unavailable,
+        ...m, stages, streaming: false,
+        text: adapted.text,
+        citations: adapted.citations,
+        copilotAssumptions: adapted.copilotAssumptions,
+        unknowns: adapted.unknowns,
+        copilotWarnings: adapted.copilotWarnings,
+        recommendedNextActions: adapted.recommendedNextActions,
+        copilotUnavailable: adapted.copilotUnavailable,
+        runtimeMode: adapted.runtimeMode,
       } : m)),
     }));
   }, []);
@@ -249,7 +257,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         && (overview.opportunities.some((o) => o.id === pid) || overview.archived.some((o) => o.id === pid));
       const context = isCommittedOpportunity ? { opportunity_id: pid } : undefined;
       const result = await copilotApi.chat(message, existingConvId, context);
-      if (!existingConvId && !result.unavailable && result.conversationId) {
+      // Phase 3 — store the (possibly new) conversation id whenever we didn't
+      // have one yet, OR the stale one just got recovered — in every other
+      // case (an ordinary follow-up) the mapping is left untouched, and no
+      // other project's mapping is ever touched.
+      if ((!existingConvId || result.staleConversationRecovered) && !result.unavailable && result.conversationId) {
         setCopilotConversationIds((m) => ({ ...m, [pid]: result.conversationId }));
       }
       await deliverCopilot(pid, message, result);
@@ -258,10 +270,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 
   const analyzeNew = useCallback(
-    async (prompt: string) => {
+    async (prompt: string): Promise<CopilotChatResult> => {
       // Always a brand-new copilot conversation (Phase 2I: "new chat gets a
       // new conversation_id" / "does not inherit prior product context").
       const result = await copilotApi.chat(prompt, null, {});
+
+      // Phase 3 — a local project/opportunity stub is created ONLY when the
+      // backend itself confirms this was a genuine new-product analysis.
+      // Entering through the "New analysis" UI is not sufficient by itself —
+      // a greeting, a monitoring question, etc. must not spawn a junk
+      // sidebar entry. The caller (Home.tsx) renders the reply itself
+      // (inline, no navigation) whenever this returns without having done so.
+      if (result.answerType !== "new_opportunity_analysis") {
+        return result;
+      }
+
       const pid = result.conversationId || `local-${nextId()}`;
       const title = prompt.trim().replace(/\.$/, "").slice(0, 80) || "New analysis";
       // No score is ever fabricated for a new idea — copilot-backend never
@@ -292,6 +315,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setView("project");
       setSidebarOpen(false);
       await deliverCopilot(pid, prompt, result);
+      return result;
     },
     [deliverCopilot],
   );

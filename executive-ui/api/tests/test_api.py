@@ -156,6 +156,11 @@ class TestGenerate(unittest.TestCase):
 class TestServerReadOnly(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        # Phase 3 — /chat and /analyze are disabled by default (see
+        # TestLegacyRoutesDisabledByDefault below); this class exercises the
+        # rest of the read-only surface plus the legacy pair with the flag
+        # explicitly enabled, same as an operator opting in.
+        server.LEGACY_UNGROUNDED_ROUTES_ENABLED = True
         cls.httpd = server.make_server(port=0, root=str(REPO))
         cls.port = cls.httpd.server_address[1]
         cls.t = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
@@ -164,6 +169,7 @@ class TestServerReadOnly(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.httpd.shutdown()
+        server.LEGACY_UNGROUNDED_ROUTES_ENABLED = False
 
     def _get(self, path):
         with urlopen(f"http://127.0.0.1:{self.port}{path}") as r:
@@ -232,6 +238,58 @@ class TestServerReadOnly(unittest.TestCase):
         status, data = self._get("/executive-api/overview")
         self.assertEqual(status, 200)
         self.assertTrue(data["opportunities"])
+
+
+class TestLegacyRoutesDisabledByDefault(unittest.TestCase):
+    """Phase 3 — the pre-copilot-backend, ungrounded /chat and /analyze
+    scaffold is disabled unless ENABLE_LEGACY_UNGROUNDED_ROUTES=1 is set. The
+    grounded chat UI only ever calls /copilot-api/chat now."""
+
+    @classmethod
+    def setUpClass(cls):
+        # Explicit, not order-dependent on other test classes.
+        server.LEGACY_UNGROUNDED_ROUTES_ENABLED = False
+        cls.httpd = server.make_server(port=0, root=str(REPO))
+        cls.port = cls.httpd.server_address[1]
+        cls.t = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
+        cls.t.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+
+    def test_get_chat_is_disabled_by_default(self):
+        import urllib.error
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            urlopen(f"http://127.0.0.1:{self.port}/api/chat?q=hi")
+        self.assertEqual(cm.exception.code, 404)
+
+    def test_get_analyze_is_disabled_by_default(self):
+        import urllib.error
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            urlopen(f"http://127.0.0.1:{self.port}/api/analyze?q=hi")
+        self.assertEqual(cm.exception.code, 404)
+
+    def test_post_analyze_is_disabled_by_default(self):
+        import urllib.error
+        import urllib.request
+        body = json.dumps({"q": "hi"}).encode()
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/api/analyze", data=body,
+            method="POST", headers={"content-type": "application/json"})
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            urllib.request.urlopen(req)
+        self.assertEqual(cm.exception.code, 404)
+
+    def test_executive_api_alias_chat_is_also_disabled_by_default(self):
+        import urllib.error
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            urlopen(f"http://127.0.0.1:{self.port}/executive-api/chat?q=hi")
+        self.assertEqual(cm.exception.code, 404)
+
+    def test_read_only_routes_are_unaffected(self):
+        with urlopen(f"http://127.0.0.1:{self.port}/api/overview") as r:
+            self.assertEqual(r.status, 200)
 
 
 class TestCopilotProxy(unittest.TestCase):
@@ -315,6 +373,111 @@ class TestCopilotProxy(unittest.TestCase):
                 data = json.loads(r.read())
             self.assertEqual(data["schema_version"], "1.0")
             self.assertTrue(data["conversation_id"].startswith("conv_"))
+        finally:
+            server.COPILOT_UPSTREAM = "http://127.0.0.1:8010"
+            chttpd.shutdown()
+
+    def test_oversized_body_is_rejected_before_being_buffered(self):
+        # Phase 3 — enforced at the proxy itself, on the declared
+        # Content-Length, so an oversized body is never read into memory
+        # even when copilot-backend would also reject it.
+        import urllib.error
+        import urllib.request
+        oversized = b"x" * (server.COPILOT_PROXY_MAX_BODY_BYTES + 1)
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/copilot-api/chat", data=oversized,
+            method="POST", headers={"content-type": "application/json"})
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            urllib.request.urlopen(req)
+        self.assertEqual(cm.exception.code, 413)
+        payload = json.loads(cm.exception.read())
+        self.assertEqual(payload["error"]["code"], "message_too_long")
+
+    def test_at_limit_body_is_still_forwarded(self):
+        # The boundary itself must not be rejected — only strictly over it.
+        import urllib.request
+
+        copilot_dir = UI.parents[0] / "copilot-backend"
+        if str(copilot_dir) not in sys.path:
+            sys.path.insert(0, str(copilot_dir))
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        received = {}
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", 0) or 0)
+                received["length"] = length
+                self.rfile.read(length)
+                data = json.dumps({"schema_version": "1.0", "conversation_id": "conv_x", "ok": True}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+        chttpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        cport = chttpd.server_address[1]
+        cthread = threading.Thread(target=chttpd.serve_forever, daemon=True)
+        cthread.start()
+        server.COPILOT_UPSTREAM = f"http://127.0.0.1:{cport}"
+        try:
+            at_limit = b"x" * server.COPILOT_PROXY_MAX_BODY_BYTES
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{self.port}/copilot-api/chat", data=at_limit,
+                method="POST", headers={"content-type": "application/json"})
+            with urllib.request.urlopen(req) as r:
+                self.assertEqual(r.status, 200)
+            self.assertEqual(received["length"], server.COPILOT_PROXY_MAX_BODY_BYTES)
+        finally:
+            server.COPILOT_UPSTREAM = "http://127.0.0.1:8010"
+            chttpd.shutdown()
+
+    def test_authorization_header_is_forwarded_to_copilot_but_never_logged(self):
+        import io
+        import urllib.request
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        captured = {}
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                captured["authorization"] = self.headers.get("Authorization")
+                length = int(self.headers.get("Content-Length", 0) or 0)
+                self.rfile.read(length)
+                data = json.dumps({"schema_version": "1.0", "conversation_id": "conv_x"}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+        chttpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        cport = chttpd.server_address[1]
+        cthread = threading.Thread(target=chttpd.serve_forever, daemon=True)
+        cthread.start()
+        server.COPILOT_UPSTREAM = f"http://127.0.0.1:{cport}"
+        try:
+            body = json.dumps({"conversation_id": None, "message": "hi"}).encode()
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{self.port}/copilot-api/chat", data=body,
+                method="POST", headers={"content-type": "application/json",
+                                        "authorization": "Bearer secret-token-abc"})
+            # Capture this process's own stdout/stderr while the request runs to
+            # confirm the token is never printed anywhere along the way.
+            captured_output = io.StringIO()
+            import contextlib
+            with contextlib.redirect_stdout(captured_output):
+                with urllib.request.urlopen(req) as r:
+                    self.assertEqual(r.status, 200)
+            self.assertEqual(captured["authorization"], "Bearer secret-token-abc")
+            self.assertNotIn("secret-token-abc", captured_output.getvalue())
         finally:
             server.COPILOT_UPSTREAM = "http://127.0.0.1:8010"
             chttpd.shutdown()

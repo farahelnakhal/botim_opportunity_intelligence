@@ -41,7 +41,7 @@
 | `conversation_id` | required | no | string (`conv_…`) |
 | `message_id` | required | no | string (`msg_…`) |
 | `answer_markdown` | required | no | string — natural-language answer ending with an **“Evidence used”** section |
-| `answer_type` | required | no | enum: `analysis, brief, comparison, evidence, challenge, assumptions, research_recommendation, research_request_draft, change_summary, merchant_feedback, new_opportunity_analysis` (`merchant_feedback` added for Merchant Voice research questions; `new_opportunity_analysis` added in Integration Phase 2 for a genuinely new idea with no OPP record yet — both additive, backward compatible, `schema_version` unchanged) |
+| `answer_type` | required | no | enum: `analysis, brief, comparison, evidence, challenge, assumptions, research_recommendation, research_request_draft, change_summary, merchant_feedback, new_opportunity_analysis, clarification` (`merchant_feedback` added for Merchant Voice research questions; `new_opportunity_analysis` added in Integration Phase 2 for a genuinely new idea with no OPP record yet; `clarification` added in Phase 3 for a bare greeting/help message with no product-discovery content — all additive, backward compatible, `schema_version` unchanged) |
 | `confidence` | required | no | `{level: "high"|"medium"|"low"|"mixed", basis: string}` — derived deterministically from records/engines, never model-invented |
 | `citations` | required | no | array of citation objects (below); may be empty |
 | `assumptions` | required | no | string[] — working assumptions relevant to the answer |
@@ -49,6 +49,7 @@
 | `recommended_next_actions` | required | no | string[] |
 | `warnings` | required | no | string[] (e.g. wording-guard notes, weak-evidence flags) |
 | `safe_tool_trace` | required | no | string[] — **empty `[]` in normal production responses**; populated with short operational one-liners (e.g. `"loaded OPP-013"`) only when the server runs with `COPILOT_DEBUG_TRACE=1`. Never contains prompts, reasoning, provider payloads, file paths, secrets, or full tool results |
+| `runtime_mode` | required (Phase 3) | no | enum: `deterministic_demo` \| `live_model` — `deterministic_demo` when the configured provider is `MockProvider` (echoes only the grounded facts block, never invents), `live_model` for any real model provider (currently Anthropic). Additive; absent is backward-compatible (older clients ignore it). Never reveals whether an API key is configured, the provider class, or any other configuration detail |
 | `draft` | optional | yes | object — present only for draft answer types; ephemeral (never persisted server-side beyond conversation storage) |
 
 Citation object:
@@ -96,7 +97,7 @@ Citation object:
   "error": { "code": "not_found", "message": "…", "retryable": false } }
 ```
 
-`error.code` enum → HTTP status: `invalid_request` 400 · `unauthorized` 401 · `not_found` 404 · `message_too_long` 413 · `rate_limited` 429 (`retryable: true`) · `provider_error` 502 (`retryable: true`) · `provider_timeout` 504 (`retryable: true`) · `internal` 500. Error messages are safe (no stack traces, paths, or secrets).
+`error.code` enum → HTTP status: `invalid_request` 400 · `unauthorized` 401 · `not_found` 404 · `conversation_not_found` 404 (Phase 3 — `POST /api/chat` with a `conversation_id` that no longer exists, e.g. after a store reset; distinct from generic `not_found` so a client can safely drop the stale id and retry once as a fresh conversation) · `message_too_long` 413 · `rate_limited` 429 (`retryable: true`) · `provider_error` 502 (`retryable: true`) · `provider_timeout` 504 (`retryable: true`) · `internal` 500. Error messages are safe (no stack traces, paths, or secrets).
 
 ## Conversation lifecycle
 

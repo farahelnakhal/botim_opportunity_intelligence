@@ -13,6 +13,7 @@ import re
 CONV_RE = re.compile(r"^conv_[0-9a-f]{12}$")
 
 ERROR_STATUS = {"invalid_request": 400, "unauthorized": 401, "not_found": 404,
+                "conversation_not_found": 404,
                 "message_too_long": 413, "rate_limited": 429,
                 "provider_error": 502, "provider_timeout": 504, "internal": 500}
 

@@ -19,6 +19,10 @@ INTENTS = ("portfolio_summary", "opportunity_explanation", "opportunity_comparis
            # no OPP record yet. Never fabricates repository evidence; never
            # persists anything (see grounding.py + system_prompt.py).
            "new_opportunity_analysis",
+           # Phase 3 — deterministic, non-product-analysis fallbacks so a
+           # greeting or a methodology question is never mistaken for a new
+           # product idea (see classify()).
+           "clarification_needed", "general_explanation",
            "unknown_or_unsupported")
 
 OPP_REF = re.compile(r"\bOPP-\d{3}\b", re.I)
@@ -31,9 +35,43 @@ _CODE_WORDS = re.compile(
     r"\b(source code|python module|repositor(y|ies)|file path|json structure|parser|"
     r"stack trace|git |commit|pull request|refactor|function name|implementation detail)\b", re.I)
 
+# Phase 3 — a message that is ONLY a greeting/help word (no other content) gets
+# a deterministic clarification, never a new-product analysis or a fabricated
+# opportunity. Anchored to the whole (trimmed) message so "Hi, I have an idea
+# for..." is untouched — only a bare greeting matches.
+_GREETING_ONLY = re.compile(
+    r"^\s*(hi|hello|hey|hiya|yo|sup|howdy|help|hi there|hello there|good (morning|afternoon|evening))\s*[!.?]*\s*$",
+    re.I)
+
+# Phase 3 — questions about how the app itself scores/classifies opportunities
+# are a methodology explanation, not a new-product analysis.
+_METHODOLOGY = re.compile(
+    r"\b(how (does|do|is|are) .*(scor(e|ing|ed)|classif|calculat|comput)|"
+    r"scoring (method|methodology|framework|works?)|"
+    r"(explain|what is) the (scoring|methodology|framework)|"
+    r"how (does|do) (this|the) (app|system|tool|copilot|engine) work)\b", re.I)
+
+# Phase 3 — positive evidence that the user is proposing/evaluating a
+# genuinely new product, feature, customer problem, or build concept — used
+# ONLY to let a new-product idea win over a generic keyword collision (e.g.
+# "build a card for merchants" would otherwise be swallowed by the bare
+# "merchants?" match in segment_analysis below). Never fires unless the
+# conversation is new and no opportunity/segment is already selected.
+_NEW_PRODUCT_SIGNAL = re.compile(
+    r"\b(i have an idea|(a )?new (product |feature |market )?idea|product idea|"
+    r"(should|could|can|let'?s) (botim|we)? ?(build|create|launch|design|develop)|"
+    r"(build|create|design|develop) (a|an) |"
+    r"(analyz|evaluat|assess|review)(e|ing) (a|an|this) (product|feature|opportunity|concept|idea|marketplace)|"
+    r"(a|an) (product|feature|concept)( idea)? (that|which|to) |"
+    r"want to (build|test|launch|create|develop|try|pitch)|"
+    r"propose (a|an)|pitch (a|an|for)|concept for (a|an)?)\b", re.I)
+
 _RULES = [
     ("executive_brief", re.compile(r"\b(brief|two.minute|2.minute|executive summary|tell arihant|for arihant|management summary)\b", re.I)),
-    ("change_summary", re.compile(r"\b(what changed|recent(ly)? chang|latest updates?|what'?s new|change summary)\b", re.I)),
+    ("general_explanation", _METHODOLOGY),
+    ("change_summary", re.compile(
+        r"\b(what changed|recent(ly)? chang|latest updates?|what'?s new|change summary|"
+        r"monitoring update|show .*monitoring|recent (developments?|updates?)|monitoring status)\b", re.I)),
     ("opportunity_comparison", re.compile(r"\b(compare|versus|vs\.?|stronger|strongest|which .*opportunit)\b", re.I)),
     ("challenge_hypothesis", re.compile(r"\b(challenge|should (botim|we) build|devil'?s advocate|poke holes|steelman|stress.test|why might .*fail|reject this)\b", re.I)),
     # Merchant Voice (Phase 5) — deliberately scoped to explicit merchant-
@@ -62,7 +100,7 @@ _RULES = [
     ("contradictory_evidence", re.compile(r"\b(contradict|against (this|the)|weakens?|counter.evidence|negative signal)\b", re.I)),
     ("evidence_gap", re.compile(r"\b(evidence gaps?|unanswered|unknowns?|what.s missing|no supporting evidence)\b", re.I)),
     ("research_recommendation", re.compile(r"\b(research next|should .*research|next research|research request|validate next|what should part a)\b", re.I)),
-    ("assumption_analysis", re.compile(r"\b(assumption|unproven|capped|unvalidated|what remains assumed)\b", re.I)),
+    ("assumption_analysis", re.compile(r"\b(assumptions?|unproven|capped|unvalidated|what remains assumed)\b", re.I)),
     ("evidence_support", re.compile(r"\b(evidence (support|for)|what supports|willingness to pay|what do .*use instead|workaround)\b", re.I)),
     ("validation_planning", re.compile(r"\b(validation (plan|experiment)|how (do|would) we validate|ve-\d{3})\b", re.I)),
     ("segment_analysis", re.compile(r"\b(segment|importers?|merchants?|customers? (are|is)|who is the customer|which segment)\b", re.I)),
@@ -85,6 +123,25 @@ def is_out_of_scope(text):
     return bool(_CODE_WORDS.search(text))
 
 
+# Deterministic, provider-independent reply for clarification_needed — a bare
+# greeting has no product-discovery content to ground an answer in, so the
+# response is fixed rather than left to (or overridable by) the model.
+CLARIFICATION = (
+    "Tell me whether you want to explore a new product idea, review an existing opportunity, "
+    "inspect monitoring updates, or examine merchant feedback."
+)
+
+
+# Rules that are broad, generic keyword catch-alls (e.g. segment_analysis's
+# bare "merchants?") and can otherwise swallow a genuine new-product message
+# that happens to mention one of their trigger words. The positive
+# new-product signal is checked immediately before these specific two, so a
+# strong signal wins; everything else in _RULES (brief, comparisons,
+# challenge, all Merchant Voice intents, evidence/assumption/validation
+# intents, portfolio_summary) keeps first-priority as before.
+_GENERIC_CATCHALLS = {"segment_analysis", "opportunity_explanation"}
+
+
 def classify(text, ids, is_new_conversation=False, has_selected_context=False):
     """Deterministic mode detection.
 
@@ -94,16 +151,31 @@ def classify(text, ids, is_new_conversation=False, has_selected_context=False):
     `unknown_or_unsupported` and being treated as a bare LLM prompt. Any
     explicit OPP/EV/SEG/ASM/MVC id, or an existing selected opportunity
     (frontend `context.opportunity_id`), or a message matching one of the
-    deterministic rules above, always takes priority.
+    deterministic rules above, always takes priority — new_opportunity_analysis
+    requires POSITIVE evidence of a product idea, not just an unmatched
+    message (see _NEW_PRODUCT_SIGNAL).
     """
-    for intent, pattern in _RULES.items() if isinstance(_RULES, dict) else _RULES:
+    is_new_product_candidate = (
+        is_new_conversation and not has_selected_context
+        and not (ids["opportunities"] or ids["evidence"] or ids["segments"] or ids.get("assumptions") or ids.get("campaigns"))
+        and bool(text.strip())
+    )
+    # A bare greeting/help word is never a product idea and never a rule match
+    # away from being treated as one — check before anything else.
+    if is_new_product_candidate and _GREETING_ONLY.search(text):
+        return "clarification_needed"
+
+    for intent, pattern in _RULES:
+        if (intent in _GENERIC_CATCHALLS and is_new_product_candidate
+                and _NEW_PRODUCT_SIGNAL.search(text)):
+            return "new_opportunity_analysis"
         if pattern.search(text):
             return intent
     if ids["opportunities"] or ids["evidence"] or ids["segments"]:
         return "opportunity_explanation"
     if ids.get("campaigns"):
         return "campaign_summary"
-    if is_new_conversation and not has_selected_context and text.strip():
+    if is_new_product_candidate:
         return "new_opportunity_analysis"
     return "unknown_or_unsupported"
 
@@ -235,6 +307,11 @@ def tool_plan(intent, ids, message):
         plan.append(("get_recent_changes", {}))
         plan.append(("get_approved_merchant_findings", {}))
 
+    # --- clarification_needed / general_explanation (Phase 3) -------------- #
+    # Neither needs a tool: a bare greeting has nothing to look up, and the
+    # scoring methodology is a fixed fact about how this system itself works
+    # (added as a deterministic fact in grounding.py), not a repository query.
+
     return plan[:6]
 
 
@@ -251,5 +328,6 @@ ANSWER_TYPE = {
     "merchant_workarounds": "merchant_feedback", "concept_reactions": "merchant_feedback",
     "merchant_wtp_signals": "merchant_feedback", "merchant_contradictions": "merchant_feedback",
     "new_opportunity_analysis": "new_opportunity_analysis",
+    "clarification_needed": "clarification", "general_explanation": "analysis",
     "unknown_or_unsupported": "analysis",
 }

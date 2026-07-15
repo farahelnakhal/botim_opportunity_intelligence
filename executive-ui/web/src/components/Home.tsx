@@ -2,6 +2,8 @@ import { useRef, useState } from "react";
 import { useApp } from "../store";
 import { tagLabel } from "../lib/format";
 import Icon from "./Icon";
+import AssistantAnswer, { fromCopilotResult } from "./AssistantAnswer";
+import type { CopilotChatResult } from "../types";
 
 const EXAMPLE_PROMPTS = [
   "Invoice financing for UAE logistics SMEs",
@@ -23,12 +25,23 @@ export default function Home() {
   const { projects, openProject, analyzeNew } = useApp();
   const [val, setVal] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  // Phase 3 — a message that ISN'T a genuine new-product idea (a greeting, a
+  // monitoring question, a methodology question, …) never creates a sidebar
+  // opportunity stub or navigates away from Home; the reply renders inline,
+  // right here, exactly like the rest of the app renders a copilot answer.
+  const [quick, setQuick] = useState<{ id: number; prompt: string; result: CopilotChatResult }[]>([]);
+  const quickId = useRef(0);
 
-  const submit = (text?: string) => {
+  const submit = async (text?: string) => {
     const t = (text ?? val).trim();
     if (!t) return;
-    analyzeNew(t); // a new conversation runs a fresh analysis of whatever you describe
     setVal("");
+    const result = await analyzeNew(t);
+    if (result.answerType !== "new_opportunity_analysis") {
+      setQuick((q) => [...q, { id: ++quickId.current, prompt: t, result }]);
+    }
+    // A genuine new-product idea: analyzeNew already navigated to the new
+    // project's chat, so this component is about to unmount — nothing more to do.
   };
 
   return (
@@ -85,6 +98,17 @@ export default function Home() {
             <button className="prompt-pill" key={p} onClick={() => submit(p)}>{p}</button>
           ))}
         </div>
+
+        {quick.length > 0 && (
+          <div className="home-quick-replies">
+            {quick.map((q) => (
+              <div className="msg msg-assistant" key={q.id}>
+                <div className="msg-role">BOTIM</div>
+                <AssistantAnswer data={fromCopilotResult(q.result)} />
+              </div>
+            ))}
+          </div>
+        )}
 
         {projects.length > 0 && (
           <>
