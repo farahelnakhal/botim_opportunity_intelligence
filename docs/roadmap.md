@@ -84,7 +84,7 @@ market sizing / competitor benchmarking.
   notes exist), LLM-assisted claim extraction, citation-chip click-through to
   the run detail.
 
-## Phase R4 — Monitoring runner + evidence revalidation
+## Phase R4 — Monitoring runner (R4a ✅ DONE) + evidence revalidation (R4b, open)
 
 **Value:** existing `MCFG-` configs stop being intent-only; freshness becomes
 actionable.
@@ -99,6 +99,13 @@ research, despite the UI existing first.
 - Evidence revalidation: re-check stale sources, propose (never auto-apply) updates.
 - **Acceptance:** a configured UOPP can be run manually and produces real, cited
   events or an honest empty/failed result.
+- **R4a delivered:** manual runner (`executive-ui/api/monitoring_runner.py`)
+  reusing the research platform; `MEVT-` events grounded in `RSRC-` sources with
+  idempotent URL dedup; honest error/failure-counter discipline on the config;
+  run + events routes; frontend Run button + events list; user-store schema v2.
+- **R4b still open:** evidence revalidation (re-check stale sources, propose —
+  never auto-apply — updates) and any scheduler discussion (only after manual
+  runs prove trustworthy in real use).
 
 ## Phase C1 — Deterministic calculations
 

@@ -18,7 +18,8 @@
 | Phases 5–7 | `4b2655c`, PR #34 | `BOTIM_APP_MODE=normal\|demo\|test` (backend authoritative; normal hides demo corpus), SQLite user opportunities (`UOPP-`, draft→saved→archived, restart-safe), user reports `/report/UOPP-…`, copilot `context.user_opportunity`, monitoring configs (`MCFG-`, pause/resume/remove, honest never-run) |
 | Phase R1 | PR #36 (`fd054d8`) | Research platform core: `shared/research/store.py` (runtime SQLite at `RESEARCH_DB_PATH`; `RRUN-/RQRY-/RSRC-/RCAND-` namespaces; pending→running→complete\|partial\|failed with mandatory reasons; candidate claims require ≥1 same-run source; http(s)-only source URLs; absent metadata stays null), contract `shared/contracts/research.schema.md`, read-only `GET /research/runs[/{id}]` |
 | Phase R2 | PR #37 (`83687d0`) | Bounded research execution: provider seam (`providers.py`, Brave adapter via `RESEARCH_SEARCH_PROVIDER`/`BRAVE_SEARCH_API_KEY`; mock injectable in tests only, never via env), safe bounded retrieval (`retrieval.py`: http(s)-only, 500 KB cap, content-type allowlist, scripts stripped, injection stored as data), deterministic profiles (`profiles.py`: `generic` + `sme-financial-product`), executor (`runner.py`: dedup by normalized URL + content hash, recorded quality signals, honest complete/partial/failed), `POST /research/runs` + `POST /research/runs/{id}/execute` |
-| Phase R3 | this branch | Research integration: human-authored candidate claims (`POST …/candidates`, sources must belong to the run) + one-shot review (`POST /research/candidates/{id}/review`, approved ≠ authoritative, no EV ids) + review queue (`GET /research/candidates`); copilot tool `get_external_research` (approved-only) with `external_research_summary` intent, `research_candidate` citations, EXTERNAL-labelled grounding, deterministic stale-source warnings (freshness from publication date only); frontend Research workspace (runs list/create/execute, sources with freshness + safe links, review + claim entry), external-research citation chip, report appendix on both OPP and UOPP reports. Manual claims only — LLM-assisted extraction is a possible later enhancement |
+| Phase R3 | PR #38 (`364e358`) | Research integration: human-authored candidate claims (`POST …/candidates`, sources must belong to the run) + one-shot review (`POST /research/candidates/{id}/review`, approved ≠ authoritative, no EV ids) + review queue (`GET /research/candidates`); copilot tool `get_external_research` (approved-only) with `external_research_summary` intent, `research_candidate` citations, EXTERNAL-labelled grounding, deterministic stale-source warnings (freshness from publication date only); frontend Research workspace (runs list/create/execute, sources with freshness + safe links, review + claim entry), external-research citation chip, report appendix on both OPP and UOPP reports. Manual claims only — LLM-assisted extraction is a possible later enhancement |
+| Phase R4a | this branch | Manual monitoring runner: `POST /user-opportunities/{id}/monitoring/run` executes the MCFG config's topics/keywords/entities through the research platform (bounded, preferred/excluded domains honored) and records `MEVT-` events for genuinely new sources (unique per opportunity+URL, idempotent reruns, grounded in `RSRC-`/`RRUN-`); failures recorded honestly on the config (`error`/`last_error`/failure counter; `last_run_at` never advanced by a failed run); "Run monitoring now" button live with an events list; user-store schema v2 (in-place migration). Still no scheduler — cadence remains intent. Evidence revalidation deferred to R4b |
 
 Handoff corrections found during verification:
 - "Removal of fake report recipients" is **mode-gated, not deleted**: demo mode still
@@ -40,8 +41,14 @@ Handoff corrections found during verification:
   fallback to the legacy router/scaffold).
 - Reports: web-only at `/report/{OPP-nnn|UOPP-…}` (refresh/direct-nav safe). **No PDF
   export exists anywhere.**
-- Monitoring: internal-KB events (demo corpus) + user monitoring configs shown as
-  intent only ("Configured — awaiting monitoring run"); "Run monitoring now" disabled.
+- Monitoring: internal-KB events (demo corpus) + user monitoring configs; "Run
+  monitoring now" performs one real manual run (R4a) when a search provider is
+  configured, recording `MEVT-` events for genuinely new sources — otherwise it
+  fails honestly and the config shows the error. Cadence remains stored intent
+  (no scheduler).
+- Research workspace (sidebar → Research): create/execute runs, review candidate
+  claims; approved claims ground chat ("what did the external research find?")
+  and appear in report appendices, always labelled external.
 
 ## Important routes and environment variables
 
@@ -75,7 +82,9 @@ deploy 1 · frontend Vitest 23 files. Gate: `python3 shared/integration_check.py
   notes are manual (`contradicts` field) — automated KB-contradiction
   detection remains future work; the citation chip is informational (full
   traceability lives in the Research view, not a chip click-through).
-- **No monitoring runner/scheduler.** `MCFG-` configs are stored intent only.
+- **No monitoring scheduler.** Manual runs work (R4a) when a search provider
+  is configured; cadence remains stored intent. Evidence revalidation (R4b)
+  not yet built.
 - **No PDF export** (web reports only).
 - **No real attachment processing** (file names noted only, disclosed in the UI).
 - **No authentication/tenancy** on the executive API; copilot has optional bearer

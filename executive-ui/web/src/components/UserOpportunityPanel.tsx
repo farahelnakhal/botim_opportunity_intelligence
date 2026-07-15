@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import { useApp } from "../store";
 import { userOpportunitiesApi, UserOpportunityError } from "../lib/userOpportunities";
-import type { UserMonitoringConfig, UserOpportunity } from "../types";
+import type { UserMonitoringConfig, UserMonitoringEvent, UserOpportunity } from "../types";
 import ActionButton from "./ActionButton";
 import Icon from "./Icon";
 
@@ -186,6 +186,10 @@ export function UserMonitoringPanel({ oppId }: { oppId: string }) {
   const [form, setForm] = useState<Record<string, string>>({});
   const [enabled, setEnabled] = useState(true);
   const [cadence, setCadence] = useState<string>("weekly");
+  // Phase R4a — manual runs + recorded events
+  const [running, setRunning] = useState(false);
+  const [runNote, setRunNote] = useState<string | null>(null);
+  const [events, setEvents] = useState<UserMonitoringEvent[]>([]);
 
   const applyConfig = (c: UserMonitoringConfig) => {
     setConfig(c);
@@ -207,8 +211,28 @@ export function UserMonitoringPanel({ oppId }: { oppId: string }) {
   const load = () => {
     userOpportunitiesApi.monitoringGet(oppId).then(applyConfig)
       .catch((e) => setError(String(e instanceof Error ? e.message : e)));
+    userOpportunitiesApi.monitoringEvents(oppId)
+      .then((r) => setEvents(r.events))
+      .catch(() => setEvents([])); // events list absent ≠ config broken
   };
   useEffect(load, [oppId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Phase R4a — one manual run; the outcome (incl. failure) is shown verbatim
+  const runNow = async () => {
+    setRunning(true);
+    setRunNote(null);
+    try {
+      const result = await userOpportunitiesApi.monitoringRun(oppId);
+      setRunNote(result.note);
+      if (result.config) applyConfig(result.config);
+      const refreshed = await userOpportunitiesApi.monitoringEvents(oppId);
+      setEvents(refreshed.events);
+    } catch (e) {
+      setRunNote(String(e instanceof Error ? e.message : e));
+    } finally {
+      setRunning(false);
+    }
+  };
 
   if (error) return <div className="panel-wrap"><div className="error-banner">{error}</div></div>;
   if (!config) return <div className="panel-wrap"><div className="skeleton" style={{ height: 160 }} /></div>;
@@ -302,11 +326,50 @@ export function UserMonitoringPanel({ oppId }: { oppId: string }) {
             <Icon name="x" size={13} /> Remove configuration
           </button>
         )}
-        <button type="button" className="btn" disabled
-          title="Manual run will become available when live research is enabled">
-          Run monitoring now
-        </button>
+        {!notConfigured && (
+          <button type="button" className="btn" disabled={running || !config.enabled}
+            onClick={runNow}
+            title={config.enabled
+              ? "Run one manual monitoring pass now (requires a configured search provider)"
+              : "Resume monitoring before running"}>
+            {running ? "Running…" : "Run monitoring now"}
+          </button>
+        )}
       </div>
+
+      {runNote && (
+        <div className="banner-note" data-testid="monitoring-run-note" style={{ marginTop: 10 }}>
+          <Icon name={runNote.startsWith("Monitoring run failed") ? "alert" : "check-circle"} />
+          <span>{runNote}</span>
+        </div>
+      )}
+
+      {!notConfigured && (
+        <div className="uop-mon-events">
+          <h4>Detected developments</h4>
+          {events.length === 0 ? (
+            <p className="empty-note" data-testid="monitoring-no-events">
+              {config.last_run_at
+                ? "No new developments have been detected yet."
+                : "No events — monitoring has not run yet."}
+            </p>
+          ) : (
+            events.map((e) => (
+              <div className="research-source" key={e.id} data-testid="monitoring-event">
+                <div className="research-source-main">
+                  <div className="research-source-title">{e.title || e.domain}</div>
+                  <div className="research-source-meta">
+                    {e.domain}
+                    {e.published_at ? ` · published ${e.published_at.slice(0, 10)}` : ""}
+                    {" · detected "}{e.detected_at.slice(0, 10)}
+                    {" · run "}{e.research_run_id}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }

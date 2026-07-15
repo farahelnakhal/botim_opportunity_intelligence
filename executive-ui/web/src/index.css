@@ -691,3 +691,7 @@ select.field-input{appearance:none; -webkit-appearance:none; cursor:pointer; bac
 .research-claim-form{display:flex;flex-direction:column;gap:8px;max-width:640px;margin:14px 0;}
 .research-execute{align-self:flex-start;margin:6px 0 14px;}
 .citation-external{border-style:dashed;}
+
+/* --- Phase R4a: monitoring events (manual runs) --------------------------- */
+.uop-mon-events{margin-top:18px;}
+.uop-mon-events h4{margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-dim);}

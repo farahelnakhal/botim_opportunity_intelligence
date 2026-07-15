@@ -154,6 +154,30 @@ export interface UserMonitoringConfig {
   opportunity_title?: string;  // present in the monitoring-overview list
 }
 
+// Phase R4a — a monitoring event: exactly "a new, non-duplicate source
+// recorded by a manual monitoring run", grounded in an RSRC- research source.
+export interface UserMonitoringEvent {
+  id: string; // MEVT-<12 hex>
+  opportunity_id: string;
+  config_id: string;
+  research_run_id: string;
+  source_id: string;
+  title: string | null;
+  canonical_url: string;
+  domain: string;
+  published_at: string | null;
+  detected_at: string;
+}
+
+export interface UserMonitoringRunResult {
+  run_id: string;
+  run_status: "complete" | "partial" | "failed";
+  events_created: number;
+  new_events: UserMonitoringEvent[];
+  note: string;
+  config?: UserMonitoringConfig;
+}
+
 // Phase 6 — web-report read model for a user opportunity (record_type
 // distinguishes it from the committed BriefPayload; nothing is fabricated).
 export interface UserBriefPayload {

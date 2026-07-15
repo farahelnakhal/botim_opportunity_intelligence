@@ -7,7 +7,7 @@
 // No seed/demo fallback exists here on purpose: a failure is surfaced as an
 // error, never replaced with fabricated data.
 
-import type { UserMonitoringConfig, UserOpportunity } from "../types";
+import type { UserMonitoringConfig, UserMonitoringEvent, UserMonitoringRunResult, UserOpportunity } from "../types";
 
 const BASE = import.meta.env.VITE_EXECUTIVE_API_BASE_URL || "/executive-api";
 
@@ -107,4 +107,11 @@ export const userOpportunitiesApi = {
     request<UserMonitoringConfig>("POST", `/user-opportunities/${id}/monitoring/resume`),
   monitoringDelete: (id: string) =>
     request<{ deleted: boolean }>("DELETE", `/user-opportunities/${id}/monitoring`),
+  // Phase R4a — one MANUAL monitoring run (no scheduler exists). The server
+  // answers honestly: complete/partial with real events, or failed with the
+  // reason recorded on the config.
+  monitoringRun: (id: string) =>
+    request<UserMonitoringRunResult>("POST", `/user-opportunities/${id}/monitoring/run`),
+  monitoringEvents: (id: string) =>
+    request<{ events: UserMonitoringEvent[] }>("GET", `/user-opportunities/${id}/monitoring/events`),
 };

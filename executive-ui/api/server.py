@@ -29,11 +29,11 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 try:
-    from . import generate, modes, router, serialize, user_store
+    from . import generate, modes, monitoring_runner, router, serialize, user_store
 except ImportError:  # run directly as a script (python3 executive-ui/api/server.py)
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from api import generate, modes, router, serialize, user_store
+    from api import generate, modes, monitoring_runner, router, serialize, user_store
 
 # shared.research lives at the repo root (the platform layer, reused later by
 # the runner/monitoring), not under executive-ui — make the root importable
@@ -301,7 +301,7 @@ class Handler(BaseHTTPRequestHandler):
     def _user_api(self, method, sub, query):
         m = re.match(r"^/user-opportunities"
                      r"(?:/(UOPP-[0-9a-f]{12})"
-                     r"(?:/(archive|restore|monitoring)(?:/(pause|resume))?)?)?/?$", sub)
+                     r"(?:/(archive|restore|monitoring)(?:/(pause|resume|run|events))?)?)?/?$", sub)
         if not m:
             # a syntactically different id shape (e.g. OPP-010) is a client
             # error, not a missing record — never resolves to committed data
@@ -336,6 +336,25 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(store.monitoring_pause(opp_id))
                 if mon_action == "resume" and method == "POST":
                     return self._json(store.monitoring_resume(opp_id))
+                # Phase R4a — MANUAL monitoring run (no scheduler exists;
+                # cadence remains intended configuration). Provider failure
+                # is recorded honestly on the config, never fabricated away.
+                if mon_action == "run" and method == "POST":
+                    try:
+                        provider = research_providers.from_env()
+                    except research_providers.SearchProviderError as exc:
+                        return self._error(400, str(exc))
+                    try:
+                        result = monitoring_runner.run_monitoring(
+                            store, get_research_store(), opp_id, provider)
+                    except monitoring_runner.MonitoringRunError as exc:
+                        return self._error(exc.status, str(exc))
+                    result["config"] = store.monitoring_get(opp_id)
+                    return self._json(result)
+                if mon_action == "events" and method == "GET":
+                    limit = (query.get("limit") or ["50"])[0]
+                    return self._json({"events": store.monitoring_events(
+                        opp_id, limit=int(limit) if str(limit).isdigit() else 50)})
                 if mon_action is None:
                     if method == "GET":
                         config = store.monitoring_get(opp_id)
