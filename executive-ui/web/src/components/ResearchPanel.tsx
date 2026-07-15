@@ -43,6 +43,13 @@ function SourceRow({ s, selectable, selected, onToggle }: {
             </span>
           )}
           {s.duplicate_of && <span className="research-dup" title={`duplicate of ${s.duplicate_of}`}>duplicate</span>}
+          {s.last_revalidation && (
+            <span className={`revalidation-badge revalidation-${s.last_revalidation.outcome}`}
+              title={`re-checked ${s.last_revalidation.checked_at.slice(0, 10)}${s.last_revalidation.note ? ` — ${s.last_revalidation.note}` : ""}`}
+              data-testid="revalidation-badge">
+              {s.last_revalidation.outcome}
+            </span>
+          )}
         </div>
         <div className="research-source-meta">
           {s.publisher && <span>{s.publisher} · </span>}
@@ -84,6 +91,12 @@ function CandidateRow({ c, onReviewed }: { c: ResearchCandidate; onReviewed: () 
       {c.contradicts && (
         <div className="research-contradicts"><Icon name="alert" size={12} /> Recorded contradiction: {c.contradicts}</div>
       )}
+      {(c.source_health === "changed" || c.source_health === "unreachable") && (
+        <div className="research-contradicts" data-testid="candidate-source-health">
+          <Icon name="alert" size={12} /> A cited source failed revalidation
+          ({c.source_health}) — re-check the sources before relying on this claim.
+        </div>
+      )}
       {c.status === "pending_review" && (
         <div className="research-review-actions">
           <button className="btn-secondary" disabled={busy} onClick={() => review("approve")}>Approve</button>
@@ -120,6 +133,23 @@ function RunDetail({ runId, onBack }: { runId: string; onBack: () => void }) {
     setExecuting(false);
     if (res.ok) setRun(res.data);
     else setError(res.error);
+  };
+
+  const [revalidating, setRevalidating] = useState(false);
+  const [revalNote, setRevalNote] = useState<string | null>(null);
+  const revalidate = async () => {
+    setRevalidating(true);
+    setRevalNote(null);
+    const res = await researchApi.revalidateRun(runId);
+    setRevalidating(false);
+    if (!res.ok) { setRevalNote(res.error); return; }
+    setRun(res.data);
+    const sm = res.data.revalidation_summary;
+    if (sm) {
+      setRevalNote(`Re-checked ${sm.checked} source${sm.checked === 1 ? "" : "s"}: `
+        + `${sm.unchanged} unchanged, ${sm.changed} changed, ${sm.unreachable} unreachable`
+        + (sm.skipped ? ` (${sm.skipped} skipped — per-run cap)` : "") + ".");
+    }
   };
 
   const submitClaim = async () => {
@@ -173,6 +203,15 @@ function RunDetail({ runId, onBack }: { runId: string; onBack: () => void }) {
       ))}
 
       <h3>Sources</h3>
+      {sources.length > 0 && (
+        <div className="research-review-actions" style={{ marginBottom: 10 }}>
+          <button className="btn-secondary" disabled={revalidating} onClick={revalidate}
+            title="Re-fetch each source and record whether it is unchanged, changed, or unreachable — nothing is auto-applied">
+            {revalidating ? "Re-checking…" : "Revalidate sources"}
+          </button>
+          {revalNote && <span className="research-review-hint" data-testid="revalidation-summary">{revalNote}</span>}
+        </div>
+      )}
       {sources.length === 0 && <p className="empty-note">No sources recorded{run.status === "pending" ? " — the run has not been executed yet" : ""}.</p>}
       {sources.map((s) => (
         <SourceRow key={s.id} s={s}

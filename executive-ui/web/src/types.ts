@@ -511,6 +511,19 @@ export interface ResearchSource {
   freshness_reference_date?: string | null;
   freshness_age_days?: number | null;
   freshness_reason?: string;
+  // Phase R4b — latest re-check (append-only history; the source row itself
+  // is never mutated); null/absent = never revalidated
+  last_revalidation?: SourceRevalidation | null;
+}
+
+export interface SourceRevalidation {
+  id: string; // RREV-<12 hex>
+  source_id: string;
+  outcome: "unchanged" | "changed" | "unreachable";
+  http_status: number | null;
+  new_content_hash: string | null;
+  note: string | null;
+  checked_at: string;
 }
 
 export interface ResearchCandidate {
@@ -527,12 +540,18 @@ export interface ResearchCandidate {
   run_title?: string;
   run_status?: ResearchRunStatus;
   opportunity_ref?: string | null;
+  // Phase R4b — worst latest revalidation outcome among cited sources
+  // ("ok" also covers never-revalidated); computed server-side on run detail
+  source_health?: "ok" | "changed" | "unreachable";
 }
 
 export interface ResearchRun extends ResearchRunSummary {
   queries?: ResearchQuery[];
   sources?: ResearchSource[];
   candidate_evidence?: ResearchCandidate[];
+  // present on the response of POST /research/runs/{id}/revalidate
+  revalidation_summary?: { run_id: string; checked: number; skipped: number;
+    unchanged: number; changed: number; unreachable: number };
 }
 
 export interface Citation {

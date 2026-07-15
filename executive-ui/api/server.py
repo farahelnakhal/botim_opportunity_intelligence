@@ -44,6 +44,7 @@ try:
     from shared.research import profiles as research_profiles
     from shared.research import providers as research_providers
     from shared.research import runner as research_runner
+    from shared.research import revalidate as research_revalidate
 except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -52,6 +53,7 @@ except ImportError:
     from shared.research import profiles as research_profiles
     from shared.research import providers as research_providers
     from shared.research import runner as research_runner
+    from shared.research import revalidate as research_revalidate
 
 UI_DIR = Path(__file__).resolve().parents[1]
 WEB_DIST = UI_DIR / "web" / "dist"
@@ -288,6 +290,14 @@ class Handler(BaseHTTPRequestHandler):
                 body = self._read_json_body()
                 return self._json(store.review_candidate(
                     m.group(1), body.get("action"), note=body.get("note")))
+            # Phase R4b — re-check the run's sources; append-only outcomes,
+            # nothing auto-applied. Works on finished runs (that is the point).
+            m = re.match(r"^/research/runs/(RRUN-[0-9a-f]{12})/revalidate$", sub)
+            if m:
+                summary = research_revalidate.revalidate_run(store, m.group(1))
+                detail = self._research_run_detail(store, m.group(1))
+                detail["revalidation_summary"] = summary
+                return self._json(detail)
             return self._error(404, "unknown research endpoint")
         except research_store.ResearchStoreError as exc:
             return self._error(exc.status, str(exc))

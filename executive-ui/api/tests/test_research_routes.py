@@ -158,6 +158,21 @@ class ResearchRoutes(unittest.TestCase):
         self.assertEqual(finished["sources"][0]["canonical_url"], "https://example.com/hit")
         self.assertEqual(finished["sources"][0]["excerpt"], "page body")
 
+    def test_revalidate_route_appends_outcomes_and_returns_summary(self):
+        # Phase R4b — seeded run with one source; the live re-fetch will fail
+        # in the offline test environment, which is exactly the honest
+        # "unreachable" outcome we assert (no network is ever required).
+        run = self.store.create_run({"title": "revalidation over http"})
+        run = self.store.start_run(run["id"])
+        s = self.store.add_source(run["id"], {
+            "canonical_url": "http://127.0.0.1:1/never-reachable.example"})
+        self.store.finish_run(run["id"], "complete")
+        _, detail = self._post(f"/executive-api/research/runs/{run['id']}/revalidate", {})
+        self.assertEqual(detail["revalidation_summary"]["checked"], 1)
+        self.assertEqual(detail["revalidation_summary"]["unreachable"], 1)
+        self.assertEqual(detail["sources"][0]["last_revalidation"]["outcome"], "unreachable")
+        self.assertEqual(detail["sources"][0]["id"], s["id"])
+
     def test_error_bodies_never_leak_sql_or_paths(self):
         with self.assertRaises(urllib.error.HTTPError) as cm:
             urlopen(f"http://127.0.0.1:{self.port}/executive-api/research/runs?status=bogus")

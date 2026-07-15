@@ -84,7 +84,7 @@ market sizing / competitor benchmarking.
   notes exist), LLM-assisted claim extraction, citation-chip click-through to
   the run detail.
 
-## Phase R4 — Monitoring runner (R4a ✅ DONE) + evidence revalidation (R4b, open)
+## Phase R4 — Monitoring runner (R4a ✅) + source revalidation (R4b ✅) — DONE
 
 **Value:** existing `MCFG-` configs stop being intent-only; freshness becomes
 actionable.
@@ -103,9 +103,14 @@ research, despite the UI existing first.
   reusing the research platform; `MEVT-` events grounded in `RSRC-` sources with
   idempotent URL dedup; honest error/failure-counter discipline on the config;
   run + events routes; frontend Run button + events list; user-store schema v2.
-- **R4b still open:** evidence revalidation (re-check stale sources, propose —
-  never auto-apply — updates) and any scheduler discussion (only after manual
-  runs prove trustworthy in real use).
+- **R4b delivered:** source revalidation for research-platform sources —
+  append-only `RREV-` re-check history (`unchanged/changed/unreachable`),
+  `POST /research/runs/{id}/revalidate`, computed candidate `source_health`,
+  Research-UI badges/button, copilot warnings on failed sources; nothing is
+  ever auto-applied. **Remaining/moved:** re-checking committed KB evidence
+  source URLs (would propose impact updates — belongs with H1 or a dedicated
+  KB-maintenance phase) and any scheduler discussion (only after manual runs
+  prove trustworthy in real use).
 
 ## Phase C1 — Deterministic calculations
 

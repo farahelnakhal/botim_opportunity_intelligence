@@ -695,3 +695,9 @@ select.field-input{appearance:none; -webkit-appearance:none; cursor:pointer; bac
 /* --- Phase R4a: monitoring events (manual runs) --------------------------- */
 .uop-mon-events{margin-top:18px;}
 .uop-mon-events h4{margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-dim);}
+
+/* --- Phase R4b: source revalidation badges -------------------------------- */
+.revalidation-badge{font-size:10px;padding:1px 6px;border-radius:999px;border:1px solid var(--border);text-transform:uppercase;letter-spacing:.4px;}
+.revalidation-unchanged{color:var(--ok,#177245);border-color:currentColor;}
+.revalidation-changed{color:var(--warn,#9a6b00);border-color:currentColor;}
+.revalidation-unreachable{color:var(--danger,#b3261e);border-color:currentColor;}

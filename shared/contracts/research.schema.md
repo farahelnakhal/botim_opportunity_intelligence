@@ -1,4 +1,4 @@
-# Research runs (Phases R1–R2) — schema v1
+# Research runs (Phases R1–R4b) — schema v2
 
 Persistence + execution contract for external-research runs. Implementation:
 `shared/research/` (`store.py` — runtime SQLite at `RESEARCH_DB_PATH`, default
@@ -140,3 +140,34 @@ SQL/paths/keys/fetched content in messages.
   page fetches failed → `partial` with the counts in `error`; nothing
   succeeded → `failed`. Failed pages keep their search-result metadata
   (title/snippet) with `page_fetched: false`.
+
+## Source revalidation (Phase R4b) — schema v2
+
+Research-store schema is now **v2** (v1 databases migrate in place; the
+migration only adds `source_revalidations`). A revalidation re-fetches a
+source and APPENDS an outcome record — **the source row, candidate claims,
+and review decisions are never modified** (propose, never auto-apply):
+
+| Outcome | Meaning |
+|---|---|
+| `unchanged` | reachable; extracted-content hash matches the stored baseline |
+| `changed` | reachable; content differs (or no baseline hash was recorded) |
+| `unreachable` | fetch failed, non-200, or unsupported content type |
+
+**Revalidation record** (`RREV-<12 hex>`): `id`, `source_id`, `outcome`,
+`http_status?`, `new_content_hash?`, `note?`, `checked_at`.
+
+- `POST /research/runs/{RRUN-id}/revalidate` — re-checks up to 20
+  non-duplicate sources (bounded, polite, one retry per fetch); returns the
+  refreshed run detail plus `revalidation_summary
+  {checked, skipped, unchanged, changed, unreachable}`. Works on finished
+  runs (that is the point). Requires no search provider — it is a plain
+  re-fetch of already-recorded URLs.
+- Run detail attaches `last_revalidation` to each source and a computed
+  `source_health` (`ok | changed | unreachable`; worst cited-source outcome;
+  never-revalidated counts as `ok` — absence of a check is not a failure) to
+  each candidate. Computed at read time, never stored.
+- Copilot: `get_external_research` sources carry `check_outcome` +
+  `last_checked`; grounding emits a deterministic warning when an approved
+  claim's `source_health` is `changed`/`unreachable`. The claim still
+  grounds (its approval is untouched) — re-review is a human decision.
