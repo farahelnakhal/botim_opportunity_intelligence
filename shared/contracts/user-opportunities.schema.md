@@ -131,3 +131,25 @@ refetching, PDF export, deterministic financial calculations, real file
 uploads, production authentication and tenancy, automatic promotion of user
 drafts into the Git knowledge base, authoritative evidence writes, automated
 score changes.
+
+## Manual monitoring runs and events (Phase R4a)
+
+No scheduler exists — cadence remains **intended** configuration. Two routes
+were added (both under `/executive-api/user-opportunities/{UOPP-id}/monitoring`):
+
+| Route | Behavior |
+|---|---|
+| `POST …/monitoring/run` | Execute ONE manual monitoring run. The config's topics/keywords/entities become bounded queries (max 10) executed through the research platform (`shared/research`) with the config's preferred/excluded domains. Requires an enabled config (409 if paused, 409 if the config has nothing to search, 404 if not configured) and a configured search provider — **no provider ⇒ the run finishes `failed`, the config records `status: error` + `last_error` + an incremented `consecutive_failure_count`, and `last_run_at` is NOT advanced** (a failed run monitored nothing). Success (complete/partial) sets `status: active`, advances `last_run_at`, resets the failure counter, and returns `{run_id, run_status, events_created, new_events, note, config}`. Zero new events is an honest, successful outcome. |
+| `GET …/monitoring/events[?limit=…]` | `{events: […]}` newest first. |
+
+**Monitoring event** (`MEVT-<12 hex>`): exactly "a new, non-duplicate source
+recorded by a monitoring run" — grounded in its `RSRC-` research source and
+traceable via `research_run_id` to the full run. Fields: `id`,
+`opportunity_id`, `config_id`, `research_run_id`, `source_id`, `title`,
+`canonical_url`, `domain`, `published_at`, `detected_at`. Uniqueness on
+`(opportunity_id, canonical_url)` makes reruns idempotent: an already-seen
+URL never becomes a second "new" event. No summaries, significance scores,
+or tiers are generated — nothing is fabricated.
+
+Runtime store schema is now **v2** (v1 databases migrate in place on first
+open; the migration only adds the `monitoring_events` table).

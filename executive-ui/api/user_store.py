@@ -33,7 +33,7 @@ import uuid
 import datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_DB_PATH = REPO / "runtime" / "user-opportunities.db"
@@ -146,6 +146,8 @@ class UserStore:
                 raise StoreError("user-opportunity database is newer than this code", status=500)
             if version < 1:
                 self._migrate_to_v1(conn)
+            if version < 2:
+                self._migrate_to_v2(conn)
             conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)",
                          (str(SCHEMA_VERSION),))
 
@@ -196,6 +198,31 @@ class UserStore:
             next_run_at TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL)""")
+
+    @staticmethod
+    def _migrate_to_v2(conn):
+        # Phase R4a — monitoring events produced by MANUAL monitoring runs.
+        # An event is exactly "a new, non-duplicate source recorded by a
+        # monitoring research run for this opportunity" — grounded in an
+        # RSRC record (shared/research), never fabricated or summarized
+        # here. The (opportunity_id, canonical_url) uniqueness makes reruns
+        # idempotent: a URL already seen for this opportunity never becomes
+        # a second "new" event.
+        conn.execute("""CREATE TABLE IF NOT EXISTS monitoring_events (
+            id TEXT PRIMARY KEY,
+            opportunity_id TEXT NOT NULL
+                REFERENCES user_opportunities(id) ON DELETE CASCADE,
+            config_id TEXT NOT NULL,
+            research_run_id TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            title TEXT,
+            canonical_url TEXT NOT NULL,
+            domain TEXT NOT NULL,
+            published_at TEXT,
+            detected_at TEXT NOT NULL,
+            UNIQUE (opportunity_id, canonical_url))""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_mevents_opp "
+                     "ON monitoring_events(opportunity_id)")
 
     # -- serialization ---------------------------------------------------- #
 
@@ -478,6 +505,74 @@ class UserStore:
                    JOIN user_opportunities o ON o.id = c.opportunity_id
                    ORDER BY c.created_at DESC""").fetchall()
         return [self._config_dict(r) for r in rows]
+
+    # -- monitoring runs + events (Phase R4a) ------------------------------- #
+
+    def monitoring_record_result(self, opp_id, ok, error=None):
+        """Record the outcome of a MANUAL monitoring run on the config:
+        success -> status 'active', last_run_at set, failure counter reset;
+        failure -> status 'error', honest last_error, counter incremented.
+        last_run_at is only advanced on success — a failed run is never
+        presented as having monitored anything."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT id FROM monitoring_configs WHERE opportunity_id=?",
+                               (opp_id,)).fetchone()
+            if row is None:
+                raise StoreError("monitoring is not configured for this opportunity",
+                                 status=404)
+            now = _now()
+            if ok:
+                conn.execute(
+                    """UPDATE monitoring_configs SET status='active', last_run_at=?,
+                       last_error=NULL, consecutive_failure_count=0, updated_at=?
+                       WHERE opportunity_id=?""", (now, now, opp_id))
+            else:
+                message = (error or "monitoring run failed")[:500]
+                conn.execute(
+                    """UPDATE monitoring_configs SET status='error', last_error=?,
+                       consecutive_failure_count=consecutive_failure_count+1, updated_at=?
+                       WHERE opportunity_id=?""", (message, now, opp_id))
+        return self.monitoring_get(opp_id)
+
+    def monitoring_add_events(self, opp_id, config_id, candidates):
+        """Insert events for genuinely NEW sources. `candidates` are dicts
+        with research_run_id, source_id, title, canonical_url, domain,
+        published_at. A URL already evented for this opportunity is skipped
+        (idempotent reruns). Returns the events actually inserted."""
+        inserted = []
+        now = _now()
+        with self._connect() as conn:
+            for c in candidates:
+                url = c.get("canonical_url")
+                if not isinstance(url, str) or not url:
+                    continue
+                event_id = _new_id("MEVT")
+                cur = conn.execute(
+                    """INSERT OR IGNORE INTO monitoring_events
+                       (id, opportunity_id, config_id, research_run_id, source_id,
+                        title, canonical_url, domain, published_at, detected_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (event_id, opp_id, config_id, c.get("research_run_id"),
+                     c.get("source_id"), (c.get("title") or None),
+                     url, c.get("domain") or "", c.get("published_at"), now))
+                if cur.rowcount:
+                    inserted.append(event_id)
+            if not inserted:
+                return []
+            marks = ",".join("?" for _ in inserted)
+            rows = conn.execute(
+                f"SELECT * FROM monitoring_events WHERE id IN ({marks})",
+                inserted).fetchall()
+        return [dict(r) for r in rows]
+
+    def monitoring_events(self, opp_id, limit=50):
+        self.get(opp_id)  # 404 for unknown opportunity
+        limit = max(1, min(int(limit), 200))
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM monitoring_events WHERE opportunity_id=?
+                   ORDER BY detected_at DESC, id LIMIT ?""", (opp_id, limit)).fetchall()
+        return [dict(r) for r in rows]
 
 
 def suggested_monitoring_topics(opp):
