@@ -374,6 +374,20 @@ def build(intent, executed, ids):
             else:
                 pack.facts.append(f"No limitations recorded for {r['campaign_id']}.")
 
+    if intent == "general_explanation":
+        # A fixed, factual description of this system's own scoring mechanics
+        # — never repository evidence, so it is safe to state as a direct
+        # fact rather than something requiring a tool lookup.
+        pack.facts.append(
+            "How scoring works: each opportunity is scored on 17 fixed dimensions (customer pain, "
+            "commercial potential, competitive position, and feasibility factors), each rated 1-5. "
+            "The raw score is the sum (out of 85); the composite score is a weighted reference figure. "
+            "A dimension is marked assumption-based when no supporting evidence is on file for it. "
+            "If too many of the 17 factors are assumption-based, the classification is automatically "
+            "capped at 'promising' regardless of the raw score, so an unvalidated idea can never be "
+            "labelled 'strong'. Scores are computed by the scoring engine — never invented or "
+            "adjusted by this conversation.")
+
     # intent-level discipline epilogues (deterministic, not model-generated)
     if intent == "challenge_hypothesis":
         pack.facts.append(

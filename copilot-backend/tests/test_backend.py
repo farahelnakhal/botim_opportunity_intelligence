@@ -66,7 +66,7 @@ def make_orchestrator():
 
 ANSWER_TYPES = {"analysis", "brief", "comparison", "evidence", "challenge", "assumptions",
                 "research_recommendation", "research_request_draft", "change_summary",
-                "merchant_feedback", "new_opportunity_analysis"}
+                "merchant_feedback", "new_opportunity_analysis", "clarification"}
 CITE_TYPES = {"evidence", "opportunity", "segment", "inflection", "experiment", "assumption",
              "merchant_finding", "competitor"}
 CITE_ROLES = {"primary", "contextual", "contradictory", "weak_lead", "excluded"}

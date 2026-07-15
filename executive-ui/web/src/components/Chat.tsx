@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useApp, type Message } from "../store";
 import type { ChatBlock } from "../types";
 import Icon from "./Icon";
-import Citations from "./Citations";
 import ActionButton from "./ActionButton";
+import AssistantAnswer from "./AssistantAnswer";
 import {
   Banner, BriefEnvelopeCard, CalibrationCard, CommercialModelCard, DecisionJournalEntry,
   EvidenceCard, ExecutiveSummaryCard, ExperimentCard, FeedItemCard, MonitoringAlertCard,
@@ -90,34 +90,6 @@ function renderOne(b: ChatBlock): JSX.Element | null {
   }
 }
 
-/* ---------------- copilot-backend answer metadata (Phase 2C/2K) ---------------- */
-function ListSection({ icon, label, items }: { icon: Parameters<typeof Icon>[0]["name"]; label: string; items: string[] }) {
-  if (!items.length) return null;
-  return (
-    <div className="copilot-meta-section">
-      <div className="copilot-meta-label"><Icon name={icon} size={12} /> {label}</div>
-      <ul className="copilot-meta-list">
-        {items.map((it, i) => <li key={i}>{it}</li>)}
-      </ul>
-    </div>
-  );
-}
-
-function CopilotMeta({ m }: { m: Message }) {
-  const hasAny = (m.citations?.length || m.copilotAssumptions?.length || m.unknowns?.length
-    || m.copilotWarnings?.length || m.recommendedNextActions?.length);
-  if (!hasAny) return null;
-  return (
-    <div className="copilot-meta">
-      {m.citations && m.citations.length > 0 && <Citations citations={m.citations} />}
-      <ListSection icon="alert" label="Assumptions" items={m.copilotAssumptions ?? []} />
-      <ListSection icon="search" label="Unknowns" items={m.unknowns ?? []} />
-      <ListSection icon="alert" label="Warnings" items={m.copilotWarnings ?? []} />
-      <ListSection icon="check-circle" label="Recommended next actions" items={m.recommendedNextActions ?? []} />
-    </div>
-  );
-}
-
 /* ---------------- message ---------------- */
 function MessageView({ m }: { m: Message }) {
   if (m.role === "user") {
@@ -132,17 +104,7 @@ function MessageView({ m }: { m: Message }) {
     <div className="msg msg-assistant">
       <div className="msg-role">BOTIM</div>
       <Timeline stages={m.stages ?? []} done={!m.streaming} />
-      {m.text && (
-        <div className={`msg-assistant-body${m.copilotUnavailable ? " unavailable" : ""}`}>
-          {m.copilotUnavailable && (
-            <div className="banner-note" style={{ marginBottom: 8 }}>
-              <Icon name="alert" /><span>Grounded analysis is temporarily unavailable.</span>
-            </div>
-          )}
-          <p>{m.text}{m.streaming && <span className="stream-caret" />}</p>
-        </div>
-      )}
-      {!m.streaming && <CopilotMeta m={m} />}
+      <AssistantAnswer data={m} />
       {m.blocks && <Blocks blocks={m.blocks} />}
     </div>
   );
@@ -208,17 +170,49 @@ function ChatInput({ onSend }: { onSend: (t: string) => void }) {
 }
 
 /* ---------------- chat view ---------------- */
+// Phase 3 scroll policy: scroll is triggered ONLY when a new exchange starts
+// (msgs.length grows — the user message + assistant placeholder are appended
+// together), anchoring to the TOP of the new user message. Streaming/stage
+// updates mutate existing messages in place (length unchanged) and never
+// trigger another scroll, so a long answer's beginning — and the user's own
+// question — stay in view instead of being pushed out by a "scroll to
+// bottom on every update" policy. Reopening a chat with history lands
+// instantly (no animation) at the bottom exactly once on mount/project
+// switch — never a repeated scroll storm.
 export default function Chat({ projectId }: { projectId: string }) {
   const { conversations, send, clearConversation } = useApp();
   const msgs = conversations[projectId] ?? [];
-  const endRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const msgRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const prevCountRef = useRef(0);
+  const mountedProjectRef = useRef<string | null>(null);
+
+  // New chat/project mount (or switching back to this project's chat tab):
+  // land at the bottom once, instantly — not a smooth scroll, not repeated.
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [msgs]);
+    if (mountedProjectRef.current !== projectId) {
+      mountedProjectRef.current = projectId;
+      prevCountRef.current = msgs.length;
+      const el = scrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
+  // A new exchange started — bring its beginning into view exactly once.
+  useEffect(() => {
+    const prevCount = prevCountRef.current;
+    if (msgs.length > prevCount) {
+      const newMsg = msgs[prevCount];
+      const el = newMsg && msgRefs.current[newMsg.id];
+      el?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    prevCountRef.current = msgs.length;
+  }, [msgs.length]);
 
   return (
-    <div className="tab-panel" style={{ display: "flex", flexDirection: "column" }}>
-      <div className="chat-scroll" style={{ flex: 1 }}>
+    <div className="chat-view">
+      <div className="chat-scroll" ref={scrollRef}>
         {msgs.length === 0 ? (
           <div className="empty-state" style={{ paddingTop: 80 }}>
             <Icon name="message" className="icon" />
@@ -234,8 +228,11 @@ export default function Chat({ projectId }: { projectId: string }) {
             />
           </div>
         )}
-        {msgs.map((m) => <MessageView key={m.id} m={m} />)}
-        <div ref={endRef} />
+        {msgs.map((m) => (
+          <div key={m.id} ref={(el) => { msgRefs.current[m.id] = el; }}>
+            <MessageView m={m} />
+          </div>
+        ))}
       </div>
       <ChatInput onSend={(t) => send(t, projectId)} />
     </div>

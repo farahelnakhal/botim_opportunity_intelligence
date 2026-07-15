@@ -9,7 +9,7 @@ validates unsafe wording and falls back to the deterministic grounded text
 """
 
 from . import grounding, intents, security
-from .provider import ProviderError, make_provider
+from .provider import MockProvider, ProviderError, make_provider
 from .system_prompt import SYSTEM_PROMPT
 from .tools_registry import REGISTRY, ToolError, call_tool, tool_specs
 from .wordguard import check_wording
@@ -47,8 +47,12 @@ class Orchestrator:
         if conversation_id:
             conv = self.store.get_conversation(conversation_id)
             if conv is None:
-                return {"error": {"code": "not_found",
-                                  "message": "conversation not found", "retryable": False}}
+                # Phase 3 — a distinct code from generic "not_found" so the
+                # frontend can safely auto-recover (drop the stale id, retry
+                # once as a fresh conversation) without guessing from a bare
+                # 404 that might mean something else entirely.
+                return {"error": {"code": "conversation_not_found",
+                                  "message": "the conversation no longer exists", "retryable": False}}
             stored_context = conv["context"]
         else:
             conversation_id = self.store.create_conversation()
@@ -84,6 +88,18 @@ class Orchestrator:
         has_selected_context = bool(ctx.get("opportunity_id") or ctx.get("segment_id"))
         intent = intents.classify(message, ids, is_new_conversation=is_new_conversation,
                                   has_selected_context=has_selected_context)
+
+        # A bare greeting/help word has nothing to ground an answer in — reply
+        # deterministically and never create a new-product analysis or an
+        # opportunity stub for it (Phase 3).
+        if intent == "clarification_needed":
+            answer = intents.CLARIFICATION
+            mid = self.store.add_message(conversation_id, "assistant", answer)
+            self.store.update_context(conversation_id, ctx)
+            return self._response(conversation_id, mid, answer, "clarification",
+                                  {"level": "high", "basis": "no product-discovery content to ground"},
+                                  [], [], [], [], [], trace, None)
+
         plan = intents.tool_plan(intent, ids, message)
 
         executed, seen, not_found = [], set(), []
@@ -181,6 +197,13 @@ class Orchestrator:
             prose = prose.rstrip() + "\n" + "\n".join(lines)
         return prose, warnings
 
+    def _runtime_mode(self):
+        # Phase 3 — lets the frontend disclose deterministic demo synthesis
+        # rather than looking identical to live model output. Never exposes
+        # whether a key is configured, the provider class name, or anything
+        # beyond this one fixed two-value label.
+        return "deterministic_demo" if isinstance(self.provider, MockProvider) else "live_model"
+
     def _response(self, conversation_id, message_id, answer, answer_type, confidence,
                   citations, assumptions, unknowns, actions, warnings, trace, draft):
         resp = {"schema_version": "1.0", "conversation_id": conversation_id,
@@ -188,7 +211,7 @@ class Orchestrator:
                 "answer_type": answer_type, "confidence": confidence,
                 "citations": citations, "assumptions": assumptions,
                 "unknowns": unknowns, "recommended_next_actions": actions,
-                "warnings": warnings,
+                "warnings": warnings, "runtime_mode": self._runtime_mode(),
                 "safe_tool_trace": trace if self.config.debug_trace else []}
         if draft is not None:
             resp["draft"] = draft

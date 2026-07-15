@@ -16,7 +16,11 @@ const chatMock = vi.fn(
     conversationId: conversationId ?? `conv_test${++nextConvId}`,
     messageId: "msg_test",
     answerMarkdown: `answer to: ${message}`,
-    answerType: "analysis",
+    // Phase 3: analyzeNew only creates a project/stub and navigates when the
+    // backend confirms a genuine new-product analysis — these lifecycle
+    // tests exercise that path deliberately. The stub-gating behavior itself
+    // (non-product messages) is covered in Home.newProductGate.test.tsx.
+    answerType: "new_opportunity_analysis",
     confidence: { level: "medium", basis: "test" },
     citations: [],
     assumptions: [],

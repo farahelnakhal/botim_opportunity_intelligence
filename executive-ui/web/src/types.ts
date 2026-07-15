@@ -253,4 +253,12 @@ export interface CopilotChatResult {
   // unavailable state instead (Phase 2L/2J).
   unavailable: boolean;
   unavailableReason?: string;
+  // Phase 3 — true when this result came from the one-shot stale-conversation
+  // retry (the original conversation_id no longer existed; copilotApi already
+  // retried once as a fresh conversation). Tells the caller to overwrite its
+  // stored conversation id for this chat even though one was already on file.
+  staleConversationRecovered?: boolean;
+  // Phase 3 — "deterministic_demo" (MockProvider) | "live_model" (Anthropic).
+  // Absent is safe/backward-compatible (treated as unknown, no badge shown).
+  runtimeMode?: "deterministic_demo" | "live_model";
 }

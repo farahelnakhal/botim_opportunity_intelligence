@@ -55,6 +55,20 @@ OPP_ID = re.compile(r"^OPP-\d{3}$")
 COPILOT_UPSTREAM = os.environ.get("COPILOT_UPSTREAM_URL", "http://127.0.0.1:8010").rstrip("/")
 COPILOT_PROXY_TIMEOUT_S = 30
 
+# Phase 3 — /chat and /analyze (reachable as either /api/... or the
+# /executive-api/... alias) are the pre-copilot-backend, ungrounded scaffold
+# (executive-ui/api/generate.py, router.py). The chat UI now talks to the
+# grounded copilot-backend via /copilot-api/* instead, so this legacy pair is
+# disabled by default and only reachable when explicitly opted into.
+LEGACY_UNGROUNDED_ROUTES_ENABLED = os.environ.get("ENABLE_LEGACY_UNGROUNDED_ROUTES") == "1"
+LEGACY_ROUTE_PATHS = ("/chat", "/analyze")
+
+# Same default as copilot-backend's own COPILOT_MAX_BODY_BYTES (see
+# copilot-backend/app/config.py) — enforced here too so an oversized body is
+# rejected at the proxy, before it is ever read into memory, not only after
+# forwarding it to copilot-backend.
+COPILOT_PROXY_MAX_BODY_BYTES = int(os.environ.get("COPILOT_MAX_BODY_BYTES", 65536))
+
 
 class Handler(BaseHTTPRequestHandler):
     repo_root = "."
@@ -84,14 +98,23 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- copilot-backend passthrough (Phase 2) ------------------------------ #
     # Forwards /copilot-api/<sub> to COPILOT_UPSTREAM + /api/<sub> unchanged.
-    # Bounded: fixed upstream, bounded timeout, request body already size-
-    # limited by copilot-backend itself; never proxies to a caller-supplied URL.
+    # Bounded: fixed upstream, bounded timeout, request body size-limited here
+    # (Phase 3, before ever being buffered — see do_POST/do_GET/do_DELETE)
+    # as well as by copilot-backend itself; never proxies to a caller-supplied
+    # URL.
     def _proxy_to_copilot(self, method, sub_path, query, body_bytes):
         url = f"{COPILOT_UPSTREAM}/api{sub_path}"
         if query:
             url += "?" + query
+        headers = {"content-type": "application/json", "accept": "application/json"}
+        # Forwarded unchanged, never logged (see log_message override above
+        # and logging_util on the copilot-backend side — neither ever prints
+        # header values).
+        auth = self.headers.get("Authorization")
+        if auth:
+            headers["authorization"] = auth
         req = urllib.request.Request(url, data=body_bytes if body_bytes else None, method=method,
-                                     headers={"content-type": "application/json", "accept": "application/json"})
+                                     headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=COPILOT_PROXY_TIMEOUT_S) as r:
                 status = r.status
@@ -126,6 +149,12 @@ class Handler(BaseHTTPRequestHandler):
         path = parsed.path
         if path.startswith("/copilot-api/"):
             length = int(self.headers.get("Content-Length", 0) or 0)
+            if length > COPILOT_PROXY_MAX_BODY_BYTES:
+                # Rejected on the declared Content-Length alone — never
+                # buffered into memory first.
+                return self._json({"schema_version": "1.0", "error": {
+                    "code": "message_too_long", "message": "request body too large",
+                    "retryable": False}}, status=413)
             body = self.rfile.read(length) if length else b""
             return self._proxy_to_copilot("POST", path[len("/copilot-api"):], parsed.query, body)
         if path.startswith("/executive-api/"):
@@ -133,6 +162,8 @@ class Handler(BaseHTTPRequestHandler):
         if not path.startswith("/api/"):
             return self._error(404, "not found")
         sub = path[len("/api"):]
+        if sub in LEGACY_ROUTE_PATHS and not LEGACY_UNGROUNDED_ROUTES_ENABLED:
+            return self._legacy_disabled()
         body = self._read_json_body()
         msg = str(body.get("q") or body.get("message") or "")
         history = body.get("history") if isinstance(body.get("history"), list) else None
@@ -144,6 +175,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(405, f"{sub} does not accept POST (read-only)")
         except Exception as exc:
             return self._error(500, f"{type(exc).__name__}: {exc}")
+
+    def _legacy_disabled(self):
+        return self._error(404, "legacy ungrounded endpoint disabled — set "
+                                "ENABLE_LEGACY_UNGROUNDED_ROUTES=1 to enable, or use /copilot-api/chat")
 
     def do_DELETE(self):
         parsed = urlparse(self.path)
@@ -186,6 +221,8 @@ class Handler(BaseHTTPRequestHandler):
                     if o["id"] == m.group(1):
                         return self._json(o)
                 return self._error(404, "no such opportunity")
+            if path in LEGACY_ROUTE_PATHS and not LEGACY_UNGROUNDED_ROUTES_ENABLED:
+                return self._legacy_disabled()
             if path == "/chat":
                 msg = (query.get("q") or query.get("message") or [""])[0]
                 return self._json(router.route(msg, root))

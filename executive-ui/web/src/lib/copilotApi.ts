@@ -39,9 +39,14 @@ function isCitation(x: unknown): x is Citation {
   return !!x && typeof x === "object" && typeof (x as Citation).id === "string";
 }
 
+const RUNTIME_MODES = new Set(["deterministic_demo", "live_model"]);
+
 function toResult(data: Record<string, unknown>): CopilotChatResult {
   const citations = Array.isArray(data.citations) ? data.citations.filter(isCitation) : [];
   const conf = data.confidence as CopilotConfidence | undefined;
+  const mode = typeof data.runtime_mode === "string" && RUNTIME_MODES.has(data.runtime_mode)
+    ? (data.runtime_mode as "deterministic_demo" | "live_model")
+    : undefined;
   return {
     conversationId: String(data.conversation_id ?? ""),
     messageId: (data.message_id as string) ?? null,
@@ -56,9 +61,15 @@ function toResult(data: Record<string, unknown>): CopilotChatResult {
       : [],
     warnings: Array.isArray(data.warnings) ? (data.warnings as string[]) : [],
     unavailable: false,
+    runtimeMode: mode,
   };
 }
 
+// `code` is the wire error.code when the backend returned a structured error
+// (missing entirely on network failure/timeout/malformed body) — used ONLY to
+// detect "conversation_not_found" for the one-shot stale-conversation retry
+// below. Every other failure (timeout, 500, malformed body, auth, network
+// outage) has no matching code and is never retried.
 async function post(path: string, body: unknown, timeoutMs: number) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -76,16 +87,16 @@ async function post(path: string, body: unknown, timeoutMs: number) {
       data = null;
     }
     if (!res.ok || !data) {
-      const err = (data?.error as { message?: string } | undefined) ?? undefined;
-      return { ok: false as const, reason: err?.message || `HTTP ${res.status}` };
+      const err = (data?.error as { message?: string; code?: string } | undefined) ?? undefined;
+      return { ok: false as const, reason: err?.message || `HTTP ${res.status}`, code: err?.code };
     }
     if ("error" in data) {
-      const err = data.error as { message?: string };
-      return { ok: false as const, reason: err?.message || "copilot returned an error" };
+      const err = data.error as { message?: string; code?: string };
+      return { ok: false as const, reason: err?.message || "copilot returned an error", code: err?.code };
     }
     return { ok: true as const, data };
   } catch (e) {
-    return { ok: false as const, reason: e instanceof Error ? e.message : String(e) };
+    return { ok: false as const, reason: e instanceof Error ? e.message : String(e), code: undefined };
   } finally {
     clearTimeout(timer);
   }
@@ -97,13 +108,22 @@ export const copilotApi = {
     conversationId: string | null,
     context?: CopilotContext,
   ): Promise<CopilotChatResult> {
-    const r = await post(
-      "/chat",
-      { conversation_id: conversationId, message, context: context ?? {} },
-      CHAT_TIMEOUT_MS,
-    );
-    if (!r.ok) return unavailableResult(conversationId ?? "", r.reason);
-    return toResult(r.data);
+    const body = { conversation_id: conversationId, message, context: context ?? {} };
+    const r = await post("/chat", body, CHAT_TIMEOUT_MS);
+    if (r.ok) return toResult(r.data);
+
+    // Phase 3 — exactly one automatic retry, ONLY for a stale/deleted
+    // conversation id (e.g. after a backend restart wiped the store), and
+    // ONLY when a conversation_id was actually sent (nothing to recover from
+    // otherwise). Retries as a brand-new conversation with the same message
+    // and context, so opportunity/project context is preserved. Never
+    // retries for timeout/500/malformed-response/auth/network failures.
+    if (r.code === "conversation_not_found" && conversationId) {
+      const retry = await post("/chat", { ...body, conversation_id: null }, CHAT_TIMEOUT_MS);
+      if (retry.ok) return { ...toResult(retry.data), staleConversationRecovered: true };
+      return unavailableResult("", retry.reason);
+    }
+    return unavailableResult(conversationId ?? "", r.reason);
   },
 
   async deleteConversation(conversationId: string): Promise<boolean> {
