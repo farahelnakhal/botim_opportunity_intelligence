@@ -69,6 +69,15 @@ export const researchApi = {
     });
   },
 
+  // Phase R4b — re-check the run's sources; append-only outcomes, nothing
+  // auto-applied. Returns the refreshed run detail with revalidation_summary.
+  revalidateRun(runId: string) {
+    return request<ResearchRun>(`/research/runs/${encodeURIComponent(runId)}/revalidate`, {
+      method: "POST",
+      body: "{}",
+    });
+  },
+
   addCandidate(runId: string, payload: { claim: string; source_ids: string[]; contradicts?: string }) {
     return request<ResearchCandidate>(`/research/runs/${encodeURIComponent(runId)}/candidates`, {
       method: "POST",

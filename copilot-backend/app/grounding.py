@@ -369,6 +369,15 @@ def build(intent, executed, ids):
                     pack.warnings.append(
                         f"{stale} cited external source(s) are stale (older than the "
                         f"180-day threshold) — re-run research before relying on them.")
+                # Phase R4b — deterministic revalidation outcomes: a claim whose
+                # cited source has changed or vanished needs human re-review.
+                unhealthy = [c for c in cands[:10]
+                             if c.get("source_health") in ("changed", "unreachable")]
+                if unhealthy:
+                    pack.warnings.append(
+                        f"{len(unhealthy)} cited claim(s) rest on sources that failed "
+                        f"revalidation (content changed or page unreachable) — "
+                        f"re-check the sources before relying on them.")
                 pack.conf_sources["external research (candidate)"] = "low"
             pack.needs_no_decision = True
 

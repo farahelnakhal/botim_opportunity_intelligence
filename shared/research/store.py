@@ -47,7 +47,7 @@ try:
 except ImportError:  # imported with repo root not on sys.path (e.g. as shared.research from elsewhere)
     from ..source_urls import safe_url
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_DB_PATH = REPO / "runtime" / "research.db"
@@ -56,6 +56,7 @@ RUN_RE = re.compile(r"^RRUN-[0-9a-f]{12}$")
 QUERY_RE = re.compile(r"^RQRY-[0-9a-f]{12}$")
 SOURCE_RE = re.compile(r"^RSRC-[0-9a-f]{12}$")
 CANDIDATE_RE = re.compile(r"^RCAND-[0-9a-f]{12}$")
+REVALIDATION_OUTCOMES = ("unchanged", "changed", "unreachable")
 # a run may optionally be linked to a committed or user opportunity
 OPP_REF_RE = re.compile(r"^(OPP-\d{3}|UOPP-[0-9a-f]{12})$")
 
@@ -192,6 +193,8 @@ class ResearchStore:
                 raise ResearchStoreError("research database is newer than this code", status=500)
             if version < 1:
                 self._migrate_to_v1(conn)
+            if version < 2:
+                self._migrate_to_v2(conn)
             conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)",
                          (str(SCHEMA_VERSION),))
 
@@ -255,6 +258,26 @@ class ResearchStore:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_queries_run ON research_queries(run_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sources_run ON research_sources(run_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_candidates_run ON candidate_evidence(run_id)")
+
+    @staticmethod
+    def _migrate_to_v2(conn):
+        # Phase R4b — source revalidation history. A revalidation NEVER
+        # mutates the original source record (recorded observations stay
+        # immutable); each re-check appends a row here. Outcomes:
+        #   unchanged   — reachable, content hash matches the stored one
+        #   changed     — reachable, content hash differs (or no baseline)
+        #   unreachable — fetch failed / non-200 / unsupported type
+        conn.execute("""CREATE TABLE IF NOT EXISTS source_revalidations (
+            id TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL REFERENCES research_sources(id) ON DELETE CASCADE,
+            outcome TEXT NOT NULL
+                CHECK (outcome IN ('unchanged','changed','unreachable')),
+            http_status INTEGER,
+            new_content_hash TEXT,
+            note TEXT,
+            checked_at TEXT NOT NULL)""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_revalidations_source "
+                     "ON source_revalidations(source_id)")
 
     # -- serialization ----------------------------------------------------- #
 
@@ -333,7 +356,15 @@ class ResearchStore:
                 result["candidate_evidence"] = [self._candidate_dict(r) for r in conn.execute(
                     "SELECT * FROM candidate_evidence WHERE run_id=? ORDER BY created_at, id",
                     (run_id,))]
-            return result
+        # Phase R4b — computed at read time, never stored: latest re-check per
+        # source and the worst cited-source outcome per candidate.
+        if include_children:
+            latest = self.latest_revalidations(run_id)
+            for source in result["sources"]:
+                source["last_revalidation"] = latest.get(source["id"])
+            for cand in result["candidate_evidence"]:
+                cand["source_health"] = self.source_health(cand, latest)
+        return result
 
     def list_runs(self, status=None, opportunity_ref=None, limit=100):
         if status is not None and status not in RUN_STATUSES:
@@ -607,3 +638,66 @@ class ResearchStore:
                 if row is not None:
                     out.append(self._source_dict(row))
         return out
+
+    # -- source revalidation (Phase R4b) ------------------------------------- #
+
+    def add_revalidation(self, source_id, outcome, http_status=None,
+                         new_content_hash=None, note=None):
+        """Append one re-check result for a source. The source row itself is
+        never modified — revalidations are history, and acting on them
+        (re-running research, revising claims) stays a human decision."""
+        _validate_id(source_id, SOURCE_RE, "source id")
+        if outcome not in REVALIDATION_OUTCOMES:
+            raise ResearchStoreError("outcome must be unchanged, changed, or unreachable")
+        if http_status is not None and (not isinstance(http_status, int)
+                                        or isinstance(http_status, bool)):
+            raise ResearchStoreError("'http_status' must be an integer")
+        if note is not None:
+            if not isinstance(note, str) or len(note) > ERROR_MAX:
+                raise ResearchStoreError("'note' must be a bounded string")
+            note = note.strip() or None
+        if new_content_hash is not None and (not isinstance(new_content_hash, str)
+                                             or len(new_content_hash) > SHORT_MAX):
+            raise ResearchStoreError("'new_content_hash' must be a bounded string")
+        rev_id = _new_id("RREV")
+        with self._connect() as conn:
+            row = conn.execute("SELECT id FROM research_sources WHERE id=?",
+                               (source_id,)).fetchone()
+            if row is None:
+                raise ResearchStoreError("source not found", status=404)
+            conn.execute(
+                """INSERT INTO source_revalidations
+                   (id, source_id, outcome, http_status, new_content_hash, note, checked_at)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (rev_id, source_id, outcome, http_status, new_content_hash, note, _now()))
+            return dict(conn.execute(
+                "SELECT * FROM source_revalidations WHERE id=?", (rev_id,)).fetchone())
+
+    def latest_revalidations(self, run_id):
+        """{source_id: latest revalidation dict} for one run's sources."""
+        _validate_id(run_id, RUN_RE, "research run id")
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT r.* FROM source_revalidations r
+                    JOIN research_sources s ON s.id = r.source_id
+                    WHERE s.run_id=? ORDER BY r.checked_at, r.id""", (run_id,)).fetchall()
+        latest = {}
+        for row in rows:  # ordered ascending — the last write per source wins
+            latest[row["source_id"]] = dict(row)
+        return latest
+
+    @staticmethod
+    def source_health(candidate, latest_by_source):
+        """Worst latest revalidation outcome among a candidate's cited
+        sources: 'unreachable' > 'changed' > 'ok'. 'ok' also covers
+        never-revalidated sources — absence of a check is not a failure."""
+        worst = "ok"
+        for sid in candidate.get("source_ids") or []:
+            rev = latest_by_source.get(sid)
+            if rev is None:
+                continue
+            if rev["outcome"] == "unreachable":
+                return "unreachable"
+            if rev["outcome"] == "changed":
+                worst = "changed"
+        return worst

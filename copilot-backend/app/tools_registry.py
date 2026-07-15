@@ -457,7 +457,12 @@ def get_external_research(opportunity_ref=None):
     except ResearchStoreError as exc:
         raise ToolError(f"research store unavailable: {exc}")
     out = []
+    # latest revalidation per source, per run (Phase R4b) — computed once
+    revalidations_by_run = {}
     for c in candidates:
+        if c["run_id"] not in revalidations_by_run:
+            revalidations_by_run[c["run_id"]] = store.latest_revalidations(c["run_id"])
+        latest = revalidations_by_run[c["run_id"]]
         sources = []
         for s in store.get_sources(c["source_ids"]):
             # Information age comes from the publication date ONLY: automated
@@ -466,17 +471,23 @@ def get_external_research(opportunity_ref=None):
             # -> honestly "unknown", never a guess.
             fresh = shared_freshness.compute({
                 "publication_date": s.get("published_at")})
+            rev = latest.get(s["id"])
             sources.append({"id": s["id"], "url": s["canonical_url"],
                             "domain": s["domain"], "title": s.get("title"),
                             "publisher": s.get("publisher"),
                             "published_at": s.get("published_at"),
                             "retrieved_at": s.get("retrieved_at"),
-                            "freshness_status": fresh["freshness_status"]})
+                            "freshness_status": fresh["freshness_status"],
+                            # Phase R4b — latest re-check, if one exists
+                            "check_outcome": rev["outcome"] if rev else None,
+                            "last_checked": rev["checked_at"] if rev else None})
         out.append({"candidate_id": c["id"], "claim": c["claim"],
                     "contradicts": c.get("contradicts"),
                     "run_id": c["run_id"], "run_title": c.get("run_title"),
                     "opportunity_ref": c.get("opportunity_ref"),
-                    "reviewed": True, "sources": sources})
+                    "reviewed": True,
+                    "source_health": store.source_health(c, latest),
+                    "sources": sources})
     return {"approved_candidates": out,
             "note": ("External research candidates are human-approved web-research "
                      "claims — clearly external, not authoritative repository evidence.")}

@@ -109,6 +109,19 @@ class Grounding(unittest.TestCase):
         import re
         self.assertIsNone(re.search(r"\bEV-\d{4}-W\d{2}-\d{3}\b", r["answer_markdown"]))
 
+    def test_failed_revalidation_produces_a_deterministic_warning(self):
+        # Phase R4b — a claim whose cited source vanished must be flagged.
+        run, cand = seed_candidate(self.store)
+        full = self.store.get_run(run["id"], include_children=True)
+        self.store.add_revalidation(full["sources"][0]["id"], "unreachable",
+                                    note="HTTP 404")
+        r = self._ask()
+        self.assertTrue(any("failed revalidation" in w for w in r["warnings"]),
+                        r["warnings"])
+        # the claim still grounds (approved status untouched — propose, never
+        # auto-apply), but with the warning attached
+        self.assertIn("600k SMEs", r["answer_markdown"])
+
 
 if __name__ == "__main__":
     unittest.main()

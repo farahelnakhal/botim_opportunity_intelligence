@@ -112,6 +112,46 @@ describe("ResearchPanel (Phase R3)", () => {
   });
 });
 
+describe("source revalidation (Phase R4b)", () => {
+  const realFetch = global.fetch;
+  afterEach(() => { global.fetch = realFetch; });
+
+  it("revalidate posts, shows the summary, outcome badges, and candidate health warning", async () => {
+    const revalidated = {
+      ...runDetail,
+      sources: [{
+        ...runDetail.sources![0],
+        last_revalidation: { id: "RREV-aaaaaaaaaaa1", source_id: "RSRC-aaaaaaaaaaa1",
+          outcome: "unreachable" as const, http_status: null, new_content_hash: null,
+          note: "fetch failed after retry (OSError)", checked_at: "2026-07-16T09:00:00Z" },
+      }],
+      candidate_evidence: [{ ...runDetail.candidate_evidence![0], source_health: "unreachable" as const }],
+      revalidation_summary: { run_id: runDetail.id, checked: 1, skipped: 0,
+        unchanged: 0, changed: 0, unreachable: 1 },
+    };
+    const fetchMock = fetchMockFor({
+      "/revalidate": revalidated,
+      "/research/runs/RRUN-aaaaaaaaaaaa": runDetail,
+      "/research/runs": { runs: [runDetail] },
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    render(<ResearchPanel />);
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByText("UAE SME sizing")).toBeInTheDocument());
+    await user.click(screen.getByText("UAE SME sizing"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Revalidate sources" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Revalidate sources" }));
+
+    await waitFor(() => expect(screen.getByTestId("revalidation-summary"))
+      .toHaveTextContent("Re-checked 1 source: 0 unchanged, 0 changed, 1 unreachable."));
+    expect(screen.getByTestId("revalidation-badge")).toHaveTextContent("unreachable");
+    expect(screen.getByTestId("candidate-source-health"))
+      .toHaveTextContent("failed revalidation (unreachable)");
+    const post = fetchMock.mock.calls.find(([u]) => String(u).includes("/revalidate"));
+    expect(post).toBeTruthy();
+  });
+});
+
 describe("research_candidate citation chip (Phase R3)", () => {
   it("renders a distinct, safe, external-labelled chip with a stale flag from metadata", () => {
     const citation: Citation = {
