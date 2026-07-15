@@ -12,7 +12,7 @@ import { api } from "../lib/api";
 import { useApp } from "../store";
 import { confidenceLabel, humanFactorKey, tagClass, tagLabel } from "../lib/format";
 import { humanize, humanizeRef, nameMap } from "../lib/labels";
-import type { BriefPayload, Citation } from "../types";
+import type { BriefPayload, Citation, UserBriefPayload } from "../types";
 import Icon from "./Icon";
 import Markdown from "./Markdown";
 import { ExternalSourceLink, FreshnessBadge } from "./Provenance";
@@ -53,9 +53,82 @@ function findingToCitation(f: Record<string, unknown>): Citation {
   };
 }
 
+// Phase 6 — the web report for a persisted user opportunity. Honest partial
+// rendering: sections without data say "Not yet defined"; nothing is scored
+// or fabricated; monitoring state comes from the stored configuration.
+function UserReport({ brief }: { brief: UserBriefPayload }) {
+  const text = (v: string | null) =>
+    v ? <p>{v}</p> : <EmptyNote text="Not yet defined." />;
+  const list = (items: string[], empty: string) =>
+    items.length === 0 ? <EmptyNote text={empty} /> : (
+      <ul className="evidence-list">
+        {items.map((x, i) => <li key={i}><span className="dot" /><span>{x}</span></li>)}
+      </ul>
+    );
+  const mon = brief.monitoring;
+  const monLabel = mon.status === "not_configured" ? "Monitoring is not configured for this opportunity."
+    : mon.status === "never_run" ? "Configured — awaiting monitoring run (no runner is connected yet)."
+    : mon.status === "paused" ? "Monitoring configuration is paused."
+    : mon.status === "error" ? `Monitoring error: ${mon.last_error ?? "unknown"}`
+    : "Monitoring is active.";
+  return (
+    <section className="view" id="view-report">
+      <div className="panel-wrap report-page">
+        <div className="panel-title-row" style={{ alignItems: "flex-start" }}>
+          <div>
+            <h1 className="panel-title" style={{ marginBottom: 6 }} data-testid="report-title">
+              {brief.title}
+            </h1>
+            <div className="panel-sub">
+              {brief.opportunity_id} · generated {brief.generated_at} · v{brief.version}
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+              <span className="tag neutral">{brief.classification_label}</span>
+              {brief.is_archived && <span className="tag reject">Archived</span>}
+              <span className="tag neutral">Your opportunity</span>
+            </div>
+          </div>
+        </div>
+        <div className="banner-note"><Icon name="alert" /><span>{brief.decision_banner}</span></div>
+
+        <Section label="Product definition">{text(brief.product_definition)}</Section>
+        <Section label="Problem statement">{text(brief.problem_statement)}</Section>
+        <Section label="Target segment">{text(brief.target_segment)}</Section>
+        <Section label="Customer description">{text(brief.customer_description)}</Section>
+        <Section label="Value proposition">{text(brief.value_proposition)}</Section>
+        <Section label={`Assumptions (${brief.assumptions.length})`}>
+          {list(brief.assumptions, "No assumptions recorded yet.")}
+        </Section>
+        <Section label="Risks">{list(brief.risks, "No risks recorded yet.")}</Section>
+        <Section label="Unknowns">{list(brief.unknowns, "No unknowns recorded yet.")}</Section>
+        <Section label="Recommended next actions">
+          {list(brief.next_actions, "No next actions recorded yet.")}
+        </Section>
+        <Section label="Monitoring">
+          <p data-testid="user-report-monitoring">{monLabel}</p>
+          {mon.status !== "not_configured" && (
+            <p className="source-tag" style={{ display: "block" }}>
+              Cadence (intended): {mon.cadence} · last run {mon.last_run_at ?? "unavailable — never run"}
+            </p>
+          )}
+        </Section>
+        <Section label="Evidence & scoring">
+          <EmptyNote text="No engine score and no evidence citations exist for a user draft — validation has not happened yet, and nothing is fabricated." />
+        </Section>
+        <Section label="Provenance">
+          <p className="source-tag" style={{ display: "block" }}>
+            Created {brief.created_at}
+            {brief.created_from_analysis ? " from a grounded copilot analysis" : ""} · last updated {brief.updated_at}
+          </p>
+        </Section>
+      </div>
+    </section>
+  );
+}
+
 export default function Report() {
   const { reportOppId, overview, openDetail, goReports } = useApp();
-  const [brief, setBrief] = useState<BriefPayload | null | undefined>(undefined); // undefined = loading
+  const [brief, setBrief] = useState<BriefPayload | UserBriefPayload | null | undefined>(undefined); // undefined = loading
   const names = nameMap([...(overview?.opportunities ?? []), ...(overview?.archived ?? [])]);
 
   useEffect(() => {
@@ -103,6 +176,10 @@ export default function Report() {
         </div>
       </section>
     );
+  }
+
+  if (brief.record_type === "user_opportunity") {
+    return <UserReport brief={brief} />;
   }
 
   const s = brief.score_summary;

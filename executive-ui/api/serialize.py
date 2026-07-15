@@ -463,6 +463,52 @@ def brief_payload(opp_id, root=None):
     }
 
 
+# --------------------------------------------------------------------------- #
+# Web brief for a USER-created opportunity (Phase 6)
+# --------------------------------------------------------------------------- #
+def user_brief_payload(store, opp_id):
+    """The web-report read model for a persisted user opportunity draft.
+
+    Honest by construction: a draft has no engine score, no evidence
+    citations, and no classification — missing sections are reported as not
+    yet defined, never fabricated. Raises user_store.StoreError (404/400)
+    for unknown/invalid ids."""
+    import datetime
+    opp = store.get(opp_id)
+    monitoring = store.monitoring_get(opp_id)
+    return {
+        "record_type": "user_opportunity",
+        "opportunity_id": opp["id"],
+        "title": opp["title"],
+        "generated_at": datetime.datetime.now(datetime.timezone.utc)
+                        .strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "status": opp["status"],
+        "is_archived": opp["status"] == "archived",
+        "classification": "unscored",
+        "classification_label": {
+            "draft": "Draft — unvalidated, not scored",
+            "saved": "Saved opportunity — unvalidated, not scored",
+            "archived": "Archived",
+        }[opp["status"]],
+        "product_definition": opp["product_definition"],
+        "problem_statement": opp["problem_statement"],
+        "target_segment": opp["target_segment"],
+        "customer_description": opp["customer_description"],
+        "value_proposition": opp["value_proposition"],
+        "assumptions": opp["assumptions"],
+        "risks": opp["risks"],
+        "unknowns": opp["unknowns"],
+        "next_actions": opp["next_actions"],
+        "monitoring": monitoring,
+        "source_conversation_id": opp["source_conversation_id"],
+        "created_from_analysis": opp["created_from_analysis"],
+        "created_at": opp["created_at"],
+        "updated_at": opp["updated_at"],
+        "version": opp["version"],
+        "decision_banner": DECISION_BANNER,
+    }
+
+
 def monitoring_summary_payload(event_id, root=None):
     """{"event_id", "markdown", "truncated"} for a committed summary, None if
     absent. Raises ValueError for an invalid id (the API returns 400)."""

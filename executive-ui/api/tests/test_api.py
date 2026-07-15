@@ -3,11 +3,21 @@ fabricates, recomputes, or asserts a build decision. Run against the live repo.
 """
 
 import json
+import os
 import sys
 import threading
 import unittest
 from pathlib import Path
 from urllib.request import urlopen
+
+# Phase 5 — these tests exercise the committed demo corpus over HTTP, so they
+# pin demo mode explicitly (the default is the clean normal mode; see
+# executive-ui/api/modes.py and tests/test_modes.py for the mode behavior).
+os.environ.setdefault("BOTIM_APP_MODE", "demo")
+# and isolate the runtime user store in a temp path (never the repo tree)
+import tempfile
+os.environ.setdefault("USER_OPPORTUNITIES_DB_PATH",
+                      os.path.join(tempfile.mkdtemp(), "user-opportunities.db"))
 
 UI = Path(__file__).resolve().parents[2]        # executive-ui/
 API_PKG_PARENT = UI                              # so `import api` works
@@ -187,11 +197,17 @@ class TestServerReadOnly(unittest.TestCase):
 
     def test_no_kb_write_methods(self):
         # POST exists only for compute endpoints (chat/analyze with history); it
-        # never writes to the knowledge base. No PUT at all. DELETE (Phase 2)
-        # exists ONLY to proxy copilot-backend conversation deletion — its own
-        # local SQLite convenience store, never the knowledge base — and is
-        # refused everywhere else (see test_delete_only_proxies_copilot below).
-        self.assertFalse(hasattr(server.Handler, "do_PUT"))
+        # never writes to the knowledge base. Phase 6 adds PUT/PATCH/DELETE, but
+        # ONLY for the /user-opportunities runtime store (a separate SQLite DB,
+        # never the knowledge base): any other path is refused.
+        import urllib.error
+        import urllib.request
+        for method in ("PUT", "PATCH"):
+            req = urllib.request.Request(f"http://127.0.0.1:{self.port}/api/overview",
+                                         method=method)
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                urllib.request.urlopen(req)
+            self.assertEqual(cm.exception.code, 404, method)
         self.assertTrue(hasattr(server.Handler, "do_DELETE"))
 
     def test_delete_only_proxies_copilot(self):

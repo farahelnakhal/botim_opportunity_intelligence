@@ -1,8 +1,11 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { api } from "./lib/api";
 import { copilotApi } from "./lib/copilotApi";
+import { userOpportunitiesApi } from "./lib/userOpportunities";
 import { fromCopilotResult } from "./components/AssistantAnswer";
-import type { ChatBlock, Citation, CopilotChatResult, Opportunity, OverviewPayload } from "./types";
+import type {
+  AppMode, ChatBlock, Citation, CopilotChatResult, Opportunity, OverviewPayload, UserOpportunity,
+} from "./types";
 
 export type View =
   | "home" | "updates" | "project" | "monitoring" | "knowledge" | "reports" | "settings" | "report";
@@ -10,10 +13,35 @@ export type View =
 // Phase 4 — the web-report route. The report view is the only URL-addressed
 // view (/report/OPP-nnn) so a brief can be refreshed, bookmarked, and opened
 // directly; everything else stays state-based exactly as before.
-const REPORT_PATH_RE = /^\/report\/(OPP-\d{3})$/;
+const REPORT_PATH_RE = /^\/report\/(OPP-\d{3}|UOPP-[0-9a-f]{12})$/;
 export function matchReportPath(pathname: string): string | null {
   const m = REPORT_PATH_RE.exec(pathname);
   return m ? m[1] : null;
+}
+
+// Phase 6 — a persisted user opportunity rendered through the existing
+// Opportunity-shaped workspace UI. Nothing is fabricated: no score, no
+// classification, no evidence — the honest sentinel values the UI already
+// renders for absent data.
+export function userOppAsProject(u: UserOpportunity): Opportunity {
+  return {
+    id: u.id, name: u.title,
+    raw_score: null, raw_max: 85, composite: null,
+    classification: "unscored",
+    classification_label: u.status === "draft" ? "Draft — unvalidated" : "Saved — unvalidated",
+    confidence: "—", assumption_count: u.assumptions.length,
+    factors: [], critical_flags: [],
+    segment: u.target_segment ?? "—", jtbd: "—",
+    hypothesis: u.value_proposition ?? u.product_definition ?? "—",
+    strongest_evidence: [], contradictory_evidence: "—", rejection_conditions: "—",
+    validation_plan: "—", score_history: [],
+    latest_change: `Saved ${u.updated_at}`, latest_alert: "—",
+    next_action: u.next_actions[0] ?? "—",
+    profile_path: "(persisted user opportunity)",
+    is_archived: u.status === "archived",
+    impact_history: [], brief_envelope: null,
+    source: "user",
+  };
 }
 export type Tab =
   | "chat" | "knowledge" | "interviews" | "reports" | "monitoring" | "files" | "sources" | "settings";
@@ -56,8 +84,13 @@ export interface AppState {
   loading: boolean;
   error: string | null;
   overview: OverviewPayload | null;
-  projects: Opportunity[]; // committed KB opportunities
-  generated: Opportunity[]; // on-demand AI analyses created this session
+  appMode: AppMode | null; // backend-reported effective mode (null until known)
+  projects: Opportunity[]; // committed corpus (demo mode only — labelled)
+  generated: Opportunity[]; // UNSAVED analyses (browser-local until saved)
+  userOpps: UserOpportunity[]; // persisted user opportunities (Phase 6)
+  userProjects: Opportunity[]; // userOpps in workspace shape
+  refreshUserOpps: () => Promise<void>;
+  saveOpportunity: (stubId: string) => Promise<UserOpportunity | null>;
 
   view: View;
   activeProjectId: string | null;
@@ -102,7 +135,24 @@ const nextId = () => `m${++seq}`;
 const LS = {
   conv: "botim.conversations", gen: "botim.generated", theme: "botim.theme",
   copilotConv: "botim.copilotConversationIds",
+  migrationV1: "botim.migration.v1",
 };
+
+// Phase 6 — one-time localStorage migration (documented version reset).
+// Pre-Phase-6 "generated" entries were browser-only scaffolds/stubs with
+// fabricated shape (no persisted fields, no lifecycle) — guessing which of
+// them were genuine user products would risk persisting junk, so they are
+// DISCARDED once, and real persistence starts clean. Conversations and
+// copilot conversation-id mappings are preserved untouched.
+function migrateLocalStorageOnce() {
+  try {
+    if (localStorage.getItem(LS.migrationV1)) return;
+    localStorage.removeItem(LS.gen);
+    localStorage.setItem(LS.migrationV1, "generated-stubs-reset");
+  } catch {
+    /* storage unavailable — nothing to migrate */
+  }
+}
 function load<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
@@ -120,6 +170,7 @@ function save(key: string, value: unknown) {
 }
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
+  migrateLocalStorageOnce();
   const [theme, setTheme] = useState<"light" | "dark">(() => load<"light" | "dark">(LS.theme, "light"));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -139,6 +190,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [drawerOppId, setDrawerOppId] = useState<string | null>(null);
   const [detailTarget, setDetailTarget] = useState<DetailTarget | null>(null);
   const [generated, setGenerated] = useState<Opportunity[]>(() => load<Opportunity[]>(LS.gen, []));
+  // Phase 6 — persisted user opportunities from the backend store
+  const [userOpps, setUserOpps] = useState<UserOpportunity[]>([]);
   // Phase 2I — the copilot conversation id backing each chat (project id ->
   // conv_… ). A brand-new chat has none yet; the first send() creates one.
   // Switching projects never reuses another project's conversation id.
@@ -174,10 +227,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // Phase 6 — load persisted user opportunities alongside the overview
+  const refreshUserOpps = useCallback(async () => {
+    try {
+      setUserOpps(await userOpportunitiesApi.list());
+    } catch {
+      /* API unreachable — the sidebar shows what it last had; never seeded */
+    }
+  }, []);
+  useEffect(() => {
+    void refreshUserOpps();
+  }, [refreshUserOpps]);
+
   const projects = useMemo(
     () => (overview ? [...overview.opportunities, ...overview.archived] : []),
     [overview],
   );
+  const userProjects = useMemo(() => userOpps.map(userOppAsProject), [userOpps]);
+  const appMode: AppMode | null = overview?.meta.app_mode ?? null;
 
   const toggleTheme = useCallback(() => setTheme((t) => (t === "dark" ? "light" : "dark")), []);
   const goHome = useCallback(() => {
@@ -307,7 +374,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // chat) carries no such context, letting the first message start fresh.
       const isCommittedOpportunity = !!overview
         && (overview.opportunities.some((o) => o.id === pid) || overview.archived.some((o) => o.id === pid));
-      const context = isCommittedOpportunity ? { opportunity_id: pid } : undefined;
+      // Phase 6 — a saved user opportunity is passed as bounded context so
+      // the copilot can ground on its USER-PROVIDED fields (clearly labelled
+      // by the backend; never written back without an explicit save).
+      const userOpp = userOpps.find((u) => u.id === pid);
+      const context = isCommittedOpportunity
+        ? { opportunity_id: pid }
+        : userOpp
+          ? { user_opportunity: {
+              id: userOpp.id, title: userOpp.title,
+              product_definition: userOpp.product_definition ?? undefined,
+              problem_statement: userOpp.problem_statement ?? undefined,
+              target_segment: userOpp.target_segment ?? undefined,
+              customer_description: userOpp.customer_description ?? undefined,
+              value_proposition: userOpp.value_proposition ?? undefined,
+              assumptions: userOpp.assumptions, risks: userOpp.risks,
+              unknowns: userOpp.unknowns, next_actions: userOpp.next_actions,
+            } }
+          : undefined;
       const result = await copilotApi.chat(message, existingConvId, context);
       // Phase 3 — store the (possibly new) conversation id whenever we didn't
       // have one yet, OR the stale one just got recovered — in every other
@@ -318,7 +402,44 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
       await deliverCopilot(pid, message, result);
     },
-    [activeProjectId, overview, copilotConversationIds, deliverCopilot],
+    [activeProjectId, overview, userOpps, copilotConversationIds, deliverCopilot],
+  );
+
+  // Phase 6 — persist an unsaved analysis stub as a real backend record.
+  // The stub is replaced by the persisted UOPP record; the conversation and
+  // its copilot conversation-id mapping move over so context is preserved.
+  const saveOpportunity = useCallback(
+    async (stubId: string): Promise<UserOpportunity | null> => {
+      const stub = generated.find((g) => g.id === stubId);
+      if (!stub) return null;
+      const convId = copilotConversationIds[stubId];
+      let created: UserOpportunity;
+      try {
+        created = await userOpportunitiesApi.create({
+          title: stub.name,
+          status: "saved",
+          created_from_analysis: true,
+          ...(convId && /^conv_[0-9a-f]{12}$/.test(convId)
+            ? { source_conversation_id: convId } : {}),
+        });
+      } catch {
+        return null; // caller shows an honest failure state; stub is kept
+      }
+      setUserOpps((u) => [created, ...u]);
+      setGenerated((g) => g.filter((x) => x.id !== stubId));
+      const remap = <T,>(m: Record<string, T>) => {
+        if (!(stubId in m)) return m;
+        const next = { ...m };
+        next[created.id] = next[stubId];
+        delete next[stubId];
+        return next;
+      };
+      setConversations(remap);
+      setCopilotConversationIds(remap);
+      setActiveProjectId((cur) => (cur === stubId ? created.id : cur));
+      return created;
+    },
+    [generated, copilotConversationIds],
   );
 
   const analyzeNew = useCallback(
@@ -357,6 +478,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         profile_path: "(generated — not committed to the knowledge base)",
         is_archived: false, impact_history: [], brief_envelope: null,
         generated: true, engine: "copilot",
+        // Phase 6 — an UNSAVED analysis state, not a fake committed
+        // opportunity; persisted only through the explicit "Save
+        // opportunity" action (saveOpportunity above).
+        unsaved: true,
       };
       setGenerated((g) => (g.some((x) => x.id === pid) ? g : [stub, ...g]));
       if (!result.unavailable && result.conversationId) {
@@ -392,7 +517,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const value: AppState = {
     theme, toggleTheme,
-    loading, error, overview, projects, generated,
+    loading, error, overview, appMode, projects, generated,
+    userOpps, userProjects, refreshUserOpps, saveOpportunity,
     view, activeProjectId, activeTab, sidebarOpen, reportOppId, openReport,
     conversations, drawerOppId, detailTarget,
     goHome, goUpdates, goMonitoring, goKnowledge, goReports, goSettings,

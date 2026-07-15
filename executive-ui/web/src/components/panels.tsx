@@ -332,7 +332,44 @@ export function MonitoringPanel() {
         </div>
       </div>
       {mon.summary_state && <MonitoringSummaryCard state={mon.summary_state} />}
-      {mon.events.length === 0 && <EmptyPanel icon="bell" title="No monitoring events" note="The monitoring engine has produced no signals for this period." />}
+
+      {/* Phase 7 — user monitoring configurations, clearly distinguished
+          from the internal-KB/demo event stream below */}
+      {(mon.user_monitoring?.configs.length ?? 0) > 0 && (
+        <div data-testid="user-monitoring-section">
+          <div className="section-label">Your monitoring configurations</div>
+          <div className="list-card" style={{ marginBottom: 18 }}>
+            {mon.user_monitoring!.configs.map((c) => {
+              const label = c.status === "never_run" ? "Configured — awaiting monitoring run"
+                : c.status === "paused" ? "Paused"
+                : c.status === "error" ? `Error: ${c.last_error ?? "unknown"}`
+                : c.status === "active" ? "Active" : c.status;
+              return (
+                <div className="list-row" key={c.opportunity_id}>
+                  <div className="list-row-icon"><Icon name="bell" size={16} /></div>
+                  <div className="list-row-main">
+                    <div className="list-row-title">{c.opportunity_title ?? c.opportunity_id}</div>
+                    <div className="list-row-sub">
+                      {label} · cadence {c.cadence ?? "manual"} · last run {c.last_run_at ?? "unavailable"}
+                    </div>
+                  </div>
+                  <div className="list-row-meta">
+                    <span className={`pill-status ${c.enabled ? "designed" : "processing"}`}>
+                      {c.enabled ? "configured" : "paused"}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="source-tag" style={{ display: "block", marginBottom: 16 }}>
+            {mon.user_monitoring!.note}
+          </p>
+        </div>
+      )}
+
+      {mon.events.length === 0 && <EmptyPanel icon="bell" title="No monitoring events" note="No monitoring events exist yet — none are fabricated." />}
+      {mon.events.length > 0 && <div className="section-label">Knowledge-base &amp; demo monitoring events</div>}
       {groups.map((g) => {
         const items = byTier(g.tier);
         if (!items.length) return null;
@@ -462,10 +499,16 @@ const MARKETS: Record<string, { flag: string; name: string; regulator: string; c
 };
 
 export function SettingsPanel({ opp }: { opp?: Opportunity }) {
+  const { appMode } = useApp();
+  // Phase 5 — email ingestion/recipients are demo-only theatre: in any
+  // non-demo mode no fake addresses are invented and the sections below are
+  // replaced by an honest "not available" note.
+  const demoEmailFeatures = appMode === "demo";
   const [country, setCountry] = useState("AE");
   const [notify, setNotify] = useState(true);
   const [autoProcess, setAutoProcess] = useState(true);
-  const [recipients, setRecipients] = useState<string[]>(["strategy@botim.ai", "research@botim.ai"]);
+  const [recipients, setRecipients] = useState<string[]>(
+    demoEmailFeatures ? ["strategy@botim.ai", "research@botim.ai"] : []);
   const [newEmail, setNewEmail] = useState("");
   const m = MARKETS[country];
   const inbox = opp
@@ -515,53 +558,65 @@ export function SettingsPanel({ opp }: { opp?: Opportunity }) {
         <div className="field-row" style={{ marginBottom: 0 }}><div className="field-label">Currency</div><input className="field-input" value={m.currency} readOnly /></div>
       </div>
 
-      <div className="settings-section">
-        <div className="settings-section-title">Email ingestion</div>
-        <div className="field-row">
-          <div className="field-label">Incoming email address</div>
-          <div className="email-box">
-            <span>{inbox}</span>
-            <ActionButton className="btn btn-sm" label="Copy" doneLabel="Copied" onAct={() => copyText(inbox)} />
-          </div>
-          <div className="toggle-row-sub">Forward reports or evidence here — attachments are summarised and filed automatically.</div>
-        </div>
-        <div className="toggle-row">
-          <div>
-            <div className="toggle-row-text">Auto-process incoming attachments</div>
-            <div className="toggle-row-sub">Extract, summarise, and file on arrival</div>
-          </div>
-          <button className={`switch${autoProcess ? " on" : ""}`} onClick={() => setAutoProcess((v) => !v)} />
-        </div>
-      </div>
-
-      <div className="settings-section">
-        <div className="settings-section-title">Notification recipients</div>
-        <div className="toggle-row" style={{ marginBottom: 12 }}>
-          <div>
-            <div className="toggle-row-text">Email members on critical alerts</div>
-            <div className="toggle-row-sub">Send the people below an email when a critical signal fires</div>
-          </div>
-          <button className={`switch${notify ? " on" : ""}`} onClick={() => setNotify((v) => !v)} />
-        </div>
-        <div className="list-card" style={{ marginBottom: 12 }}>
-          {recipients.map((r) => (
-            <div className="list-row" key={r}>
-              <div className="list-row-icon"><Icon name="users" size={16} /></div>
-              <div className="list-row-main"><div className="list-row-title">{r}</div></div>
-              <button className="btn btn-sm" onClick={() => setRecipients((list) => list.filter((x) => x !== r))}>Remove</button>
+      {demoEmailFeatures ? (
+        <>
+          <div className="settings-section">
+            <div className="settings-section-title">Email ingestion <span className="chip">demo</span></div>
+            <div className="field-row">
+              <div className="field-label">Incoming email address</div>
+              <div className="email-box">
+                <span>{inbox}</span>
+                <ActionButton className="btn btn-sm" label="Copy" doneLabel="Copied" onAct={() => copyText(inbox)} />
+              </div>
+              <div className="toggle-row-sub">Forward reports or evidence here — attachments are summarised and filed automatically.</div>
             </div>
-          ))}
-          {recipients.length === 0 && <div className="list-row"><div className="list-row-sub">No recipients yet.</div></div>}
+            <div className="toggle-row">
+              <div>
+                <div className="toggle-row-text">Auto-process incoming attachments</div>
+                <div className="toggle-row-sub">Extract, summarise, and file on arrival</div>
+              </div>
+              <button className={`switch${autoProcess ? " on" : ""}`} onClick={() => setAutoProcess((v) => !v)} />
+            </div>
+          </div>
+
+          <div className="settings-section">
+            <div className="settings-section-title">Notification recipients <span className="chip">demo</span></div>
+            <div className="toggle-row" style={{ marginBottom: 12 }}>
+              <div>
+                <div className="toggle-row-text">Email members on critical alerts</div>
+                <div className="toggle-row-sub">Send the people below an email when a critical signal fires</div>
+              </div>
+              <button className={`switch${notify ? " on" : ""}`} onClick={() => setNotify((v) => !v)} />
+            </div>
+            <div className="list-card" style={{ marginBottom: 12 }}>
+              {recipients.map((r) => (
+                <div className="list-row" key={r}>
+                  <div className="list-row-icon"><Icon name="users" size={16} /></div>
+                  <div className="list-row-main"><div className="list-row-title">{r}</div></div>
+                  <button className="btn btn-sm" onClick={() => setRecipients((list) => list.filter((x) => x !== r))}>Remove</button>
+                </div>
+              ))}
+              {recipients.length === 0 && <div className="list-row"><div className="list-row-sub">No recipients yet.</div></div>}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                className="field-input" style={{ flex: 1 }} placeholder="name@company.com" value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") addRecipient(); }}
+              />
+              <button className="btn btn-primary" onClick={addRecipient}>Add</button>
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="settings-section" data-testid="email-unavailable">
+          <div className="settings-section-title">Email &amp; notifications</div>
+          <div className="toggle-row-sub" style={{ lineHeight: 1.5 }}>
+            Email ingestion and alert recipients are not available yet — no email is sent or
+            received by this workspace, so no addresses are configured here.
+          </div>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <input
-            className="field-input" style={{ flex: 1 }} placeholder="name@company.com" value={newEmail}
-            onChange={(e) => setNewEmail(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") addRecipient(); }}
-          />
-          <button className="btn btn-primary" onClick={addRecipient}>Add</button>
-        </div>
-      </div>
+      )}
 
       <div className="settings-section">
         <div className="settings-section-title">Governance</div>

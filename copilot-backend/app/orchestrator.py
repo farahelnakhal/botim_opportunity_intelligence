@@ -15,6 +15,63 @@ from .tools_registry import REGISTRY, ToolError, call_tool, tool_specs
 from .wordguard import check_wording
 
 
+import re as _re
+
+_UOPP_RE = _re.compile(r"^UOPP-[0-9a-f]{12}$")
+_UO_TEXT_FIELDS = ("title", "product_definition", "problem_statement",
+                   "target_segment", "customer_description", "value_proposition")
+_UO_LIST_FIELDS = ("assumptions", "risks", "unknowns", "next_actions")
+_UO_TEXT_MAX = 2000
+_UO_LIST_MAX = 20
+
+
+def _sanitize_user_opportunity(raw):
+    """Bounded, allowlisted copy of a user-opportunity context object
+    (Phase 6). Anything malformed is dropped entirely — never partially
+    trusted. These are USER-PROVIDED fields, kept clearly separate from
+    repository evidence in the grounding below."""
+    if not isinstance(raw, dict):
+        return None
+    uid = raw.get("id")
+    if not isinstance(uid, str) or not _UOPP_RE.match(uid):
+        return None
+    out = {"id": uid}
+    for key in _UO_TEXT_FIELDS:
+        value = raw.get(key)
+        if isinstance(value, str) and value.strip():
+            out[key] = value.strip()[:_UO_TEXT_MAX]
+    for key in _UO_LIST_FIELDS:
+        value = raw.get(key)
+        if isinstance(value, list):
+            items = [str(x).strip()[:500] for x in value[:_UO_LIST_MAX]
+                     if isinstance(x, str) and x.strip()]
+            if items:
+                out[key] = items
+    return out
+
+
+def _user_opportunity_facts(uo):
+    """Deterministic grounding lines for a user opportunity draft — labelled
+    user-provided so the model never presents them as repository evidence."""
+    if not uo:
+        return []
+    lines = [f"USER-PROVIDED OPPORTUNITY DRAFT {uo['id']} (fields entered by the user; "
+             "unvalidated hypotheses — NOT repository evidence, NOT scored):"]
+    labels = {"title": "Title", "product_definition": "Product definition",
+              "problem_statement": "Problem statement", "target_segment": "Target segment",
+              "customer_description": "Customer description",
+              "value_proposition": "Value proposition", "assumptions": "Stated assumptions",
+              "risks": "Stated risks", "unknowns": "Stated unknowns",
+              "next_actions": "Planned next actions"}
+    for key in _UO_TEXT_FIELDS:
+        if uo.get(key):
+            lines.append(f"- {labels[key]}: {uo[key]}")
+    for key in _UO_LIST_FIELDS:
+        if uo.get(key):
+            lines.append(f"- {labels[key]}: " + "; ".join(uo[key]))
+    return lines
+
+
 def _resolve_context(message_ids, request_context, stored_context):
     """Explicit IDs in the newest message always win over remembered context."""
     ctx = dict(stored_context or {})
@@ -22,6 +79,10 @@ def _resolve_context(message_ids, request_context, stored_context):
         for key in ("opportunity_id", "segment_id"):
             if request_context.get(key):
                 ctx[key] = request_context[key]
+        # Phase 6 — a saved user opportunity passed as conversation context
+        uo = _sanitize_user_opportunity(request_context.get("user_opportunity"))
+        if uo:
+            ctx["user_opportunity"] = uo
     if message_ids["opportunities"]:
         ctx["opportunity_id"] = message_ids["opportunities"][0]
     if message_ids["segments"]:
@@ -85,7 +146,8 @@ class Orchestrator:
                                   {"level": "high", "basis": "scope redirect — no data accessed"},
                                   [], [], [], [], [], trace, None)
 
-        has_selected_context = bool(ctx.get("opportunity_id") or ctx.get("segment_id"))
+        has_selected_context = bool(ctx.get("opportunity_id") or ctx.get("segment_id")
+                                    or ctx.get("user_opportunity"))
         intent = intents.classify(message, ids, is_new_conversation=is_new_conversation,
                                   has_selected_context=has_selected_context)
 
@@ -115,9 +177,15 @@ class Orchestrator:
                 (not_found if exc.not_found else trace).append(
                     str(exc) if exc.not_found else f"{name} rejected: input validation")
 
+        # Phase 6 — a saved user opportunity in context contributes clearly
+        # labelled USER-PROVIDED facts, always kept apart from repository
+        # evidence and never written back to the persisted record from here.
+        user_facts = _user_opportunity_facts(ctx.get("user_opportunity"))
+
         # bounded model loop: the model may request extra allowlisted tools
         pack = grounding.build(intent, executed, ids)
-        facts_block = "\n".join(pack.facts) if pack.facts else "(no grounded facts found)"
+        facts_block = "\n".join(user_facts + pack.facts) \
+            if (user_facts or pack.facts) else "(no grounded facts found)"
         messages = self._history_messages(conversation_id)
         messages.append({"role": "user", "content":
                          f"Question: {message}\n\nGROUNDING FACTS:\n{facts_block}"})
@@ -151,7 +219,8 @@ class Orchestrator:
                         not_found.append(str(exc))
                     tool_msgs.append(f"[{call['name']}: {exc}]")
             pack = grounding.build(intent, executed, ids)
-            facts_block = "\n".join(pack.facts) if pack.facts else "(no grounded facts found)"
+            facts_block = "\n".join(user_facts + pack.facts) \
+                if (user_facts or pack.facts) else "(no grounded facts found)"
             messages.append({"role": "user", "content":
                              "Tool results incorporated.\n\nGROUNDING FACTS:\n" + facts_block})
         if prose is None:
@@ -159,6 +228,10 @@ class Orchestrator:
 
         for nf in not_found:
             pack.unknowns.append(f"not found in the knowledge base: {nf}")
+        if user_facts:
+            pack.assumptions.insert(0, (
+                f"{ctx['user_opportunity']['id']}: draft fields are user-provided "
+                "hypotheses, not validated repository evidence"))
         if not executed and not not_found and intent == "unknown_or_unsupported":
             prose = security.OUT_OF_SCOPE
 

@@ -16,6 +16,22 @@ const CHAT_TIMEOUT_MS = 45000;
 export interface CopilotContext {
   opportunity_id?: string;
   segment_id?: string;
+  // Phase 6 — a persisted user opportunity as bounded conversation context.
+  // The backend sanitizes/labels these as USER-PROVIDED fields, kept apart
+  // from repository evidence; it never writes them back.
+  user_opportunity?: {
+    id: string;
+    title?: string;
+    product_definition?: string;
+    problem_statement?: string;
+    target_segment?: string;
+    customer_description?: string;
+    value_proposition?: string;
+    assumptions?: string[];
+    risks?: string[];
+    unknowns?: string[];
+    next_actions?: string[];
+  };
 }
 
 function unavailableResult(conversationId: string, reason: string): CopilotChatResult {

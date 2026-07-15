@@ -22,7 +22,7 @@ function greeting(): string {
 }
 
 export default function Home() {
-  const { projects, openProject, analyzeNew } = useApp();
+  const { projects, userProjects, appMode, openProject, analyzeNew } = useApp();
   const [val, setVal] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   // Phase 3 — a message that ISN'T a genuine new-product idea (a greeting, a
@@ -110,9 +110,28 @@ export default function Home() {
           </div>
         )}
 
+        {userProjects.length > 0 && (
+          <>
+            <div className="home-recent-label">Your opportunities</div>
+            <div className="recent-grid">
+              {userProjects.map((p) => (
+                <button className="recent-card" key={p.id} onClick={() => openProject(p.id)}>
+                  <div className="recent-card-top"><span className="status-dot review" /></div>
+                  <div className="recent-card-title">{p.name}</div>
+                  <div className="recent-card-meta">{p.classification_label}</div>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* Phase 5 — the committed corpus renders only in demo/test mode,
+            clearly labelled; normal mode gets a clean invite instead. */}
         {projects.length > 0 && (
           <>
-            <div className="home-recent-label">Opportunities</div>
+            <div className="home-recent-label">
+              Demo opportunities <span className="chip">demo data</span>
+            </div>
             <div className="recent-grid">
               {projects.map((p) => {
                 const dot = p.classification === "reject" ? "paused"
@@ -127,6 +146,15 @@ export default function Home() {
               })}
             </div>
           </>
+        )}
+
+        {appMode === "normal" && projects.length === 0 && userProjects.length === 0 && (
+          <div className="empty-state" style={{ paddingTop: 28 }} data-testid="home-empty-invite">
+            <Icon name="star" className="icon" />
+            <div className="empty-state-title">No opportunities yet</div>
+            Describe your first product idea above — the grounded analysis can then be saved
+            as your first opportunity.
+          </div>
         )}
       </div>
     </section>

@@ -25,7 +25,7 @@
 |---|---|---|---|---|
 | `conversation_id` | optional | yes | string | null/absent ⇒ new conversation |
 | `message` | required | no | string | 1..`COPILOT_MAX_MESSAGE_CHARS` (default 4000) |
-| `context` | optional | yes | object | optional hints: `opportunity_id`, `segment_id` (validated IDs only) |
+| `context` | optional | yes | object | optional hints: `opportunity_id`, `segment_id` (validated IDs only); Phase 6 additive: `user_opportunity` — a persisted user-opportunity draft (`shared/contracts/user-opportunities.schema.md`), sanitized/bounded server-side and grounded as clearly labelled USER-PROVIDED fields, never repository evidence, never written back |
 
 ```json
 { "conversation_id": null,

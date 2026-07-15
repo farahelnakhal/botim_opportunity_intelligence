@@ -3,6 +3,7 @@ safety), the web-brief endpoint, and evidence provenance over HTTP. Read-only
 against the live repo."""
 
 import json
+import os
 import sys
 import threading
 import unittest
@@ -10,6 +11,14 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from urllib.request import urlopen
+
+# Phase 5 — this suite verifies the committed demo corpus over HTTP; pin demo
+# mode explicitly (normal mode hides the demo portfolio — see test_modes.py).
+os.environ.setdefault("BOTIM_APP_MODE", "demo")
+# and isolate the runtime user store in a temp path (never the repo tree)
+import tempfile
+os.environ.setdefault("USER_OPPORTUNITIES_DB_PATH",
+                      os.path.join(tempfile.mkdtemp(), "user-opportunities.db"))
 
 UI = Path(__file__).resolve().parents[2]
 REPO = UI.parents[0]

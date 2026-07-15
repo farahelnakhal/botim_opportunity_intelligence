@@ -89,6 +89,98 @@ export interface Opportunity {
   brief_envelope: Record<string, any> | null;
   generated?: boolean; // true = an on-demand AI analysis, not a committed KB opportunity
   engine?: "claude" | "scaffold" | "copilot";
+  // Phase 5/6 — explicit source type; never merged indistinguishably:
+  // "user" = persisted user opportunity, "demo" = committed demo corpus,
+  // "committed_reference" = committed reference record, absent = legacy.
+  source?: "user" | "demo" | "committed_reference";
+  // Phase 6 — true for a fresh analysis that has NOT been saved to the
+  // backend yet (browser-local only until "Save opportunity").
+  unsaved?: boolean;
+}
+
+// --- Phase 6: persisted user-created opportunity drafts -------------------- //
+export type UserOpportunityStatus = "draft" | "saved" | "archived";
+
+export interface UserOpportunity {
+  id: string; // UOPP-…
+  title: string;
+  status: UserOpportunityStatus;
+  product_definition: string | null;
+  problem_statement: string | null;
+  target_segment: string | null;
+  customer_description: string | null;
+  value_proposition: string | null;
+  assumptions: string[];
+  risks: string[];
+  unknowns: string[];
+  next_actions: string[];
+  source_conversation_id: string | null;
+  created_from_analysis: boolean;
+  monitoring_enabled: boolean;
+  version: number;
+  created_at: string;
+  updated_at: string;
+  archived_at: string | null;
+  source: "user";
+}
+
+// --- Phase 7: monitoring configuration for a user opportunity -------------- //
+export type MonitoringConfigStatus =
+  | "not_configured" | "active" | "paused" | "error" | "never_run";
+export type MonitoringCadence = "manual" | "daily" | "weekly" | "monthly";
+
+export interface UserMonitoringConfig {
+  opportunity_id: string;
+  status: MonitoringConfigStatus;
+  enabled: boolean;
+  id?: string;
+  cadence?: MonitoringCadence;
+  topics?: string[];
+  keywords?: string[];
+  entities?: string[];
+  source_categories?: string[];
+  preferred_domains?: string[];
+  excluded_domains?: string[];
+  geographic_scope?: string | null;
+  language?: string | null;
+  notes?: string | null;
+  last_error?: string | null;
+  consecutive_failure_count?: number;
+  last_run_at?: string | null;
+  next_run_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  suggested_topics?: string[]; // present only while not_configured
+  opportunity_title?: string;  // present in the monitoring-overview list
+}
+
+// Phase 6 — web-report read model for a user opportunity (record_type
+// distinguishes it from the committed BriefPayload; nothing is fabricated).
+export interface UserBriefPayload {
+  record_type: "user_opportunity";
+  opportunity_id: string;
+  title: string;
+  generated_at: string;
+  status: UserOpportunityStatus;
+  is_archived: boolean;
+  classification: "unscored";
+  classification_label: string;
+  product_definition: string | null;
+  problem_statement: string | null;
+  target_segment: string | null;
+  customer_description: string | null;
+  value_proposition: string | null;
+  assumptions: string[];
+  risks: string[];
+  unknowns: string[];
+  next_actions: string[];
+  monitoring: UserMonitoringConfig;
+  source_conversation_id: string | null;
+  created_from_analysis: boolean;
+  created_at: string;
+  updated_at: string;
+  version: number;
+  decision_banner: string;
 }
 
 export interface FeedItem {
@@ -108,12 +200,17 @@ export interface Brief {
   body: string;
 }
 
+// Phase 5 — the backend is the source of truth for the application data mode
+// (BOTIM_APP_MODE); the frontend only displays what it reports.
+export type AppMode = "normal" | "demo" | "test";
+
 export interface OverviewPayload {
   meta: {
     generated_note: string;
     decision_banner: string;
     impact_available: boolean;
     counts: Record<string, number>;
+    app_mode?: AppMode; // absent on legacy payloads → treated as unknown
   };
   opportunities: Opportunity[];
   archived: Opportunity[];
@@ -238,10 +335,14 @@ export interface MonitoringPayload {
   alerts: Record<string, any>[];
   summaries: { id: string; available: boolean; flags?: Record<string, unknown> | null }[];
   summary_state?: MonitoringSummaryState | null;
+  // Phase 7 — user monitoring configurations (always present when the
+  // backend has the user store; honest note that no runner exists yet)
+  user_monitoring?: { configs: UserMonitoringConfig[]; note: string } | null;
 }
 
 // Phase 4 — GET /executive-api/brief/{opportunity_id} (web report read model)
 export interface BriefPayload {
+  record_type?: "committed_reference"; // absent on the wire; discriminates from UserBriefPayload
   opportunity_id: string;
   title: string;
   generated_at: string;
