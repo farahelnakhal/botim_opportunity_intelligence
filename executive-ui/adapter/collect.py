@@ -23,7 +23,8 @@ def _engines(root):
     """Import Workstream B and C engines read-only (single source of truth)."""
     b = str(Path(root).resolve() / "opportunity-intelligence" / "tools")
     c = str(Path(root).resolve() / "intelligence-monitoring" / "tools")
-    for p in (b, c):
+    # repo root too, so shared/ (freshness thresholds, URL policy) resolves
+    for p in (b, c, str(Path(root).resolve())):
         if p not in sys.path:
             sys.path.insert(0, p)
     from opportunity_engine import backlog, evidence, journal, scoring
@@ -98,24 +99,60 @@ def _backlog_rows(eng, kb):
 
 
 def _evidence_refs(eng, kb, cited_ids, roles_by_id):
-    """Build EvidenceRef for every real record + any cited-but-missing id."""
+    """Build EvidenceRef for every real record + any cited-but-missing id.
+
+    Phase 4: preserves the provenance the parser now retains (source title/
+    publisher/URL/dates/excerpt/access label) and attaches the deterministic
+    freshness status from shared/freshness.py. Absent provenance stays None —
+    an unresolved or source-less record is reported honestly, never padded.
+    """
+    from shared import freshness, source_urls
     refs = {}
     records = eng["evidence"].load_records(kb / "customer-evidence") if "evidence" in eng else {}
+    try:
+        source_log = eng["evidence"].load_source_log(kb / "customer-evidence")
+    except AttributeError:  # older engine without the source-log parser
+        source_log = {}
     for rid, rec in records.items():
         strength = rec["scores"].get("evidence strength", M.UNKNOWN)
         status = rec.get("status") or M.UNKNOWN
         weak = (isinstance(strength, int) and strength < 3) or status == "needs-more-evidence"
+        src = source_log.get((rec.get("source_ids") or [None])[0]) or {}
+        source_url = (source_urls.first_candidate(rec.get("source_text"))
+                      or source_urls.normalize(src.get("url_text")))
+        fresh = freshness.compute({
+            "last_verified_at": rec.get("last_verified_at"),
+            "retrieved_at": src.get("added"),
+            "publication_date": rec.get("publication_date"),
+            "date_of_evidence": rec.get("date_of_evidence"),
+            "created_at": rec.get("created_at"),
+        })
         refs[rid] = M.EvidenceRef(
             ev_id=rid, resolved=True,
             evidence_class="behavioural/stated (see record)",
             strength=strength, confidence=(rec.get("evidence_confidence") or M.UNKNOWN).split(" ")[0],
             status=status, segment=rec.get("segment", M.UNKNOWN), title=rec.get("title", M.UNKNOWN),
             role=roles_by_id.get(rid, M.CONTEXTUAL), weak=weak,
+            source_type=rec.get("access_label") or M.UNKNOWN,
+            source_title=src.get("title"),
+            source_url=source_url,
+            publisher=src.get("publisher"),
+            publication_date=rec.get("publication_date"),
+            date_of_evidence=rec.get("date_of_evidence"),
+            retrieved_at=src.get("added"),
+            created_at=rec.get("created_at"),
+            last_verified_at=rec.get("last_verified_at"),
+            excerpt=rec.get("excerpt"),
+            access_label=rec.get("access_label"),
+            contradictory_evidence=rec.get("contradictory_evidence"),
+            **fresh,
         )
     for cid in cited_ids:
         if cid not in refs:
-            refs[cid] = M.EvidenceRef(ev_id=cid, resolved=False, role=roles_by_id.get(cid, M.CONTEXTUAL),
-                                      weak=True, status="unresolved")
+            refs[cid] = M.EvidenceRef(
+                ev_id=cid, resolved=False, role=roles_by_id.get(cid, M.CONTEXTUAL),
+                weak=True, status="unresolved",
+                freshness_reason="This evidence id is cited but the record is not on file.")
     return refs
 
 
@@ -305,6 +342,20 @@ def build_model(root="."):
                                    f"{h.get('raw_score_prev', '?')}→{h.get('raw_score_new', '?')} "
                                    f"({h.get('kind', 'applied')}, approved by {h.get('approved_by', '—')})")
         m.impact_proposals = impact_bridge.proposals(str(root))
+
+    # Phase 4 — reverse-link every evidence ref to the opportunities and
+    # assumptions that actually cite it (never an invented relation)
+    links_opp, links_asm = {}, {}
+    for opp, _card in raw_opps:
+        for f in opp.factors:
+            for eid in f.evidence_ids:
+                links_opp.setdefault(eid, set()).add(opp.id)
+    for a in m.assumptions:
+        for eid in (a.evidence_ids or []):
+            links_asm.setdefault(eid, set()).add(f"{a.opportunity_id}::{a.factor_key}")
+    for ref in m.evidence:
+        ref.linked_opportunity_ids = sorted(links_opp.get(ref.ev_id, ()))
+        ref.linked_assumption_ids = sorted(links_asm.get(ref.ev_id, ()))
 
     m.generated_note = (f"{len(m.opportunities)} live + {len(m.archived)} archived opportunities · "
                         f"{len(m.evidence)} evidence records · {len(m.feed)} feed items · "

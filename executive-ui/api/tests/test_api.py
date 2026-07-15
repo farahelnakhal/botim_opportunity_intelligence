@@ -66,7 +66,8 @@ class TestSerialize(unittest.TestCase):
 
     def test_monitoring_shape(self):
         m = serialize.monitoring_payload(str(REPO))
-        self.assertEqual(set(m), {"events", "alerts", "summaries"})
+        # summary_state is the Phase 4 additive current-state block
+        self.assertEqual(set(m), {"events", "alerts", "summaries", "summary_state"})
 
 
 class TestRouter(unittest.TestCase):

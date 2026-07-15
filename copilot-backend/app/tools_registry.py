@@ -26,6 +26,8 @@ from impact import proposal as impact_proposal                # noqa: E402
 from impact import research_request as impact_rr              # noqa: E402
 from impact import tracker as impact_tracker                  # noqa: E402
 from opportunity_engine import evidence, scoring              # noqa: E402
+from shared import freshness as shared_freshness              # noqa: E402
+from shared import source_urls as shared_source_urls          # noqa: E402
 
 impact_paths.set_repo_root(REPO_ROOT)
 
@@ -96,6 +98,18 @@ def _one_opportunity(opp_id):
 def get_opportunity(opp_id):
     _validate(OPP_RE, opp_id, "opportunity")
     view = _brief_view(opp_id)
+    # Phase 4 — deterministic freshness for every evidence id this view cites,
+    # so grounding can warn about stale support without re-reading the KB.
+    records, source_log = _records(), _source_log()
+    cited = set(view["supporting_primary"]) | set(view["supporting_leads"]) | set(view["contradicting"])
+    evidence_freshness = {}
+    for ev_id in sorted(cited):
+        rec = records.get(ev_id)
+        if rec is not None:
+            p = _provenance(rec, source_log)
+            evidence_freshness[ev_id] = {k: p[k] for k in
+                                         ("freshness_status", "freshness_reason",
+                                          "freshness_age_days", "last_verified_at")}
     return {"opportunity_id": opp_id, "name": view["name"], "score": view["score"],
             "customer": view["customer"], "confidence": view["confidence"],
             "supporting_primary": view["supporting_primary"],
@@ -103,7 +117,8 @@ def get_opportunity(opp_id):
             "contradicting": view["contradicting"], "risks": view["risks"],
             "next_validation": view["next_validation"],
             "assumptions": view["assumptions"],
-            "inflection_points": view["inflection_points"]}
+            "inflection_points": view["inflection_points"],
+            "evidence_freshness": evidence_freshness}
 
 
 def compare_opportunities(opp_a, opp_b):
@@ -155,6 +170,45 @@ def get_evidence_gaps():
 
 # --- evidence / segment / inflection / competitor / experiment ---------------
 
+def _source_log():
+    try:
+        return evidence.load_source_log(KB / "customer-evidence")
+    except AttributeError:  # engine without the Phase 4 source-log parser
+        return {}
+
+
+def _provenance(rec, source_log=None):
+    """Provenance + deterministic freshness for one parsed record (Phase 4).
+
+    Only data already stored in the record/source log; a missing field is
+    None, and the URL is emitted only when it passes the shared http(s)-only
+    policy — never a local path, never fabricated.
+    """
+    source_log = _source_log() if source_log is None else source_log
+    src = source_log.get((rec.get("source_ids") or [None])[0]) or {}
+    fresh = shared_freshness.compute({
+        "last_verified_at": rec.get("last_verified_at"),
+        "retrieved_at": src.get("added"),
+        "publication_date": rec.get("publication_date"),
+        "date_of_evidence": rec.get("date_of_evidence"),
+        "created_at": rec.get("created_at"),
+    })
+    return {
+        "source_title": src.get("title"),
+        "source_url": (shared_source_urls.first_candidate(rec.get("source_text"))
+                       or shared_source_urls.normalize(src.get("url_text"))),
+        "publisher": src.get("publisher"),
+        "publication_date": rec.get("publication_date"),
+        "date_of_evidence": rec.get("date_of_evidence"),
+        "retrieved_at": src.get("added"),
+        "created_at": rec.get("created_at"),
+        "last_verified_at": rec.get("last_verified_at"),
+        "excerpt": rec.get("excerpt"),
+        "access_label": rec.get("access_label"),
+        **fresh,
+    }
+
+
 def get_evidence_record(ev_id):
     _validate(EV_RE, ev_id, "evidence")
     rec = _records().get(ev_id)
@@ -166,7 +220,8 @@ def get_evidence_record(ev_id):
             "segment": rec.get("segment", ""), "pain_category": rec.get("pain_category", ""),
             "workaround": rec.get("workaround", ""),
             "contradictory_evidence": rec.get("contradictory_evidence", ""),
-            "scores": rec.get("scores", {}), "is_weak_lead": weak}
+            "scores": rec.get("scores", {}), "is_weak_lead": weak,
+            "provenance": _provenance(rec)}
 
 
 def get_segment(seg_id):

@@ -6,6 +6,7 @@ import Updates from "./components/Updates";
 import ProjectWorkspace from "./components/ProjectWorkspace";
 import Drawer from "./components/Drawer";
 import DetailDrawer from "./components/DetailDrawer";
+import Report from "./components/Report";
 import Icon from "./components/Icon";
 import { KnowledgePanel, MonitoringPanel, ReportsPanel, SettingsPanel } from "./components/panels";
 
@@ -44,6 +45,8 @@ export default function App() {
             {view === "monitoring" && <section className="view" id="view-monitoring"><MonitoringPanel /></section>}
             {view === "knowledge" && <section className="view" id="view-knowledge"><KnowledgePanel /></section>}
             {view === "reports" && <section className="view" id="view-reports"><ReportsPanel /></section>}
+            {/* Phase 4 — URL-addressed web report (/report/OPP-nnn) */}
+            {view === "report" && <Report />}
             {view === "settings" && <section className="view" id="view-settings"><SettingsPanel /></section>}
           </>
         )}

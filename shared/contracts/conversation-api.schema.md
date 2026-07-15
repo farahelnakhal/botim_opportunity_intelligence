@@ -60,7 +60,7 @@ Citation object:
   "title": "Card rails appear unsuitable for many core supplier-payment transactions…",
   "role": "primary",              // enum: primary | contextual | contradictory | weak_lead | excluded | concept_reaction
   "target": { "type": "internal_route", "value": "/evidence/EV-2026-W28-014" },
-  "metadata": null }              // additive field; non-null only for merchant_finding citations — see below
+  "metadata": null }              // additive field; non-null for merchant_finding citations and (Phase 4) evidence citations with provenance — see below
 ```
 
 `target.value` is an internal UI route (`/evidence/{id}`, `/opportunity/{id}`, `/segment/{id}`, `/inflection/{id}`, `/experiment/{id}`, `/assumption/{id}`, `/merchant-findings/{id}`) — never a filesystem path.
@@ -77,6 +77,28 @@ Citation object:
 ```
 
 `metadata` never contains identity fields, participant/response ids, transcript paths, or raw response text — those never leave Merchant Voice's own read-only query layer in the first place.
+
+**`evidence` citations with provenance (additive — Integration Phase 4).** When the answer's tool run loaded the evidence record itself (`get_evidence_record`), the citation carries a bounded provenance `metadata` object so clients can show where the evidence came from and how current it is without a second lookup. Every field is optional/nullable — a client must treat an absent field or `metadata: null` exactly like before Phase 4 (backward compatible):
+
+```json
+{ "id": "EV-2026-W28-001", "type": "evidence", "role": "weak_lead",
+  "title": "Telr: multi-month fund holds…",
+  "target": { "type": "internal_route", "value": "/evidence/EV-2026-W28-001" },
+  "metadata": { "source_title": "Trustpilot — Telr", "publisher": "Trustpilot",
+               "source_url": "https://trustpilot.com/review/www.telr.com",
+               "publication_date": null, "retrieved_at": "2026-07-10",
+               "last_verified_at": "2026-07-10", "access_label": "search-snippet",
+               "excerpt": "\"PAYMENTS ARE SENT TO ISSUER BANK VERIFICATION\" — …",
+               "freshness_status": "fresh",
+               "freshness_reason": "Last verified 5 days ago." } }
+```
+
+Rules:
+
+- `source_url` is either an absolute **http(s)** URL or `null`. It is never a `javascript:`/`data:`/`file:` URL, never a filesystem path, and never fabricated — an internal record with no external source keeps `source_url: null` and the client says so honestly.
+- `freshness_status` ∈ `fresh | aging | stale | unknown` is a **deterministic** calculation over stored dates only (`shared/freshness.py` — reference-date priority `last_verified_at > retrieved_at > publication_date > date_of_evidence > created_at`; bands ≤90 days fresh, ≤180 aging, >180 stale, no date → unknown). It is never an LLM judgment and never implies the source was re-fetched.
+- When an answer relies on stale evidence, the response's top-level `warnings` array carries one deduplicated entry per stale record (e.g. `"EV-2026-W28-001 was last verified 214 days ago — stale evidence; …"`) — never one per mention.
+- `metadata` never contains prompts, traces, filesystem paths, or private identity data.
 
 ## GET /api/conversations/{id} — 200
 

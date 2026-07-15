@@ -37,7 +37,11 @@ export default function Updates() {
                 type="button"
                 className="list-row clickable"
                 key={f.id}
-                onClick={() => openDetail("monitoring_update", f.id)}
+                onClick={() =>
+                  // Phase 4 — a resolved prediction opens the prediction
+                  // detail; every other feed item opens the monitoring detail.
+                  openDetail(f.kind === "prediction-resolved" ? "prediction" : "monitoring_update", f.id)
+                }
                 aria-label={`Open update detail: ${humanize(f.title, names)}`}
               >
                 <div

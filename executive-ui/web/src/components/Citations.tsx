@@ -15,8 +15,20 @@ const ROLE_LABEL: Record<string, string> = {
 };
 
 export default function Citations({ citations }: { citations: Citation[] }) {
-  const { openDrawer, openDetail } = useApp();
+  const { openDrawer, openDetail, overview } = useApp();
   if (!citations.length) return null;
+
+  // Phase 4 — deterministic freshness for an evidence citation: prefer the
+  // citation's own backend-computed metadata, fall back to the overview
+  // read-model. Displayed only; never derived in the frontend.
+  const evidenceFreshness = (c: Citation): { status?: string; reason?: string } => {
+    const meta = (c.metadata ?? {}) as Record<string, unknown>;
+    if (typeof meta.freshness_status === "string") {
+      return { status: meta.freshness_status, reason: meta.freshness_reason as string | undefined };
+    }
+    const e = overview?.evidence.find((x) => x.ev_id === c.id);
+    return { status: e?.freshness_status, reason: e?.freshness_reason };
+  };
 
   return (
     <div className="citation-list">
@@ -33,10 +45,14 @@ export default function Citations({ citations }: { citations: Citation[] }) {
           );
         }
         if (c.type === "evidence") {
+          const fresh = evidenceFreshness(c);
+          const isStale = fresh.status === "stale";
+          const staleTitle = isStale && fresh.reason ? ` — STALE: ${fresh.reason}` : "";
           return (
             <button key={c.id} type="button" className="citation-chip clickable"
-              onClick={() => openDetail("evidence", c.id)} title={label}>
+              onClick={() => openDetail("evidence", c.id)} title={`${label}${staleTitle}`}>
               <Icon name="file" size={12} /> {c.id} <span className="citation-role">{roleLabel}</span>
+              {isStale && <span className="citation-stale-flag" data-testid="citation-stale-flag">stale</span>}
             </button>
           );
         }

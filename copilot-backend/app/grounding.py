@@ -90,6 +90,23 @@ def _conf_token(text):
     return tok if tok in ("high", "medium", "low") else None
 
 
+# citation-metadata fields exposed for evidence provenance (Phase 4).
+# Deliberately bounded: no filesystem paths, no raw prompts/traces, no
+# identity data — only the source/date/freshness fields the contract lists.
+_EVIDENCE_META_FIELDS = (
+    "source_title", "source_url", "publisher", "publication_date",
+    "retrieved_at", "last_verified_at", "access_label",
+    "freshness_status", "freshness_reason",
+)
+
+
+def _evidence_metadata(prov):
+    meta = {k: prov.get(k) for k in _EVIDENCE_META_FIELDS}
+    excerpt = prov.get("excerpt")
+    meta["excerpt"] = excerpt[:300] if isinstance(excerpt, str) else None
+    return meta
+
+
 def _ev_titles(pack, tools):
     """Titles for evidence ids cited by opportunity views, via the records the
     tools already loaded (never re-parsed here)."""
@@ -102,6 +119,10 @@ def build(intent, executed, ids):
     """executed: list of (tool_name, result_dict) in execution order."""
     pack = Pack()
     ev_titles = dict(_ev_titles(pack, executed))
+    # Phase 4 — deterministic freshness per cited evidence id, collected from
+    # tool results only (get_evidence_record provenance / get_opportunity
+    # evidence_freshness). Used for deduplicated stale warnings below.
+    ev_freshness = {}
 
     for name, r in executed:
         if name == "list_opportunities":
@@ -181,6 +202,8 @@ def build(intent, executed, ids):
             conf = (r.get("confidence") or {}).get("opportunity_assessment", {})
             pack.conf_sources[f"{r['opportunity_id']} assessment"] = conf.get("value")
             pack.cite(r["opportunity_id"], "opportunity", r["name"], "primary")
+            for ev_id, f in (r.get("evidence_freshness") or {}).items():
+                ev_freshness.setdefault(ev_id, f)
             if s["classification"] in ("promising", None):
                 pack.needs_no_decision = True
 
@@ -214,7 +237,14 @@ def build(intent, executed, ids):
                 + (", WEAK LEAD — not primary support)" if r["is_weak_lead"] else ")"))
             if r.get("contradictory_evidence"):
                 pack.facts.append(f"  Contradiction field: {r['contradictory_evidence'][:200]}")
-            pack.cite(r["ev_id"], "evidence", r["title"], role)
+            prov = r.get("provenance") or {}
+            pack.cite(r["ev_id"], "evidence", r["title"], role,
+                      metadata=_evidence_metadata(prov) if prov else None)
+            if prov:
+                ev_freshness.setdefault(r["ev_id"], prov)
+                pack.facts.append(
+                    f"  Provenance: source {prov.get('source_title') or 'internal record (no external source)'}"
+                    f", freshness {prov.get('freshness_status')} — {prov.get('freshness_reason')}")
             pack.conf_sources[r["ev_id"]] = conf
             if r["is_weak_lead"]:
                 pack.warnings.append(f"{r['ev_id']} is a weak lead and was not used as primary support")
@@ -373,6 +403,20 @@ def build(intent, executed, ids):
                 pack.facts.append(f"Limitations recorded for {r['campaign_id']}: " + "; ".join(r["limitations"]))
             else:
                 pack.facts.append(f"No limitations recorded for {r['campaign_id']}.")
+
+    # Phase 4 — surface stale evidence honestly, once per record (never once
+    # per mention). The status is deterministic metadata from stored dates
+    # (shared/freshness.py); nothing here claims the source was re-checked.
+    for ev_id in sorted(ev_freshness):
+        f = ev_freshness[ev_id]
+        if f.get("freshness_status") == "stale" and ev_id in pack.citations:
+            last = f.get("last_verified_at")
+            age = f.get("freshness_age_days")
+            detail = (f"was last verified {age} days ago" if last and age is not None
+                      else (f.get("freshness_reason") or "has no recent verification date"))
+            pack.warnings.append(
+                f"{ev_id} {detail} — stale evidence; re-verification is recommended "
+                "before relying on it")
 
     if intent == "general_explanation":
         # A fixed, factual description of this system's own scoring mechanics

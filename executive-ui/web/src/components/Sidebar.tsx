@@ -20,6 +20,7 @@ export default function Sidebar() {
   const GLOBAL_NAV_ACTIONS: Record<View, (() => void) | undefined> = {
     home: undefined,
     project: undefined,
+    report: undefined, // Phase 4 — opened via openReport/URL, never from the nav
     updates: goUpdates,
     monitoring: goMonitoring,
     knowledge: goKnowledge,

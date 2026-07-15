@@ -17,6 +17,7 @@
 
 import seed from "../seed.json";
 import type {
+  BriefPayload,
   ChatResponse,
   CommercialModel,
   Experiment,
@@ -73,6 +74,39 @@ export const api = {
   journal: () => get<JournalPayload>("/journal", () => S.journal),
 
   monitoring: () => get<MonitoringPayload>("/monitoring", () => S.monitoring),
+
+  // Phase 4 — per-event monitoring summary markdown. null = no summary on
+  // file / unreachable; the UI shows an honest "no summary" state, never an
+  // invented one. No seed fallback (summaries are optional artefacts).
+  monitoringSummary: async (eventId: string): Promise<{ markdown: string; truncated: boolean } | null> => {
+    if (!/^EVT-\d{4}-W\d{2}-\d{3}$/.test(eventId)) return null;
+    try {
+      const res = await fetch(`${BASE}/monitoring/summary/${eventId}`, {
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) return null;
+      return (await res.json()) as { markdown: string; truncated: boolean };
+    } catch {
+      return null;
+    }
+  },
+
+  // Phase 4 — web-report read model. null = unknown opportunity or API
+  // unavailable; the report route renders a safe not-found state.
+  brief: async (opportunityId: string): Promise<BriefPayload | null> => {
+    if (!/^OPP-\d{3}$/.test(opportunityId)) return null;
+    try {
+      const res = await fetch(`${BASE}/brief/${opportunityId}`, {
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) return null;
+      liveOk = true;
+      return (await res.json()) as BriefPayload;
+    } catch {
+      liveOk = false;
+      return null;
+    }
+  },
 
   // LEGACY (Phase 2J): the deterministic keyword router. copilot-backend now
   // owns conversational chat (lib/copilotApi.ts); this remains only as a

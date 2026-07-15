@@ -7,7 +7,14 @@ import { overviewFixture } from "../test/fixtures";
 import DetailDrawer from "./DetailDrawer";
 
 vi.mock("../lib/api", () => ({
-  api: { overview: vi.fn(() => Promise.resolve(overviewFixture)) },
+  api: {
+    overview: vi.fn(() => Promise.resolve(overviewFixture)),
+    // Phase 4 — the drawer lazily loads full monitoring events / journal;
+    // empty results exercise the safe feed-item fallback used before.
+    monitoring: vi.fn(() => Promise.resolve({ events: [], alerts: [], summaries: [], summary_state: null })),
+    monitoringSummary: vi.fn(() => Promise.resolve(null)),
+    journal: vi.fn(() => Promise.resolve({ predictions: [], calibration: null })),
+  },
   isLive: () => true,
 }));
 
@@ -59,7 +66,10 @@ describe("DetailDrawer (Phase 1C/1D/1E)", () => {
   it("a monitoring update with a related opportunity id offers to open it, without fabricating a diff", async () => {
     await mount();
     act(() => state.openDetail("monitoring_update", "EVT-003"));
-    expect(screen.getByText(/New monitoring information was received/)).toBeInTheDocument();
+    // Phase 4 — full events load first (empty in this mock), then the safe
+    // feed-item fallback renders exactly as before.
+    await waitFor(() =>
+      expect(screen.getByText(/New monitoring information was received/)).toBeInTheDocument());
     const openRelated = screen.getByRole("button", { name: /Open related opportunity/ });
     const user = userEvent.setup();
     await user.click(openRelated);

@@ -210,10 +210,29 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(serialize.journal_payload(root))
             if path == "/monitoring":
                 return self._json(serialize.monitoring_payload(root))
+            # Phase 4 — bounded, read-only per-event summary. The id segment
+            # is strictly shaped here AND re-validated in serialize.py; a
+            # traversal attempt never matches this route at all.
+            m = re.match(r"^/monitoring/summary/([A-Za-z0-9-]{1,32})$", path)
+            if m:
+                try:
+                    data = serialize.monitoring_summary_payload(m.group(1), root)
+                except ValueError:
+                    return self._error(400, "invalid monitoring event id")
+                return self._json(data) if data else self._error(404, "no summary for that event")
             m = re.match(r"^/commercial/(OPP-\d{3})$", path)
             if m:
                 data = serialize.commercial_payload(m.group(1), root)
                 return self._json(data) if data else self._error(404, "no commercial model")
+            # Phase 4 — full web-report read model for one opportunity.
+            # Strict id shape here, re-validated in serialize.brief_payload.
+            m = re.match(r"^/brief/([A-Za-z0-9-]{1,32})$", path)
+            if m:
+                try:
+                    data = serialize.brief_payload(m.group(1), root)
+                except ValueError:
+                    return self._error(400, "invalid opportunity id")
+                return self._json(data) if data else self._error(404, "no such opportunity")
             m = re.match(r"^/opportunities/(OPP-\d{3})$", path)
             if m:
                 ov = serialize.build_payload(root)
