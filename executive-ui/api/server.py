@@ -40,10 +40,16 @@ except ImportError:  # run directly as a script (python3 executive-ui/api/server
 # when run as a script.
 try:
     from shared.research import store as research_store
+    from shared.research import profiles as research_profiles
+    from shared.research import providers as research_providers
+    from shared.research import runner as research_runner
 except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from shared.research import store as research_store
+    from shared.research import profiles as research_profiles
+    from shared.research import providers as research_providers
+    from shared.research import runner as research_runner
 
 UI_DIR = Path(__file__).resolve().parents[1]
 WEB_DIST = UI_DIR / "web" / "dist"
@@ -201,6 +207,11 @@ class Handler(BaseHTTPRequestHandler):
         # monitoring pause+resume)
         if sub.startswith("/user-opportunities"):
             return self._user_api("POST", sub, parse_qs(parsed.query))
+        # Phase R2 — research-run writes (create + execute). Bounded, honest:
+        # execution with no configured provider finishes the run as 'failed'
+        # with a stated reason — it never fabricates results.
+        if sub.startswith("/research/"):
+            return self._research_post(sub)
         if sub in LEGACY_ROUTE_PATHS and not LEGACY_UNGROUNDED_ROUTES_ENABLED:
             return self._legacy_disabled()
         body = self._read_json_body()
@@ -213,6 +224,45 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(router.route(msg, self.repo_root))
             return self._error(405, f"{sub} does not accept POST (read-only)")
         except Exception as exc:
+            return self._error(500, f"{type(exc).__name__}: {exc}")
+
+    # -- Phase R2: research-run writes -------------------------------------- #
+    def _research_post(self, sub):
+        store = get_research_store()
+        try:
+            if sub in ("/research/runs", "/research/runs/"):
+                body = self._read_json_body()
+                profile_name = body.get("profile")
+                run = store.create_run(body)
+                # a profile pre-plans the run's queries deterministically
+                if profile_name:
+                    try:
+                        pairs = research_profiles.generate_queries(
+                            profile_name, body.get("context") or {})
+                    except KeyError:
+                        return self._error(400, f"unknown research profile "
+                                                f"'{profile_name}' (available: "
+                                                f"{', '.join(research_profiles.available_profiles())})")
+                    for objective, query_text in pairs:
+                        store.add_query(run["id"], {"objective": objective,
+                                                    "query_text": query_text})
+                elif isinstance(body.get("queries"), list):
+                    for q in body["queries"][:research_profiles.PROFILE_MAX_QUERIES]:
+                        if isinstance(q, str) and q.strip():
+                            store.add_query(run["id"], {"query_text": q.strip()})
+                return self._json(store.get_run(run["id"], include_children=True), status=201)
+            m = re.match(r"^/research/runs/(RRUN-[0-9a-f]{12})/execute$", sub)
+            if m:
+                try:
+                    provider = research_providers.from_env()
+                except research_providers.SearchProviderError as exc:
+                    return self._error(400, str(exc))
+                finished = research_runner.execute_run(store, m.group(1), provider)
+                return self._json(store.get_run(finished["id"], include_children=True))
+            return self._error(404, "unknown research endpoint")
+        except research_store.ResearchStoreError as exc:
+            return self._error(exc.status, str(exc))
+        except Exception as exc:  # never leak a stack trace
             return self._error(500, f"{type(exc).__name__}: {exc}")
 
     # -- Phase 6/7: user-opportunity + monitoring-config API ---------------- #

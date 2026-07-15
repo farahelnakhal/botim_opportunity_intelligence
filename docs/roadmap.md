@@ -32,7 +32,14 @@ independent polish or hardening that neither blocks nor is blocked by research.
   + read-only `GET /research/runs[/{id}]`; namespaces `RRUN-/RQRY-/RSRC-/RCAND-`;
   25 new tests (20 store + 5 routes). Acceptance criteria all verified by test.
 
-## Phase R2 — Bounded retrieval + provider adapters (first live capability)
+## Phase R2 — Bounded retrieval + provider adapters (first live capability) — ✅ DONE
+
+> Delivered: `providers.py` (Brave adapter + injectable mock, env-selected,
+> keys never logged), `retrieval.py` (safe bounded fetch + text extraction),
+> `profiles.py` (`generic` + `sme-financial-product`), `runner.py`
+> (dedup, quality signals, honest outcomes), `POST /research/runs[/{id}/execute]`;
+> 32 new tests, all offline. **Deferred to R3:** KB-contradiction flagging
+> (belongs with claim extraction/review, which R3 owns).
 
 **Value:** actual external evidence for any opportunity; unblocks the SME case's
 market sizing / competitor benchmarking.

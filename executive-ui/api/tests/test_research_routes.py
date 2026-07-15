@@ -77,9 +77,9 @@ class ResearchRoutes(unittest.TestCase):
             urlopen(f"http://127.0.0.1:{self.port}/executive-api/research/runs/not-a-run-id")
         self.assertEqual(cm.exception.code, 400)
 
-    def test_no_write_methods_exist_for_research(self):
+    def test_no_destructive_methods_exist_for_research(self):
         import urllib.request
-        for method in ("POST", "PUT", "DELETE"):
+        for method in ("PUT", "DELETE"):
             req = urllib.request.Request(
                 f"http://127.0.0.1:{self.port}/executive-api/research/runs",
                 data=b"{}" if method != "DELETE" else None, method=method,
@@ -87,6 +87,76 @@ class ResearchRoutes(unittest.TestCase):
             with self.assertRaises(urllib.error.HTTPError, msg=method) as cm:
                 urllib.request.urlopen(req)
             self.assertIn(cm.exception.code, (404, 405), method)
+
+    # -- Phase R2: create + execute ---------------------------------------- #
+
+    def _post(self, path, payload):
+        import urllib.request
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}{path}",
+            data=json.dumps(payload).encode(), method="POST",
+            headers={"content-type": "application/json"})
+        with urllib.request.urlopen(req) as r:
+            return r.status, json.loads(r.read())
+
+    def test_create_run_with_profile_prefills_queries(self):
+        status, run = self._post("/executive-api/research/runs",
+                                 {"title": "SME validation run",
+                                  "profile": "sme-financial-product",
+                                  "context": {"market": "UAE"}})
+        self.assertEqual(status, 201)
+        self.assertEqual(run["status"], "pending")
+        self.assertGreater(run["counts"]["queries"], 5)
+        self.assertTrue(all(q["status"] == "pending" for q in run["queries"]))
+
+    def test_create_run_with_unknown_profile_is_a_client_error(self):
+        import urllib.request
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/executive-api/research/runs",
+            data=json.dumps({"title": "x", "profile": "nope"}).encode(),
+            method="POST", headers={"content-type": "application/json"})
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            urllib.request.urlopen(req)
+        self.assertEqual(cm.exception.code, 400)
+        self.assertIn("unknown research profile", cm.exception.read().decode())
+
+    def test_execute_without_configured_provider_fails_honestly(self):
+        # RESEARCH_SEARCH_PROVIDER is unset in the test environment — the run
+        # must finish 'failed' with a stated reason, never fabricate sources.
+        _, run = self._post("/executive-api/research/runs",
+                            {"title": "no provider", "queries": ["a query"]})
+        _, finished = self._post(f"/executive-api/research/runs/{run['id']}/execute", {})
+        self.assertEqual(finished["status"], "failed")
+        self.assertIn("no search provider configured", finished["error"])
+        self.assertEqual(finished["counts"]["sources"], 0)
+
+    def test_execute_with_injected_provider_end_to_end(self):
+        # Patch the provider factory the route uses — the mock provider stays
+        # unreachable via environment configuration by design.
+        from shared.research import MockSearchProvider
+        from shared.research import runner as research_runner
+        provider = MockSearchProvider({"a query": [
+            {"url": "https://example.com/hit", "title": "Hit", "snippet": "s"}]})
+        original_from_env = server.research_providers.from_env
+        original_execute = research_runner.execute_run
+        server.research_providers.from_env = lambda *a, **k: provider
+        server.research_runner.execute_run = (
+            lambda store, run_id, prov, **kw: original_execute(
+                store, run_id, prov,
+                fetch_fn=lambda url, t: (200, "text/html",
+                                         b"<html><title>Hit</title><body>page body</body>"),
+                sleep_fn=lambda s: None))
+        try:
+            _, run = self._post("/executive-api/research/runs",
+                                {"title": "live-shaped run", "queries": ["a query"]})
+            _, finished = self._post(f"/executive-api/research/runs/{run['id']}/execute", {})
+        finally:
+            server.research_providers.from_env = original_from_env
+            server.research_runner.execute_run = original_execute
+        self.assertEqual(finished["status"], "complete")
+        self.assertEqual(finished["counts"]["sources"], 1)
+        self.assertEqual(finished["sources"][0]["canonical_url"], "https://example.com/hit")
+        self.assertEqual(finished["sources"][0]["excerpt"], "page body")
 
     def test_error_bodies_never_leak_sql_or_paths(self):
         with self.assertRaises(urllib.error.HTTPError) as cm:
