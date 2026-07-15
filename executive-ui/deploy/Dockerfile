@@ -30,14 +30,25 @@ WORKDIR /src
 COPY executive-ui/web/package.json executive-ui/web/package-lock.json ./
 RUN npm ci
 COPY executive-ui/web/ ./
+# Phase 5 — this image is the public DEMO showcase: the build-time hint lets
+# the bundled demo seed act as the offline fallback (normal-mode builds leave
+# this unset and never fall back to demo data).
+ENV VITE_APP_MODE=demo
 RUN npm run build
 
 # ---- Stage 2: runtime (Python API only — stdlib, no dependencies) -------- #
 FROM python:3.11-slim
 
+# Phase 5 — the bundled deployments (Render / Hugging Face Space) are the
+# public demo showcase, so they pin demo mode explicitly. A real product
+# deployment removes/overrides this (the code default is the clean "normal"
+# mode). Phase 6 — the runtime user-opportunity DB lives on the writable
+# volume, never inside the image's committed knowledge base.
 ENV PORT=7860 \
     HOST=0.0.0.0 \
-    HOME=/data
+    HOME=/data \
+    BOTIM_APP_MODE=demo \
+    USER_OPPORTUNITIES_DB_PATH=/data/runtime/user-opportunities.db
 RUN mkdir -p /data && chmod -R 777 /data
 
 WORKDIR /app

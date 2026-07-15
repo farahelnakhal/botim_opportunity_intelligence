@@ -1,0 +1,7 @@
+# Runtime data (Phase 6) — user-created opportunity drafts + monitoring
+# configuration live in a runtime SQLite database, never in Git.
+runtime/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

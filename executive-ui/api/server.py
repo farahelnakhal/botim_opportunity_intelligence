@@ -29,11 +29,11 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 try:
-    from . import generate, router, serialize
+    from . import generate, modes, router, serialize, user_store
 except ImportError:  # run directly as a script (python3 executive-ui/api/server.py)
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from api import generate, router, serialize
+    from api import generate, modes, router, serialize, user_store
 
 UI_DIR = Path(__file__).resolve().parents[1]
 WEB_DIST = UI_DIR / "web" / "dist"
@@ -70,6 +70,19 @@ LEGACY_ROUTE_PATHS = ("/chat", "/analyze")
 COPILOT_PROXY_MAX_BODY_BYTES = int(os.environ.get("COPILOT_MAX_BODY_BYTES", 65536))
 
 
+# Phase 6 — one shared runtime store for user-created opportunities (path
+# from USER_OPPORTUNITIES_DB_PATH, default runtime/user-opportunities.db).
+# Lazy so importing this module never touches the filesystem.
+_USER_STORE = None
+
+
+def get_user_store():
+    global _USER_STORE
+    if _USER_STORE is None:
+        _USER_STORE = user_store.UserStore()
+    return _USER_STORE
+
+
 class Handler(BaseHTTPRequestHandler):
     repo_root = "."
 
@@ -92,7 +105,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):  # CORS preflight
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization")
         self.end_headers()
 
@@ -162,6 +175,10 @@ class Handler(BaseHTTPRequestHandler):
         if not path.startswith("/api/"):
             return self._error(404, "not found")
         sub = path[len("/api"):]
+        # Phase 6/7 — user-opportunity writes (create / archive / restore /
+        # monitoring pause+resume)
+        if sub.startswith("/user-opportunities"):
+            return self._user_api("POST", sub, parse_qs(parsed.query))
         if sub in LEGACY_ROUTE_PATHS and not LEGACY_UNGROUNDED_ROUTES_ENABLED:
             return self._legacy_disabled()
         body = self._read_json_body()
@@ -176,6 +193,129 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             return self._error(500, f"{type(exc).__name__}: {exc}")
 
+    # -- Phase 6/7: user-opportunity + monitoring-config API ---------------- #
+    # All writes go through user_store.UserStore (separate runtime SQLite DB;
+    # the committed knowledge base stays read-only). Committed OPP- ids never
+    # match the UOPP- routes, so demo/reference records cannot be edited here.
+    def _user_api(self, method, sub, query):
+        m = re.match(r"^/user-opportunities"
+                     r"(?:/(UOPP-[0-9a-f]{12})"
+                     r"(?:/(archive|restore|monitoring)(?:/(pause|resume))?)?)?/?$", sub)
+        if not m:
+            # a syntactically different id shape (e.g. OPP-010) is a client
+            # error, not a missing record — never resolves to committed data
+            if sub.startswith("/user-opportunities/"):
+                return self._error(400, "invalid user-opportunity id")
+            return self._error(404, "unknown endpoint")
+        opp_id, action, mon_action = m.group(1), m.group(2), m.group(3)
+        store = get_user_store()
+        try:
+            if method == "GET" and opp_id is None:
+                include_archived = (query.get("include_archived") or ["0"])[0] in ("1", "true")
+                return self._json({"user_opportunities": store.list(include_archived=include_archived)})
+            if method == "POST" and opp_id is None:
+                return self._json(store.create(self._read_json_body()), status=201)
+            if opp_id is None:
+                return self._error(405, "method not allowed")
+            if action is None:
+                if method == "GET":
+                    return self._json(store.get(opp_id))
+                if method == "PATCH":
+                    return self._json(store.update(opp_id, self._read_json_body()))
+                if method == "DELETE":
+                    confirm = (query.get("confirm") or [None])[0]
+                    return self._json(store.delete(opp_id, confirm=confirm))
+                return self._error(405, "method not allowed")
+            if action == "archive" and method == "POST":
+                return self._json(store.archive(opp_id))
+            if action == "restore" and method == "POST":
+                return self._json(store.restore(opp_id))
+            if action == "monitoring":
+                if mon_action == "pause" and method == "POST":
+                    return self._json(store.monitoring_pause(opp_id))
+                if mon_action == "resume" and method == "POST":
+                    return self._json(store.monitoring_resume(opp_id))
+                if mon_action is None:
+                    if method == "GET":
+                        config = store.monitoring_get(opp_id)
+                        if config.get("status") == "not_configured":
+                            # editable configuration-draft suggestions from the
+                            # saved fields — never auto-enabled
+                            config["suggested_topics"] = user_store.suggested_monitoring_topics(
+                                store.get(opp_id))
+                        return self._json(config)
+                    if method == "PUT":
+                        return self._json(store.monitoring_put(opp_id, self._read_json_body()))
+                    if method == "DELETE":
+                        return self._json(store.monitoring_delete(opp_id))
+                return self._error(405, "method not allowed")
+            return self._error(405, "method not allowed")
+        except user_store.StoreError as exc:
+            return self._error(exc.status, str(exc))
+        except Exception as exc:  # never leak SQL/stack detail
+            return self._error(500, f"{type(exc).__name__}: internal error")
+
+    # -- Phase 5: mode-aware read models ------------------------------------ #
+    def _mode_overview(self, root, mode):
+        """The overview payload with the effective mode applied. In normal
+        mode the synthetic demo corpus is not presented as portfolio content;
+        the reference evidence layer (used by the grounded Copilot) remains.
+        No silent fallback between modes ever happens here."""
+        p = serialize.build_payload(root)
+        p["meta"]["app_mode"] = mode
+        if not modes.demo_corpus_visible(mode):
+            p["opportunities"] = []
+            p["archived"] = []
+            p["assumptions"] = []
+            p["briefs"] = []
+            p["feed"] = []
+            p["impact_proposals"] = []
+            p["meta"]["counts"] = {**p["meta"]["counts"], "opportunities": 0,
+                                   "archived": 0, "assumptions": 0, "feed": 0}
+            p["meta"]["generated_note"] = (
+                "normal mode — demo portfolio hidden; "
+                f"{len(p['evidence'])} reference evidence records available to the copilot")
+        return p
+
+    def _mode_monitoring(self, root, mode):
+        """Monitoring payload with user monitoring configurations attached
+        and, in normal mode, the demo/KB event corpus hidden with an honest
+        summary state (never fabricated events)."""
+        mon = serialize.monitoring_payload(root)
+        try:
+            configs = get_user_store().monitoring_list()
+        except Exception:
+            configs = []
+        mon["user_monitoring"] = {
+            "configs": configs,
+            "note": ("No monitoring runner is connected yet — an enabled "
+                     "configuration is 'Configured — awaiting monitoring run', "
+                     "never claimed to be actively monitoring."),
+        }
+        if not modes.demo_corpus_visible(mode):
+            mon["events"], mon["alerts"], mon["summaries"] = [], [], []
+            enabled = [c for c in configs if c.get("enabled")]
+            if not configs:
+                status, note = "never-run", ("No monitoring is configured yet. Demo "
+                                             "monitoring data is hidden in normal mode.")
+            elif enabled:
+                status, note = "no-events", ("Monitoring is configured for "
+                                             f"{len(enabled)} opportunit"
+                                             f"{'y' if len(enabled) == 1 else 'ies'} — "
+                                             "awaiting the first monitoring run; no "
+                                             "events exist yet.")
+            else:
+                status, note = "no-events", "All monitoring configurations are paused."
+            mon["summary_state"] = {
+                "status": status, "status_note": note,
+                "last_checked": None, "latest_event_at": None,
+                "event_count": 0, "open_alert_count": 0,
+                "unresolved_warning_count": 0,
+                "monitored_entity_count": len(configs) or None,
+                "external_source_count": None, "internal_only": None,
+            }
+        return mon
+
     def _legacy_disabled(self):
         return self._error(404, "legacy ungrounded endpoint disabled — set "
                                 "ENABLE_LEGACY_UNGROUNDED_ROUTES=1 to enable, or use /copilot-api/chat")
@@ -185,7 +325,33 @@ class Handler(BaseHTTPRequestHandler):
         path = parsed.path
         if path.startswith("/copilot-api/"):
             return self._proxy_to_copilot("DELETE", path[len("/copilot-api"):], parsed.query, b"")
+        sub = self._executive_sub(path)
+        if sub is not None and sub.startswith("/user-opportunities"):
+            return self._user_api("DELETE", sub, parse_qs(parsed.query))
         return self._error(404, "not found")
+
+    def do_PATCH(self):
+        parsed = urlparse(self.path)
+        sub = self._executive_sub(parsed.path)
+        if sub is not None and sub.startswith("/user-opportunities"):
+            return self._user_api("PATCH", sub, parse_qs(parsed.query))
+        return self._error(404, "not found")
+
+    def do_PUT(self):
+        parsed = urlparse(self.path)
+        sub = self._executive_sub(parsed.path)
+        if sub is not None and sub.startswith("/user-opportunities"):
+            return self._user_api("PUT", sub, parse_qs(parsed.query))
+        return self._error(404, "not found")
+
+    @staticmethod
+    def _executive_sub(path):
+        """The '/api'-relative sub-path for either accepted prefix, else None."""
+        if path.startswith("/executive-api/"):
+            return path[len("/executive-api"):]
+        if path.startswith("/api/"):
+            return path[len("/api"):]
+        return None
 
     # -- routing ----------------------------------------------------------- #
     def do_GET(self):
@@ -201,20 +367,32 @@ class Handler(BaseHTTPRequestHandler):
 
     def _api(self, path, query):
         root = self.repo_root
+        mode = modes.get_mode()
         try:
+            # Phase 6/7 — user-opportunity reads (mode-independent: persisted
+            # user records are real product data in every mode)
+            if path.startswith("/user-opportunities"):
+                return self._user_api("GET", path, query)
             if path in ("", "/", "/overview"):
-                return self._json(serialize.build_payload(root))
+                return self._json(self._mode_overview(root, mode))
             if path == "/experiments":
+                if not modes.demo_corpus_visible(mode):
+                    return self._json([])
                 return self._json(serialize.experiments_payload(root))
             if path == "/journal":
+                if not modes.demo_corpus_visible(mode):
+                    return self._json({"predictions": [], "calibration": None,
+                                       "note": "Demo predictions are hidden in normal mode."})
                 return self._json(serialize.journal_payload(root))
             if path == "/monitoring":
-                return self._json(serialize.monitoring_payload(root))
+                return self._json(self._mode_monitoring(root, mode))
             # Phase 4 — bounded, read-only per-event summary. The id segment
             # is strictly shaped here AND re-validated in serialize.py; a
             # traversal attempt never matches this route at all.
             m = re.match(r"^/monitoring/summary/([A-Za-z0-9-]{1,32})$", path)
             if m:
+                if not modes.demo_corpus_visible(mode):
+                    return self._error(404, "demo monitoring summaries are not available in normal mode")
                 try:
                     data = serialize.monitoring_summary_payload(m.group(1), root)
                 except ValueError:
@@ -222,19 +400,33 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(data) if data else self._error(404, "no summary for that event")
             m = re.match(r"^/commercial/(OPP-\d{3})$", path)
             if m:
+                if not modes.demo_corpus_visible(mode):
+                    return self._error(404, "demo commercial models are not available in normal mode")
                 data = serialize.commercial_payload(m.group(1), root)
                 return self._json(data) if data else self._error(404, "no commercial model")
-            # Phase 4 — full web-report read model for one opportunity.
-            # Strict id shape here, re-validated in serialize.brief_payload.
-            m = re.match(r"^/brief/([A-Za-z0-9-]{1,32})$", path)
+            # Phase 4/6 — full web-report read model for one opportunity.
+            # UOPP- ids resolve from the runtime user store in every mode;
+            # committed OPP- briefs are demo corpus, hidden in normal mode.
+            m = re.match(r"^/brief/([A-Za-z0-9-]{1,40})$", path)
             if m:
+                rid = m.group(1)
+                if rid.startswith("UOPP-"):
+                    try:
+                        return self._json(serialize.user_brief_payload(
+                            get_user_store(), rid))
+                    except user_store.StoreError as exc:
+                        return self._error(exc.status, str(exc))
+                if not modes.demo_corpus_visible(mode):
+                    return self._error(404, "demo reports are not available in normal mode")
                 try:
-                    data = serialize.brief_payload(m.group(1), root)
+                    data = serialize.brief_payload(rid, root)
                 except ValueError:
                     return self._error(400, "invalid opportunity id")
                 return self._json(data) if data else self._error(404, "no such opportunity")
             m = re.match(r"^/opportunities/(OPP-\d{3})$", path)
             if m:
+                if not modes.demo_corpus_visible(mode):
+                    return self._error(404, "demo opportunities are not available in normal mode")
                 ov = serialize.build_payload(root)
                 for o in ov["opportunities"] + ov["archived"]:
                     if o["id"] == m.group(1):

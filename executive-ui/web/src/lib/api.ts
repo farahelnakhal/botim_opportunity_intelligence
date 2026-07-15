@@ -25,11 +25,32 @@ import type {
   MonitoringPayload,
   Opportunity,
   OverviewPayload,
+  UserBriefPayload,
 } from "../types";
 
 const S = seed as any;
 
 const BASE = import.meta.env.VITE_EXECUTIVE_API_BASE_URL || "/executive-api";
+
+// Phase 5 — the bundled seed snapshot is DEMO data. It may act as the
+// offline fallback ONLY in a demo build (VITE_APP_MODE=demo, a build-time
+// hint used solely for this offline case — the backend's BOTIM_APP_MODE is
+// the source of truth whenever it answers). A normal/test build that cannot
+// reach the API shows an honest unavailable/empty state instead; demo data
+// is never silently substituted.
+const BUILD_MODE = String(import.meta.env.VITE_APP_MODE || "normal");
+const SEED_FALLBACK_ALLOWED = BUILD_MODE === "demo";
+
+const EMPTY_OVERVIEW: OverviewPayload = {
+  meta: {
+    generated_note: "The data API is unreachable — nothing is shown rather than demo data.",
+    decision_banner: "No product or build decision has been made.",
+    impact_available: false,
+    counts: {},
+  },
+  opportunities: [], archived: [], evidence: [], assumptions: [],
+  feed: [], briefs: [], impact_proposals: [],
+};
 
 let liveOk: boolean | null = null;
 
@@ -58,8 +79,14 @@ export function isLive(): boolean | null {
   return liveOk;
 }
 
+// seed-or-empty fallback, gated by the build mode (see SEED_FALLBACK_ALLOWED)
+function fallback<T>(seedValue: () => T, emptyValue: () => T): () => T {
+  return SEED_FALLBACK_ALLOWED ? seedValue : emptyValue;
+}
+
 export const api = {
-  overview: () => get<OverviewPayload>("/overview", () => S.overview),
+  overview: () => get<OverviewPayload>("/overview",
+    fallback(() => S.overview, () => EMPTY_OVERVIEW)),
 
   opportunity: async (id: string): Promise<Opportunity | undefined> => {
     const ov = await api.overview();
@@ -67,13 +94,18 @@ export const api = {
   },
 
   commercial: (id: string) =>
-    get<CommercialModel | null>(`/commercial/${id}`, () => S.commercial[id] ?? null),
+    get<CommercialModel | null>(`/commercial/${id}`,
+      fallback(() => S.commercial[id] ?? null, () => null)),
 
-  experiments: () => get<Experiment[]>("/experiments", () => S.experiments),
+  experiments: () => get<Experiment[]>("/experiments",
+    fallback(() => S.experiments, () => [])),
 
-  journal: () => get<JournalPayload>("/journal", () => S.journal),
+  journal: () => get<JournalPayload>("/journal",
+    fallback(() => S.journal, () => ({ predictions: [], calibration: null }))),
 
-  monitoring: () => get<MonitoringPayload>("/monitoring", () => S.monitoring),
+  monitoring: () => get<MonitoringPayload>("/monitoring",
+    fallback(() => S.monitoring,
+      () => ({ events: [], alerts: [], summaries: [], summary_state: null }))),
 
   // Phase 4 — per-event monitoring summary markdown. null = no summary on
   // file / unreachable; the UI shows an honest "no summary" state, never an
@@ -91,10 +123,11 @@ export const api = {
     }
   },
 
-  // Phase 4 — web-report read model. null = unknown opportunity or API
-  // unavailable; the report route renders a safe not-found state.
-  brief: async (opportunityId: string): Promise<BriefPayload | null> => {
-    if (!/^OPP-\d{3}$/.test(opportunityId)) return null;
+  // Phase 4/6 — web-report read model (committed OPP- briefs and persisted
+  // UOPP- user briefs). null = unknown opportunity or API unavailable; the
+  // report route renders a safe not-found state.
+  brief: async (opportunityId: string): Promise<BriefPayload | UserBriefPayload | null> => {
+    if (!/^(OPP-\d{3}|UOPP-[0-9a-f]{12})$/.test(opportunityId)) return null;
     try {
       const res = await fetch(`${BASE}/brief/${opportunityId}`, {
         headers: { Accept: "application/json" },
@@ -115,7 +148,11 @@ export const api = {
   chat: (message: string) =>
     get<ChatResponse>(
       `/chat?q=${encodeURIComponent(message)}`,
-      () => routeOffline(message),
+      fallback(() => routeOffline(message), () => ({
+        intent: "unavailable", stages: [], blocks: [],
+        text: "The data API is unreachable.",
+        decision_banner: "No product or build decision has been made.",
+      })),
     ),
 
   // LEGACY SCAFFOLD (Phase 2J): direct-LLM (or offline) analysis with no tool
@@ -141,6 +178,14 @@ export const api = {
       return (await res.json()) as ChatResponse;
     } catch {
       liveOk = false;
+      if (!SEED_FALLBACK_ALLOWED) {
+        // never fabricate a scaffold analysis outside a demo build
+        return {
+          intent: "unavailable", stages: [], blocks: [],
+          text: "The analysis API is unreachable.",
+          decision_banner: "No product or build decision has been made.",
+        };
+      }
       return analyzeOffline(prompt);
     } finally {
       clearTimeout(timer);

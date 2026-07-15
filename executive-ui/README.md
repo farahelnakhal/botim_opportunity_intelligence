@@ -44,6 +44,34 @@ cd executive-ui/web && npm run build                    # emits web/dist
 executive-ui/deploy/start.sh                             # runs both backends; serves web/dist
 ```
 
+## Application modes, user opportunities, monitoring setup (Phases 5–7)
+
+Full contract: `shared/contracts/user-opportunities.schema.md`.
+
+- **`BOTIM_APP_MODE=normal|demo|test`** (default `normal`) — the backend is
+  the source of truth and reports the effective mode in
+  `GET /executive-api/overview` → `meta.app_mode`. Normal mode serves no
+  synthetic demo portfolio (clean empty state, no fake identity/recipients);
+  demo mode serves the committed corpus clearly labelled ("Demo data" badge);
+  test mode exists for deterministic tests. Start the demo showcase with
+  `BOTIM_APP_MODE=demo python3 executive-ui/api/server.py` (the deploy
+  Dockerfile pins this); leave unset for normal mode. Demo **frontend builds**
+  also set `VITE_APP_MODE=demo`, which only gates whether the bundled demo
+  seed may act as an offline fallback — normal builds show an honest
+  unavailable/empty state when the API is down, never demo data.
+- **User opportunities** persist in a runtime SQLite DB
+  (`USER_OPPORTUNITIES_DB_PATH`, default `runtime/user-opportunities.db`,
+  gitignored — never inside the committed knowledge base). Lifecycle:
+  `draft → saved → archived` (drafts deletable; saved records archive
+  instead; archived delete only with explicit confirmation). CRUD under
+  `/executive-api/user-opportunities`; the web report route supports
+  `/report/UOPP-…` with honest partial sections.
+- **Monitoring setup** (per user opportunity): editable suggested topics,
+  cadence (`manual|daily|weekly|monthly` — intended configuration only, no
+  scheduler yet), pause/resume/remove. No runner is connected yet, so an
+  enabled configuration is honestly labelled "Configured — awaiting
+  monitoring run"; no events are fabricated.
+
 If the dashboard API is unreachable, the React app falls back to a bundled snapshot of
 **real** engine output (`web/src/seed.json`) for *dashboard* reads only — it always
 renders truthful data and never fabricates. If copilot-backend is unreachable, the chat
