@@ -439,6 +439,49 @@ def generate_impact_proposal_draft(opp_id, ev_id, factor, proposed_score, justif
     return {"draft_type": "impact_proposal", "draft": draft}
 
 
+def get_external_research(opportunity_ref=None):
+    """Human-APPROVED external-research candidate claims (Phase R3), read
+    from the research platform's runtime store (shared/research). Approved
+    means a human reviewed the claim — it is still candidate research, NEVER
+    authoritative Part A evidence; no EV id exists or is implied. Sources
+    carry recorded metadata plus deterministic freshness."""
+    if opportunity_ref is not None:
+        if not isinstance(opportunity_ref, str) or not re.match(
+                r"^(OPP-\d{3}|UOPP-[0-9a-f]{12})$", opportunity_ref):
+            raise ToolError("opportunity_ref must be an OPP-nnn or UOPP- id")
+    from shared.research import ResearchStore, ResearchStoreError
+    try:
+        store = ResearchStore()
+        candidates = store.list_candidates(status="approved",
+                                           opportunity_ref=opportunity_ref, limit=20)
+    except ResearchStoreError as exc:
+        raise ToolError(f"research store unavailable: {exc}")
+    out = []
+    for c in candidates:
+        sources = []
+        for s in store.get_sources(c["source_ids"]):
+            # Information age comes from the publication date ONLY: automated
+            # retrieval is always recent, so counting retrieved_at would mark
+            # every external source permanently "fresh". No publication date
+            # -> honestly "unknown", never a guess.
+            fresh = shared_freshness.compute({
+                "publication_date": s.get("published_at")})
+            sources.append({"id": s["id"], "url": s["canonical_url"],
+                            "domain": s["domain"], "title": s.get("title"),
+                            "publisher": s.get("publisher"),
+                            "published_at": s.get("published_at"),
+                            "retrieved_at": s.get("retrieved_at"),
+                            "freshness_status": fresh["freshness_status"]})
+        out.append({"candidate_id": c["id"], "claim": c["claim"],
+                    "contradicts": c.get("contradicts"),
+                    "run_id": c["run_id"], "run_title": c.get("run_title"),
+                    "opportunity_ref": c.get("opportunity_ref"),
+                    "reviewed": True, "sources": sources})
+    return {"approved_candidates": out,
+            "note": ("External research candidates are human-approved web-research "
+                     "claims — clearly external, not authoritative repository evidence.")}
+
+
 # --- registry ----------------------------------------------------------------
 
 def _schema(props, required):
@@ -464,6 +507,9 @@ REGISTRY = {
     "get_recent_changes": (get_recent_changes, _schema({}, []), "Recent history + monitoring changes"),
     "get_score_history": (get_score_history, _schema({"opp_id": _ID}, ["opp_id"]), "Score history entries"),
     "search_product_knowledge": (search_product_knowledge, _schema({"query": _ID}, ["query"]), "Bounded search over approved record fields"),
+    "get_external_research": (get_external_research,
+                              _schema({"opportunity_ref": _ID}, []),
+                              "Human-approved external web-research candidates (never authoritative KB evidence)"),
     "generate_research_request_draft": (generate_research_request_draft, _schema({"assumption_id": _ID}, ["assumption_id"]), "Draft research request (ephemeral)"),
     "generate_executive_brief": (generate_executive_brief, _schema({"opp_id": _ID}, ["opp_id"]), "Draft executive brief (ephemeral)"),
     "generate_impact_proposal_draft": (generate_impact_proposal_draft,

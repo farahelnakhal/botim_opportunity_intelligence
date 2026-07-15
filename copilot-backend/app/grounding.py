@@ -64,6 +64,27 @@ class Pack:
         if cur is None or rank.get(role, 0) > rank.get(cur["role"], 0):
             self.citations[cid] = _cite(cid, ctype, title, role, metadata=metadata)
 
+    def cite_research_candidate(self, c):
+        """Phase R3 — an approved external-research candidate. The citation
+        opens the run detail (claim -> sources -> run traceability lives
+        there); metadata carries the source URLs/freshness so the UI can
+        label it external without another fetch."""
+        cid = c["candidate_id"]
+        if cid not in self.citations:
+            self.citations[cid] = {
+                "id": cid, "type": "research_candidate",
+                "title": (c.get("claim") or "")[:160],
+                "role": "external_research",
+                "target": {"type": "internal_route",
+                           "value": f"/research/runs/{c['run_id']}"},
+                "metadata": {"run_id": c["run_id"], "run_title": c.get("run_title"),
+                             "external": True,
+                             "sources": [{"url": s.get("url"), "title": s.get("title"),
+                                          "published_at": s.get("published_at"),
+                                          "freshness_status": s.get("freshness_status")}
+                                         for s in (c.get("sources") or [])[:5]]},
+            }
+
     def cite_merchant_finding(self, f):
         self.cite(f["finding_id"], "merchant_finding", f["approved_statement"], _finding_role(f),
                   metadata=_finding_metadata(f))
@@ -313,6 +334,43 @@ def build(intent, executed, ids):
                     pack.facts.append(f"- {e.get('timestamp')}: {e.get('kind')} {e.get('explanation', '')}")
             else:
                 pack.facts.append(f"No score-history entries for {r['opportunity_id']}.")
+
+        elif name == "get_external_research":
+            # Phase R3 — human-approved external web-research candidates.
+            # Always presented as EXTERNAL and non-authoritative; stale
+            # sources are flagged deterministically (shared/freshness bands).
+            cands = r.get("approved_candidates") or []
+            if not cands:
+                pack.facts.append("No approved external research candidates exist yet "
+                                  "(run and review external research first).")
+                pack.unknowns.append("no approved external-research candidates matched "
+                                     "(get_external_research)")
+            else:
+                pack.facts.append("EXTERNAL RESEARCH — human-approved candidate claims "
+                                  "from web research (external; NOT authoritative "
+                                  "repository evidence; no EV id exists):")
+                stale = 0
+                for c in cands[:10]:
+                    srcs = c.get("sources") or []
+                    src_bits = []
+                    for s in srcs[:4]:
+                        bit = s.get("title") or s.get("domain") or s.get("url")
+                        if s.get("published_at"):
+                            bit += f" ({str(s['published_at'])[:10]})"
+                        if s.get("freshness_status") == "stale":
+                            bit += " [STALE]"
+                            stale += 1
+                        src_bits.append(bit)
+                    pack.facts.append(f"- {c['claim']} — sources: {'; '.join(src_bits) or 'recorded'}")
+                    if c.get("contradicts"):
+                        pack.facts.append(f"  (recorded contradiction note: {c['contradicts']})")
+                    pack.cite_research_candidate(c)
+                if stale:
+                    pack.warnings.append(
+                        f"{stale} cited external source(s) are stale (older than the "
+                        f"180-day threshold) — re-run research before relying on them.")
+                pack.conf_sources["external research (candidate)"] = "low"
+            pack.needs_no_decision = True
 
         elif name == "search_product_knowledge":
             if r["results"]:

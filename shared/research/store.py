@@ -503,6 +503,10 @@ class ResearchStore:
     # -- candidate evidence -------------------------------------------------- #
 
     def add_candidate(self, run_id, payload):
+        """Record a human-authored claim citing sources of this run. Allowed
+        on finished runs too — reading sources and writing claims is human
+        curation AFTER execution, not execution itself. Only a 'failed' run
+        (which produced nothing to cite) refuses candidates."""
         if not isinstance(payload, dict):
             raise ResearchStoreError("payload must be an object")
         claim = _require_str(payload, "claim", TEXT_MAX, required=True)
@@ -517,8 +521,8 @@ class ResearchStore:
         now = _now()
         with self._connect() as conn:
             row = self._get_run_row(conn, run_id)
-            if row["status"] in TERMINAL_RUN_STATUSES:
-                raise ResearchStoreError("cannot add candidates to a finished run", status=409)
+            if row["status"] == "failed":
+                raise ResearchStoreError("a failed run has no sources to cite", status=409)
             seen = set()
             for sid in source_ids:
                 _validate_id(sid, SOURCE_RE, "source id")
@@ -537,3 +541,69 @@ class ResearchStore:
                 (candidate_id, run_id, claim, json.dumps(source_ids), contradicts, now, now))
             return self._candidate_dict(conn.execute(
                 "SELECT * FROM candidate_evidence WHERE id=?", (candidate_id,)).fetchone())
+
+    def review_candidate(self, candidate_id, action, note=None):
+        """Human review (Phase R3): pending_review -> approved | rejected,
+        exactly once. Approval NEVER makes the claim authoritative knowledge —
+        it never mints an EV id and never writes the knowledge base; it only
+        marks the candidate usable as clearly-labelled external research."""
+        _validate_id(candidate_id, CANDIDATE_RE, "candidate id")
+        if action not in ("approve", "reject"):
+            raise ResearchStoreError("action must be 'approve' or 'reject'")
+        if note is not None:
+            if not isinstance(note, str) or len(note) > TEXT_MAX:
+                raise ResearchStoreError("'note' must be a bounded string")
+            note = note.strip() or None
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM candidate_evidence WHERE id=?", (candidate_id,)).fetchone()
+            if row is None:
+                raise ResearchStoreError("candidate not found", status=404)
+            if row["status"] != "pending_review":
+                raise ResearchStoreError(
+                    f"candidate already reviewed ('{row['status']}')", status=409)
+            status = "approved" if action == "approve" else "rejected"
+            conn.execute(
+                "UPDATE candidate_evidence SET status=?, review_note=?, updated_at=? WHERE id=?",
+                (status, note, _now(), candidate_id))
+            return self._candidate_dict(conn.execute(
+                "SELECT * FROM candidate_evidence WHERE id=?", (candidate_id,)).fetchone())
+
+    def list_candidates(self, status=None, opportunity_ref=None, limit=100):
+        """Cross-run candidate listing (the review queue / grounding read).
+        Each row carries its run's title, status, and opportunity_ref."""
+        if status is not None and status not in CANDIDATE_STATUSES:
+            raise ResearchStoreError("unknown candidate status filter")
+        if opportunity_ref is not None and not OPP_REF_RE.match(str(opportunity_ref)):
+            raise ResearchStoreError("invalid opportunity_ref filter")
+        limit = max(1, min(int(limit), 500))
+        clauses, params = [], []
+        if status:
+            clauses.append("c.status=?")
+            params.append(status)
+        if opportunity_ref:
+            clauses.append("r.opportunity_ref=?")
+            params.append(opportunity_ref)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""SELECT c.*, r.title AS run_title, r.status AS run_status,
+                           r.opportunity_ref AS opportunity_ref
+                    FROM candidate_evidence c JOIN research_runs r ON r.id = c.run_id
+                    {where} ORDER BY c.created_at DESC, c.id LIMIT ?""",
+                (*params, limit)).fetchall()
+            return [self._candidate_dict(r) for r in rows]
+
+    def get_sources(self, source_ids):
+        """The named sources (for citation metadata), in input order; unknown
+        ids are simply absent — never invented."""
+        out = []
+        with self._connect() as conn:
+            for sid in source_ids[:CANDIDATE_SOURCES_MAX]:
+                if not isinstance(sid, str) or not SOURCE_RE.match(sid):
+                    continue
+                row = conn.execute(
+                    "SELECT * FROM research_sources WHERE id=?", (sid,)).fetchone()
+                if row is not None:
+                    out.append(self._source_dict(row))
+        return out
