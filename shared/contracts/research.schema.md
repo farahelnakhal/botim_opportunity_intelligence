@@ -7,9 +7,12 @@ Persistence + execution contract for external-research runs. Implementation:
 generation; `runner.py` — the executor). Changes to this contract are
 **additive only**.
 
-Nothing here is authoritative knowledge: candidate evidence is pending human
-review and never auto-promotes into `knowledge-base/`. Claim extraction and
-the review workflow arrive in Phase R3.
+Nothing here is authoritative knowledge: candidate evidence never
+auto-promotes into `knowledge-base/`. Human review (Phase R3) moves a
+candidate `pending_review -> approved | rejected` exactly once; **approved
+still means candidate external research, never Part A evidence — no EV id
+exists or is implied.** Claims are human-authored from recorded sources in
+this phase (LLM-assisted extraction is a possible later enhancement).
 
 ## ID namespaces
 
@@ -89,6 +92,27 @@ them, and the run that executed it. Cross-run references are rejected.
 | `GET /research/runs/{RRUN-id}` | full run with `queries`, `sources`, `candidate_evidence`; 404 if absent; 400 on malformed id |
 | `POST /research/runs` (R2) | create a pending run; body `{title, objective?, objectives?, profile?, context?, queries?, opportunity_ref?, notes?}`. A `profile` pre-plans queries deterministically (`shared/research/profiles.py`; unknown profile → 400 listing available ones); otherwise `queries` (string list) may be supplied. Returns 201 with the full run |
 | `POST /research/runs/{RRUN-id}/execute` (R2) | execute pending queries with the configured provider. **No provider configured → the run finishes `failed` with "no search provider configured"** — never fabricated results. Returns the finished run (`complete`/`partial`/`failed` with reasons) |
+| `POST /research/runs/{RRUN-id}/candidates` (R3) | record a human-authored claim: `{claim, source_ids[], contradicts?}`; sources must belong to the run; a failed run (no sources) refuses; allowed on finished runs (curation ≠ execution). 201 |
+| `POST /research/candidates/{RCAND-id}/review` (R3) | `{action: "approve"\|"reject", note?}` — exactly once; 409 if already reviewed |
+| `GET /research/candidates[?status=…&opportunity_ref=…]` (R3) | cross-run candidate listing (review queue / report appendix); rows carry `run_title`, `run_status`, `opportunity_ref` |
+
+GET run detail enriches each source with deterministic freshness
+(`freshness_status/reference_date/age_days/reason`) computed from the stored
+**publication date only** — automated retrieval time is deliberately excluded
+(it is always recent and would mark every source permanently "fresh"); a
+source without a publication date is honestly `unknown`.
+
+## Copilot integration (Phase R3, additive to conversation-api.schema.md)
+
+- New read-only tool `get_external_research(opportunity_ref?)` returns
+  **approved** candidates only (pending/rejected never ground answers), each
+  with its recorded sources + freshness.
+- New citation type `research_candidate` (role `external_research`): id =
+  `RCAND-…`, target = internal route `/research/runs/{run_id}`, metadata
+  `{run_id, run_title, external: true, sources: [{url, title, published_at,
+  freshness_status}]}`. Grounded facts are prefixed "EXTERNAL RESEARCH …
+  NOT authoritative repository evidence"; stale cited sources produce a
+  deterministic warning.
 
 No PUT/DELETE routes exist. Errors are structured `{error: message}` with no
 SQL/paths/keys/fetched content in messages.

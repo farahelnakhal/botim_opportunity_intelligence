@@ -9,10 +9,11 @@
 // not-found page. Works in light/dark mode and on mobile (single column).
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
+import { researchApi } from "../lib/researchApi";
 import { useApp } from "../store";
 import { confidenceLabel, humanFactorKey, tagClass, tagLabel } from "../lib/format";
 import { humanize, humanizeRef, nameMap } from "../lib/labels";
-import type { BriefPayload, Citation, UserBriefPayload } from "../types";
+import type { BriefPayload, Citation, ResearchCandidate, UserBriefPayload } from "../types";
 import Icon from "./Icon";
 import Markdown from "./Markdown";
 import { ExternalSourceLink, FreshnessBadge } from "./Provenance";
@@ -28,6 +29,36 @@ function Section({ label, children }: { label: string; children: React.ReactNode
 
 function EmptyNote({ text }: { text: string }) {
   return <p className="source-tag" style={{ display: "block" }}>{text}</p>;
+}
+
+// Phase R3 — approved external web-research candidates for this opportunity,
+// visually separate from repository evidence. null = research API unreachable.
+function ExternalResearchSection({ candidates }: { candidates: ResearchCandidate[] | null }) {
+  return (
+    <Section label="External research (candidate claims)">
+      {candidates === null ? (
+        <EmptyNote text="External research is unavailable right now." />
+      ) : candidates.length === 0 ? (
+        <EmptyNote text="No approved external research candidates are linked to this opportunity." />
+      ) : (
+        <div className="list-card" data-testid="report-research-candidates">
+          {candidates.map((c) => (
+            <div className="list-row" key={c.id}>
+              <div className="list-row-icon"><Icon name="search" size={16} /></div>
+              <div className="list-row-main">
+                <div className="list-row-title">{c.claim}</div>
+                <div className="list-row-sub">
+                  Human-approved external research (candidate — not repository evidence) ·
+                  {" "}{c.source_ids.length} source{c.source_ids.length === 1 ? "" : "s"} ·
+                  {" "}run {c.run_title ?? c.run_id}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Section>
+  );
 }
 
 // The merchant-finding drawer renders from a Citation-shaped payload
@@ -56,7 +87,7 @@ function findingToCitation(f: Record<string, unknown>): Citation {
 // Phase 6 — the web report for a persisted user opportunity. Honest partial
 // rendering: sections without data say "Not yet defined"; nothing is scored
 // or fabricated; monitoring state comes from the stored configuration.
-function UserReport({ brief }: { brief: UserBriefPayload }) {
+function UserReport({ brief, researchCandidates }: { brief: UserBriefPayload; researchCandidates: ResearchCandidate[] | null }) {
   const text = (v: string | null) =>
     v ? <p>{v}</p> : <EmptyNote text="Not yet defined." />;
   const list = (items: string[], empty: string) =>
@@ -115,6 +146,7 @@ function UserReport({ brief }: { brief: UserBriefPayload }) {
         <Section label="Evidence & scoring">
           <EmptyNote text="No engine score and no evidence citations exist for a user draft — validation has not happened yet, and nothing is fabricated." />
         </Section>
+        <ExternalResearchSection candidates={researchCandidates} />
         <Section label="Provenance">
           <p className="source-tag" style={{ display: "block" }}>
             Created {brief.created_at}
@@ -129,6 +161,9 @@ function UserReport({ brief }: { brief: UserBriefPayload }) {
 export default function Report() {
   const { reportOppId, overview, openDetail, goReports } = useApp();
   const [brief, setBrief] = useState<BriefPayload | UserBriefPayload | null | undefined>(undefined); // undefined = loading
+  // Phase R3 — approved external-research candidates linked to this
+  // opportunity (empty array = honestly none; null = research API down).
+  const [researchCandidates, setResearchCandidates] = useState<ResearchCandidate[] | null>([]);
   const names = nameMap([...(overview?.opportunities ?? []), ...(overview?.archived ?? [])]);
 
   useEffect(() => {
@@ -140,6 +175,9 @@ export default function Report() {
     }
     api.brief(reportOppId).then((b) => {
       if (!cancel) setBrief(b);
+    });
+    researchApi.listCandidates({ status: "approved", opportunityRef: reportOppId }).then((res) => {
+      if (!cancel) setResearchCandidates(res.ok ? res.data.candidates : null);
     });
     return () => {
       cancel = true;
@@ -179,7 +217,7 @@ export default function Report() {
   }
 
   if (brief.record_type === "user_opportunity") {
-    return <UserReport brief={brief} />;
+    return <UserReport brief={brief} researchCandidates={researchCandidates} />;
   }
 
   const s = brief.score_summary;
@@ -419,6 +457,8 @@ export default function Report() {
             </div>
           )}
         </Section>
+
+        <ExternalResearchSection candidates={researchCandidates} />
       </div>
     </section>
   );

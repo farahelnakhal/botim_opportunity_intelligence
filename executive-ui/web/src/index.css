@@ -648,3 +648,46 @@ select.field-input{appearance:none; -webkit-appearance:none; cursor:pointer; bac
   .market-badge, .ph-updated{display:none;}
   .ph-right{gap:6px;}
 }
+
+/* --- Phase R3: research workspace + external citations ------------------- */
+.research-run-row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+  padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  margin-bottom:8px;cursor:pointer;color:var(--text);}
+.research-run-row:hover{border-color:var(--accent);}
+.research-run-title{font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;}
+.research-status{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--border);white-space:nowrap;}
+.research-status-complete{color:var(--ok,#177245);border-color:currentColor;}
+.research-status-partial,.research-status-pending{color:var(--warn,#9a6b00);border-color:currentColor;}
+.research-status-failed{color:var(--danger,#b3261e);border-color:currentColor;}
+.research-profile-chip{font-size:11px;padding:2px 8px;border-radius:999px;background:var(--surface-2,rgba(127,127,127,.12));white-space:nowrap;}
+.research-run-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0 14px;color:var(--text-dim);font-size:13px;}
+.research-query{padding:6px 10px;border-left:3px solid var(--border);margin-bottom:6px;}
+.research-query.status-failed{border-left-color:var(--danger,#b3261e);}
+.research-query-text{display:block;font-size:13px;}
+.research-source{display:flex;gap:10px;padding:10px 12px;border:1px solid var(--border);
+  border-radius:10px;margin-bottom:8px;background:var(--surface);}
+.research-source.duplicate{opacity:.6;}
+.research-source-main{min-width:0;flex:1;}
+.research-source-title{font-weight:600;font-size:13px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.research-source-meta{color:var(--text-dim);font-size:12px;}
+.research-source-excerpt{font-size:12px;color:var(--text-dim);margin-top:4px;}
+.research-dup{font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--warn,#9a6b00);}
+.freshness-badge{font-size:10px;padding:1px 6px;border-radius:999px;border:1px solid var(--border);text-transform:uppercase;letter-spacing:.4px;}
+.freshness-stale{color:var(--danger,#b3261e);border-color:currentColor;}
+.freshness-aging{color:var(--warn,#9a6b00);border-color:currentColor;}
+.freshness-fresh{color:var(--ok,#177245);border-color:currentColor;}
+.freshness-unknown{color:var(--text-dim);}
+.research-candidate{padding:10px 12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;background:var(--surface);}
+.research-candidate.status-approved{border-left:3px solid var(--ok,#177245);}
+.research-candidate.status-rejected{border-left:3px solid var(--danger,#b3261e);opacity:.7;}
+.research-candidate-claim{font-size:13px;font-weight:600;margin-bottom:4px;}
+.research-contradicts{font-size:12px;color:var(--warn,#9a6b00);margin-top:4px;display:flex;gap:6px;align-items:center;}
+.research-review-actions{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;}
+.research-review-hint{font-size:12px;color:var(--text-dim);}
+.research-create-form{display:flex;flex-direction:column;gap:8px;max-width:520px;margin-bottom:18px;
+  padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--surface);}
+.research-create-form input,.research-create-form select,.research-claim-form textarea{
+  padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font:inherit;}
+.research-claim-form{display:flex;flex-direction:column;gap:8px;max-width:640px;margin:14px 0;}
+.research-execute{align-self:flex-start;margin:6px 0 14px;}
+.citation-external{border-style:dashed;}

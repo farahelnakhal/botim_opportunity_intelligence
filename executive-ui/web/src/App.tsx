@@ -9,6 +9,7 @@ import DetailDrawer from "./components/DetailDrawer";
 import Report from "./components/Report";
 import Icon from "./components/Icon";
 import { KnowledgePanel, MonitoringPanel, ReportsPanel, SettingsPanel } from "./components/panels";
+import ResearchPanel from "./components/ResearchPanel";
 
 export default function App() {
   const { view, loading, error, setSidebarOpen } = useApp();
@@ -45,6 +46,8 @@ export default function App() {
             {view === "monitoring" && <section className="view" id="view-monitoring"><MonitoringPanel /></section>}
             {view === "knowledge" && <section className="view" id="view-knowledge"><KnowledgePanel /></section>}
             {view === "reports" && <section className="view" id="view-reports"><ReportsPanel /></section>}
+            {/* Phase R3 — external research runs, sources, and candidate review */}
+            {view === "research" && <section className="view" id="view-research"><ResearchPanel /></section>}
             {/* Phase 4 — URL-addressed web report (/report/OPP-nnn) */}
             {view === "report" && <Report />}
             {view === "settings" && <section className="view" id="view-settings"><SettingsPanel /></section>}
