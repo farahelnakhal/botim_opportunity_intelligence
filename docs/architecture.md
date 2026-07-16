@@ -158,8 +158,10 @@ approved+published findings only, through `published_query.py`.
 Single container (`executive-ui/deploy/Dockerfile` + `start.sh`): builds the React
 app, runs copilot-backend (localhost-only) behind the executive API's proxy on one
 origin. `start.sh` supervises both processes (readiness-gated startup, signal
-forwarding, non-zero exit on required-service failure). The demo Dockerfile pins
-`BOTIM_APP_MODE=demo`. Lifecycle tests: `executive-ui/deploy/tests/`.
+forwarding, non-zero exit on required-service failure). The image defaults to
+NORMAL mode; the demo showcase is an explicit `--build-arg APP_MODE=demo`
+build, and a normal-mode deployment running on the mock chat provider prints
+a loud startup warning (never a silent fallback). Lifecycle tests: `executive-ui/deploy/tests/`.
 
 ## Future research architecture (not yet built — direction only)
 

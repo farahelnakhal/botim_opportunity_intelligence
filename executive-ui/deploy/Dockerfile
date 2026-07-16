@@ -25,30 +25,40 @@
 # Merchant Voice query layer), and the committed knowledge-base/ data.
 
 # ---- Stage 1: build the React app --------------------------------------- #
+# PR1 (production cleanup) — the image defaults to the clean NORMAL mode.
+# The public demo showcase is an explicit opt-in:
+#   docker build --build-arg APP_MODE=demo -f executive-ui/deploy/Dockerfile .
+# A real product deployment builds with no args and gets: no demo corpus, no
+# demo persona/recipients, no demo seed fallback, honest empty first-run
+# workspace. (BOTIM_APP_MODE can still be overridden at runtime; the backend
+# resolves any invalid value to normal — never silently to demo.)
+ARG APP_MODE=normal
+
 FROM node:20-slim AS frontend
+ARG APP_MODE
 WORKDIR /src
 COPY executive-ui/web/package.json executive-ui/web/package-lock.json ./
 RUN npm ci
 COPY executive-ui/web/ ./
-# Phase 5 — this image is the public DEMO showcase: the build-time hint lets
-# the bundled demo seed act as the offline fallback (normal-mode builds leave
-# this unset and never fall back to demo data).
-ENV VITE_APP_MODE=demo
+# Build-time hint: ONLY a demo build may use the bundled demo seed as the
+# offline fallback; normal builds never fall back to demo data.
+ENV VITE_APP_MODE=$APP_MODE
 RUN npm run build
 
 # ---- Stage 2: runtime (Python API only — stdlib, no dependencies) -------- #
 FROM python:3.11-slim
+ARG APP_MODE
 
-# Phase 5 — the bundled deployments (Render / Hugging Face Space) are the
-# public demo showcase, so they pin demo mode explicitly. A real product
-# deployment removes/overrides this (the code default is the clean "normal"
-# mode). Phase 6 — the runtime user-opportunity DB lives on the writable
-# volume, never inside the image's committed knowledge base.
+# PR1 — the runtime mode follows the build's APP_MODE (default: normal, the
+# clean production workspace). Demo showcase deployments build with
+# --build-arg APP_MODE=demo. Phase 6 — the runtime user-opportunity DB lives
+# on the writable volume, never inside the image's committed knowledge base.
 ENV PORT=7860 \
     HOST=0.0.0.0 \
     HOME=/data \
-    BOTIM_APP_MODE=demo \
-    USER_OPPORTUNITIES_DB_PATH=/data/runtime/user-opportunities.db
+    BOTIM_APP_MODE=$APP_MODE \
+    USER_OPPORTUNITIES_DB_PATH=/data/runtime/user-opportunities.db \
+    RESEARCH_DB_PATH=/data/runtime/research.db
 RUN mkdir -p /data && chmod -R 777 /data
 
 WORKDIR /app
