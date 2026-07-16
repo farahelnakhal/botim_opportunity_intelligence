@@ -20,7 +20,7 @@
 | Phase R2 | PR #37 (`83687d0`) | Bounded research execution: provider seam (`providers.py`, Brave adapter via `RESEARCH_SEARCH_PROVIDER`/`BRAVE_SEARCH_API_KEY`; mock injectable in tests only, never via env), safe bounded retrieval (`retrieval.py`: http(s)-only, 500 KB cap, content-type allowlist, scripts stripped, injection stored as data), deterministic profiles (`profiles.py`: `generic` + `sme-financial-product`), executor (`runner.py`: dedup by normalized URL + content hash, recorded quality signals, honest complete/partial/failed), `POST /research/runs` + `POST /research/runs/{id}/execute` |
 | Phase R3 | PR #38 (`364e358`) | Research integration: human-authored candidate claims (`POST …/candidates`, sources must belong to the run) + one-shot review (`POST /research/candidates/{id}/review`, approved ≠ authoritative, no EV ids) + review queue (`GET /research/candidates`); copilot tool `get_external_research` (approved-only) with `external_research_summary` intent, `research_candidate` citations, EXTERNAL-labelled grounding, deterministic stale-source warnings (freshness from publication date only); frontend Research workspace (runs list/create/execute, sources with freshness + safe links, review + claim entry), external-research citation chip, report appendix on both OPP and UOPP reports. Manual claims only — LLM-assisted extraction is a possible later enhancement |
 | Phase R4a | PR #39 (`729028c`) | Manual monitoring runner: `POST /user-opportunities/{id}/monitoring/run` executes the MCFG config's topics/keywords/entities through the research platform (bounded, preferred/excluded domains honored) and records `MEVT-` events for genuinely new sources (unique per opportunity+URL, idempotent reruns, grounded in `RSRC-`/`RRUN-`); failures recorded honestly on the config (`error`/`last_error`/failure counter; `last_run_at` never advanced by a failed run); "Run monitoring now" button live with an events list; user-store schema v2 (in-place migration). Still no scheduler — cadence remains intent. Evidence revalidation deferred to R4b |
-| Phase R4b | this branch | Source revalidation: research-store schema v2 (`source_revalidations`, in-place migration), `revalidate_run` (re-fetch up to 20 non-duplicate sources; append-only `RREV-` outcomes `unchanged/changed/unreachable`; nothing auto-applied), `POST /research/runs/{id}/revalidate`, computed `source_health` on candidates, revalidation badges + "Revalidate sources" button in the Research UI, copilot warning when approved claims cite failed sources |
+| Phase R4b | PR #40 (`56cf72e`) | Source revalidation: research-store schema v2 (`source_revalidations`, in-place migration), `revalidate_run` (re-fetch up to 20 non-duplicate sources; append-only `RREV-` outcomes `unchanged/changed/unreachable`; nothing auto-applied), `POST /research/runs/{id}/revalidate`, computed `source_health` on candidates, revalidation badges + "Revalidate sources" button in the Research UI, copilot warning when approved claims cite failed sources |
 
 Handoff corrections found during verification:
 - "Removal of fake report recipients" is **mode-gated, not deleted**: demo mode still
@@ -34,8 +34,10 @@ Handoff corrections found during verification:
 - **Normal mode** (default): clean empty state, no demo portfolio/identity/recipients;
   create/save/manage user opportunities; grounded chat works against the evidence
   corpus; demo detail routes 404.
-- **Demo mode** (`BOTIM_APP_MODE=demo`; pinned by the deploy Dockerfile): the
-  committed synthetic portfolio, visibly labelled; demo records read-only.
+- **Demo mode** (`BOTIM_APP_MODE=demo`; opt-in — the deploy image defaults to
+  normal since PR1 production cleanup, demo showcases build with
+  `--build-arg APP_MODE=demo`): the committed synthetic portfolio, visibly
+  labelled; demo records read-only.
 - Chat: grounded, cited answers; clarification for vague messages; exactly one
   opportunity draft per genuine new idea; "Demo mode — deterministic grounded output"
   badge under MockProvider; honest unavailable state when copilot is down (no silent

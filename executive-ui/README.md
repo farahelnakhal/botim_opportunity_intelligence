@@ -54,8 +54,10 @@ Full contract: `shared/contracts/user-opportunities.schema.md`.
   synthetic demo portfolio (clean empty state, no fake identity/recipients);
   demo mode serves the committed corpus clearly labelled ("Demo data" badge);
   test mode exists for deterministic tests. Start the demo showcase with
-  `BOTIM_APP_MODE=demo python3 executive-ui/api/server.py` (the deploy
-  Dockerfile pins this); leave unset for normal mode. Demo **frontend builds**
+  `BOTIM_APP_MODE=demo python3 executive-ui/api/server.py`; leave unset for
+  normal mode. The deploy image defaults to **normal** (PR1 production
+  cleanup) — a demo showcase is an explicit opt-in:
+  `docker build --build-arg APP_MODE=demo …`. Demo **frontend builds**
   also set `VITE_APP_MODE=demo`, which only gates whether the bundled demo
   seed may act as an offline fallback — normal builds show an honest
   unavailable/empty state when the API is down, never demo data.

@@ -46,6 +46,20 @@ else
   RUNTIME_MODE="live_model"
 fi
 
+# PR1 — a NORMAL-mode (production-shaped) deployment running on the mock
+# provider is almost certainly a misconfiguration (missing ANTHROPIC_API_KEY):
+# chat would echo raw grounding facts instead of live synthesis. It still
+# starts (local keyless development is legitimate) but NEVER silently — this
+# warning plus the UI's persistent "Demo mode" badge disclose it loudly.
+if [ "${BOTIM_APP_MODE:-normal}" != "demo" ] && [ "$RUNTIME_MODE" = "deterministic_demo" ]; then
+  echo "start.sh: WARNING ============================================================"
+  echo "start.sh: WARNING  BOTIM_APP_MODE=${BOTIM_APP_MODE:-normal} but the chat provider is MOCK."
+  echo "start.sh: WARNING  Production users would see deterministic demo output, not"
+  echo "start.sh: WARNING  live model synthesis. Set ANTHROPIC_API_KEY (and unset"
+  echo "start.sh: WARNING  COPILOT_PROVIDER, or set it to 'anthropic') for real use."
+  echo "start.sh: WARNING ============================================================"
+fi
+
 export COPILOT_HOST COPILOT_PORT
 
 log() {
