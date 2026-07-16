@@ -41,7 +41,12 @@ Handoff corrections found during verification:
 - Chat: grounded, cited answers; clarification for vague messages; exactly one
   opportunity draft per genuine new idea; "Demo mode — deterministic grounded output"
   badge under MockProvider; honest unavailable state when copilot is down (no silent
-  fallback to the legacy router/scaffold).
+  fallback to the legacy router/scaffold). **PR2 baseline synthesis:** with a live
+  provider, answers are decision-oriented synthesis (executive-summary → …→
+  recommendation structure for strategic questions; grounding facts are private
+  context, never echoed; no "## Evidence used" id appendix — citations travel
+  structured). Under MockProvider the answer remains the deterministic facts block
+  by design, disclosed by the badge and the PR1 startup warning.
 - Reports: web-only at `/report/{OPP-nnn|UOPP-…}` (refresh/direct-nav safe). **No PDF
   export exists anywhere.**
 - Monitoring: internal-KB events (demo corpus) + user monitoring configs; "Run

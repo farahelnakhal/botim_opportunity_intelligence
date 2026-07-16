@@ -262,12 +262,10 @@ class Orchestrator:
             prose = facts_block
         if pack.needs_no_decision and grounding.NO_DECISION not in prose:
             prose = prose.rstrip() + "\n\n" + grounding.NO_DECISION
-        if pack.citations:
-            lines = ["", "## Evidence used"]
-            for c in pack.citations.values():
-                role = f" ({c['role'].replace('_', ' ')})" if c["role"] != "primary" else ""
-                lines.append(f"- {c['id']} — {c['title'] or c['type']}{role}")
-            prose = prose.rstrip() + "\n" + "\n".join(lines)
+        # PR2 (baseline synthesis) — the old "## Evidence used" id-list
+        # appendix is gone: citations travel as structured objects in the
+        # response and the frontend renders them as chips/drawers. Appending
+        # a raw id dump to every answer was part of the record-dump feel.
         return prose, warnings
 
     def _runtime_mode(self):
