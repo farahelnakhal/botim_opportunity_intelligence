@@ -45,6 +45,8 @@ try:
     from shared.research import providers as research_providers
     from shared.research import runner as research_runner
     from shared.research import revalidate as research_revalidate
+    from shared.research import extract as research_extract
+    from shared.llm import provider as llm_provider
 except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -54,6 +56,22 @@ except ImportError:
     from shared.research import providers as research_providers
     from shared.research import runner as research_runner
     from shared.research import revalidate as research_revalidate
+    from shared.research import extract as research_extract
+    from shared.llm import provider as llm_provider
+
+
+class _ExtractionLLMConfig:
+    """Minimal config for the extraction model — the canonical BOTIM_LLM_*
+    resolution (shared.llm.provider) without a cross-service import of
+    copilot-backend's Config. Timeout is bounded per extraction call."""
+
+    def __init__(self):
+        resolved = llm_provider.resolve_llm_env()
+        self.provider = resolved["provider"]
+        self.api_key = resolved["api_key"]
+        self.model = resolved["model"]
+        self.base_url = resolved["base_url"]
+        self.timeout_s = int(os.environ.get("RESEARCH_EXTRACT_TIMEOUT_S", 60))
 
 UI_DIR = Path(__file__).resolve().parents[1]
 WEB_DIST = UI_DIR / "web" / "dist"
@@ -297,6 +315,20 @@ class Handler(BaseHTTPRequestHandler):
                 summary = research_revalidate.revalidate_run(store, m.group(1))
                 detail = self._research_run_detail(store, m.group(1))
                 detail["revalidation_summary"] = summary
+                return self._json(detail)
+            # PR3 — LLM-assisted claim extraction with source verification.
+            # Accepted claims land as pending_review candidates (origin
+            # 'extracted'); nothing shortcuts human review. Needs a live model.
+            m = re.match(r"^/research/runs/(RRUN-[0-9a-f]{12})/extract$", sub)
+            if m:
+                cfg = _ExtractionLLMConfig()
+                if cfg.provider not in ("anthropic", "openai_compatible"):
+                    return self._error(400, "no model provider configured for extraction "
+                                            "(set BOTIM_LLM_API_KEY)")
+                provider = llm_provider.make_provider(cfg)
+                summary = research_extract.extract_claims(store, m.group(1), provider, cfg)
+                detail = self._research_run_detail(store, m.group(1))
+                detail["extraction_summary"] = summary
                 return self._json(detail)
             return self._error(404, "unknown research endpoint")
         except research_store.ResearchStoreError as exc:

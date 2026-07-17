@@ -12,3 +12,4 @@ from .store import ResearchStore, ResearchStoreError  # noqa: F401
 from .providers import MockSearchProvider, SearchProviderError, from_env as provider_from_env  # noqa: F401
 from .runner import execute_run  # noqa: F401
 from .revalidate import revalidate_run  # noqa: F401
+from .extract import extract_claims, validate_claim  # noqa: F401
