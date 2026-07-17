@@ -173,6 +173,56 @@ class ResearchRoutes(unittest.TestCase):
         self.assertEqual(detail["sources"][0]["last_revalidation"]["outcome"], "unreachable")
         self.assertEqual(detail["sources"][0]["id"], s["id"])
 
+    def test_extract_route_without_provider_is_an_honest_400(self):
+        # no BOTIM_LLM_API_KEY in the test env -> unconfigured -> honest refusal
+        run = self.store.create_run({"title": "extract route"})
+        run = self.store.start_run(run["id"])
+        self.store.add_source(run["id"], {"canonical_url": "https://example.com/a",
+                                          "title": "t", "excerpt": "grounded text here"})
+        self.store.finish_run(run["id"], "complete")
+        import urllib.error, urllib.request
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/executive-api/research/runs/{run['id']}/extract",
+            data=b"{}", method="POST", headers={"content-type": "application/json"})
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            urllib.request.urlopen(req)
+        self.assertEqual(cm.exception.code, 400)
+        self.assertIn("BOTIM_LLM_API_KEY", cm.exception.read().decode())
+
+    def test_extract_route_end_to_end_with_injected_provider(self):
+        import json as _json
+        from shared.research import extract as research_extract
+        from shared.llm.provider import ConversationModel, ModelResponse
+
+        run = self.store.create_run({"title": "extract e2e"})
+        run = self.store.start_run(run["id"])
+        s = self.store.add_source(run["id"], {"canonical_url": "https://example.com/x",
+                                              "title": "Report", "excerpt": "The market grew 12% in 2024."})
+        self.store.finish_run(run["id"], "complete")
+
+        class Stub(ConversationModel):
+            model = "stub"
+            def generate(self, messages, tools, system_prompt, configuration):
+                return ModelResponse(content=_json.dumps({"claims": [{
+                    "claim": "The market grew 12% in 2024.",
+                    "sources": [{"source_id": s["id"], "supporting_quote": "grew 12% in 2024"}]}]}))
+
+        orig_cfg = server._ExtractionLLMConfig
+        orig_make = server.llm_provider.make_provider
+        class Cfg:
+            provider = "openai_compatible"; api_key = "x"; model = "stub"; base_url = "u"; timeout_s = 30
+        server._ExtractionLLMConfig = lambda: Cfg()
+        server.llm_provider.make_provider = lambda cfg: Stub()
+        try:
+            _, detail = self._post(f"/executive-api/research/runs/{run['id']}/extract", {})
+        finally:
+            server._ExtractionLLMConfig = orig_cfg
+            server.llm_provider.make_provider = orig_make
+        self.assertEqual(detail["extraction_summary"]["accepted"], 1)
+        cand = detail["candidate_evidence"][0]
+        self.assertEqual(cand["status"], "pending_review")
+        self.assertEqual(cand["origin"], "extracted")
+
     def test_error_bodies_never_leak_sql_or_paths(self):
         with self.assertRaises(urllib.error.HTTPError) as cm:
             urlopen(f"http://127.0.0.1:{self.port}/executive-api/research/runs?status=bogus")

@@ -1,4 +1,4 @@
-# Research runs (Phases R1–R4b) — schema v2
+# Research runs (Phases R1–R4b, PR3) — schema v3
 
 Persistence + execution contract for external-research runs. Implementation:
 `shared/research/` (`store.py` — runtime SQLite at `RESEARCH_DB_PATH`, default
@@ -11,8 +11,9 @@ Nothing here is authoritative knowledge: candidate evidence never
 auto-promotes into `knowledge-base/`. Human review (Phase R3) moves a
 candidate `pending_review -> approved | rejected` exactly once; **approved
 still means candidate external research, never Part A evidence — no EV id
-exists or is implied.** Claims are human-authored from recorded sources in
-this phase (LLM-assisted extraction is a possible later enhancement).
+exists or is implied.** Claims may be human-authored (R3) or LLM-extracted
+with source verification (PR3, `origin='extracted'`) — both start
+`pending_review`; machine origin never shortcuts human review.
 
 ## ID namespaces
 
@@ -171,3 +172,28 @@ and review decisions are never modified** (propose, never auto-apply):
   `last_checked`; grounding emits a deterministic warning when an approved
   claim's `source_health` is `changed`/`unreachable`. The claim still
   grounds (its approval is untouched) — re-review is a human decision.
+
+## Machine claim extraction (PR3) — schema v3
+
+Schema v3 adds two columns to `candidate_evidence` (v2 databases migrate in
+place): `origin` (`human` | `extracted`, default `human`) and
+`extraction_meta` (JSON: the model and per-source supporting quotes).
+
+`POST /research/runs/{RRUN-id}/extract` runs LLM-assisted extraction over the
+run's recorded source text (`shared/research/extract.py`) and persists
+**verified** claims as `pending_review` candidates with `origin='extracted'`.
+Needs a configured model (`BOTIM_LLM_API_KEY`; else honest 400). Returns the
+run detail plus `extraction_summary {proposed, accepted, rejected:[{reason}],
+candidate_ids}`.
+
+Verification is deterministic — the model proposes, validation disposes. A
+claim is rejected unless: it cites ≥1 same-run source; each cited source
+carries a `supporting_quote` that is an **exact (normalized) substring** of
+that source's stored text; every number/percent/currency in the claim also
+appears in a supporting quote (`unsupported_quantitative_claim` otherwise);
+and a market-wide universal ("all/every/always/...") is backed by ≥2 sources
+(`single_source_universal_claim` otherwise). External source text is data,
+never instructions — a claim survives only if grounded in a verbatim quote,
+so injected directives in a page cannot become an accepted claim. **Machine
+origin never shortcuts human review:** every accepted claim is
+`pending_review` and nothing is written to the committed knowledge base.

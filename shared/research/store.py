@@ -47,7 +47,7 @@ try:
 except ImportError:  # imported with repo root not on sys.path (e.g. as shared.research from elsewhere)
     from ..source_urls import safe_url
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_DB_PATH = REPO / "runtime" / "research.db"
@@ -195,6 +195,8 @@ class ResearchStore:
                 self._migrate_to_v1(conn)
             if version < 2:
                 self._migrate_to_v2(conn)
+            if version < 3:
+                self._migrate_to_v3(conn)
             conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)",
                          (str(SCHEMA_VERSION),))
 
@@ -279,6 +281,28 @@ class ResearchStore:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_revalidations_source "
                      "ON source_revalidations(source_id)")
 
+    @staticmethod
+    def _migrate_to_v3(conn):
+        # PR3 — provenance for how a candidate claim came to exist:
+        #   origin='human'      a person authored it from sources (R3 default)
+        #   origin='extracted'  an LLM proposed it and it PASSED source
+        #                       verification (exact-substring supporting quote,
+        #                       quantitative-claim + universal-quantifier
+        #                       guards). Either way it starts pending_review —
+        #                       machine origin never shortcuts human approval.
+        # extraction_meta (JSON) records the model and the per-source
+        # supporting quotes, so a reviewer can see exactly what grounds it.
+        # idempotent like the v1/v2 CREATE ... IF NOT EXISTS migrations: only
+        # add a column that isn't already present (a DB stamped at an older
+        # version may already carry it).
+        existing = {row["name"] for row in
+                    conn.execute("PRAGMA table_info(candidate_evidence)")}
+        if "origin" not in existing:
+            conn.execute("ALTER TABLE candidate_evidence "
+                         "ADD COLUMN origin TEXT NOT NULL DEFAULT 'human'")
+        if "extraction_meta" not in existing:
+            conn.execute("ALTER TABLE candidate_evidence ADD COLUMN extraction_meta TEXT")
+
     # -- serialization ----------------------------------------------------- #
 
     @staticmethod
@@ -299,6 +323,9 @@ class ResearchStore:
     def _candidate_dict(row):
         d = dict(row)
         d["source_ids"] = json.loads(d.get("source_ids") or "[]")
+        if "extraction_meta" in d:
+            d["extraction_meta"] = json.loads(d["extraction_meta"]) if d.get("extraction_meta") else None
+        d.setdefault("origin", "human")
         return d
 
     def _get_run_row(self, conn, run_id):
@@ -548,6 +575,14 @@ class ResearchStore:
                                      "a candidate claim without a source is fabrication")
         if len(source_ids) > CANDIDATE_SOURCES_MAX:
             raise ResearchStoreError(f"'source_ids' exceeds {CANDIDATE_SOURCES_MAX} items")
+        # PR3 — origin/extraction_meta record whether a human or the verified
+        # extractor produced the claim; both still start pending_review.
+        origin = payload.get("origin", "human")
+        if origin not in ("human", "extracted"):
+            raise ResearchStoreError("'origin' must be 'human' or 'extracted'")
+        extraction_meta = payload.get("extraction_meta")
+        if extraction_meta is not None and not isinstance(extraction_meta, dict):
+            raise ResearchStoreError("'extraction_meta' must be an object")
         candidate_id = _new_id("RCAND")
         now = _now()
         with self._connect() as conn:
@@ -567,9 +602,11 @@ class ResearchStore:
                         "every candidate source must belong to the same run", status=400)
             conn.execute(
                 """INSERT INTO candidate_evidence
-                   (id, run_id, claim, source_ids, status, contradicts, created_at, updated_at)
-                   VALUES (?,?,?,?,'pending_review',?,?,?)""",
-                (candidate_id, run_id, claim, json.dumps(source_ids), contradicts, now, now))
+                   (id, run_id, claim, source_ids, status, contradicts, origin,
+                    extraction_meta, created_at, updated_at)
+                   VALUES (?,?,?,?,'pending_review',?,?,?,?,?)""",
+                (candidate_id, run_id, claim, json.dumps(source_ids), contradicts,
+                 origin, json.dumps(extraction_meta) if extraction_meta else None, now, now))
             return self._candidate_dict(conn.execute(
                 "SELECT * FROM candidate_evidence WHERE id=?", (candidate_id,)).fetchone())
 
