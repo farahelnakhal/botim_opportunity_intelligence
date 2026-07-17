@@ -16,6 +16,7 @@ from .wordguard import check_wording
 
 
 import re as _re
+import time
 
 _UOPP_RE = _re.compile(r"^UOPP-[0-9a-f]{12}$")
 _UO_TEXT_FIELDS = ("title", "product_definition", "problem_statement",
@@ -91,10 +92,12 @@ def _resolve_context(message_ids, request_context, stored_context):
 
 
 class Orchestrator:
-    def __init__(self, config, store, provider=None):
+    def __init__(self, config, store, provider=None, sleep_fn=None):
         self.config = config
         self.store = store
         self.provider = provider or make_provider(config)
+        # Injectable so tests exercise the retry path without real waits.
+        self._sleep = sleep_fn if sleep_fn is not None else time.sleep
 
     # -- public entrypoint ---------------------------------------------------
 
@@ -209,8 +212,15 @@ class Orchestrator:
         prose, iterations = None, 0
         while iterations < self.config.max_tool_iterations:
             iterations += 1
+            # The full tool catalog is offered only on the first pass: the
+            # deterministic tool plan has already run, so the model gets one
+            # round to request extra tools, then subsequent passes just fold
+            # in results and write prose. Re-sending 30+ tool specs every
+            # iteration was pure token cost — the main driver of tripping a
+            # provider's per-minute token limit mid-conversation.
+            tools = tool_specs() if iterations == 1 else []
             try:
-                resp = self.provider.generate(messages, tool_specs(), SYSTEM_PROMPT, self.config)
+                resp = self._generate_with_retry(messages, tools)
             except ProviderError as exc:
                 code = "provider_timeout" if exc.timeout else "provider_error"
                 return {"error": {"code": code, "message": "the model provider was unavailable",
@@ -263,6 +273,23 @@ class Orchestrator:
                               pack.warnings + warnings, trace, pack.draft)
 
     # -- helpers ---------------------------------------------------------------
+
+    def _generate_with_retry(self, messages, tools):
+        """Call the provider, retrying only RETRYABLE failures (rate limits,
+        transient 5xx, timeouts) with a bounded, capped backoff. A
+        non-retryable error (bad key, unconfigured provider) is raised
+        immediately; retries are exhausted by re-raising the last error so the
+        caller still surfaces an honest failure — never a fabricated answer."""
+        attempts = max(1, self.config.max_provider_retries + 1)
+        for attempt in range(attempts):
+            try:
+                return self.provider.generate(messages, tools, SYSTEM_PROMPT, self.config)
+            except ProviderError as exc:
+                if not exc.retryable or attempt == attempts - 1:
+                    raise
+                backoff = exc.retry_after if exc.retry_after is not None \
+                    else self.config.provider_retry_base_s * (2 ** attempt)
+                self._sleep(max(0.0, min(backoff, self.config.provider_retry_max_s)))
 
     def _history_messages(self, conversation_id):
         history = self.store.get_messages(conversation_id, limit=self.config.max_history)

@@ -279,8 +279,10 @@ export function UserMonitoringPanel({ oppId }: { oppId: string }) {
       )}
 
       <div className="uop-status-note" data-testid="runner-note">
-        No live monitoring runner is connected yet — this configuration is stored and
-        labelled honestly; a manual run will become available when live research is enabled.
+        Manual monitoring runs are available — use “Run monitoring now” to perform one real
+        pass (requires a configured search provider; results and any failures are recorded
+        honestly). There is no scheduler yet, so the cadence below remains stored intent
+        rather than an automatic schedule.
       </div>
 
       <div className="uop-form">

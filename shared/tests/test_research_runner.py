@@ -143,6 +143,20 @@ class Profiles(unittest.TestCase):
         self.assertTrue(any("instant settlement" in q for _, q in pairs))
         self.assertTrue(any("chargebacks" in q for _, q in pairs))
 
+    def test_generic_profile_defaults_are_not_the_validation_case(self):
+        # Fix #4 — an unparameterised generic run must stay genuinely generic:
+        # it must never emit the UAE/SME/corporate-card validation case by
+        # default, and empty context fields must not leave stray whitespace.
+        pairs = profiles.generate_queries("generic")
+        joined = " || ".join(q for _, q in pairs)
+        self.assertNotIn("UAE", joined)
+        self.assertNotIn("SME", joined)
+        self.assertNotIn("corporate card", joined)
+        for _, q in pairs:
+            self.assertEqual(q, q.strip())      # no leading/trailing space
+            self.assertNotIn("  ", q)           # no gap where a field was empty
+            self.assertTrue(q)                  # never an empty query
+
     def test_unknown_profile_raises_for_honest_handling(self):
         with self.assertRaises(KeyError):
             profiles.generate_queries("no-such-profile")
