@@ -23,6 +23,14 @@ services:
       - key: BOTIM_APP_MODE
         value: normal
 
+      # ---- Authentication (Phase R8a) ------------------------------------ #
+      # off = today's open single-tenant behavior. Flip to `required` to put
+      # the whole app (API + chat) behind email+password sign-in; new records
+      # then belong to their creator. Optionally set AUTH_ALLOW_REGISTRATION=0
+      # once the intended accounts exist. Password reset arrives with R6 email.
+      - key: BOTIM_AUTH_MODE
+        value: "off"
+
       # ---- Canonical LLM configuration (drives ALL grounded chat) ------- #
       # The copilot, synthesis, research claim-extraction, and Merchant Voice
       # all resolve through these BOTIM_LLM_* variables (shared/llm/provider.py).

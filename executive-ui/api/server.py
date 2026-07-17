@@ -29,11 +29,13 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 try:
-    from . import generate, modes, monitoring_runner, router, serialize, user_store
+    from . import (auth_store, generate, modes, monitoring_runner, router,
+                   serialize, user_store)
 except ImportError:  # run directly as a script (python3 executive-ui/api/server.py)
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from api import generate, modes, monitoring_runner, router, serialize, user_store
+    from api import (auth_store, generate, modes, monitoring_runner, router,
+                     serialize, user_store)
 
 # shared.research lives at the repo root (the platform layer, reused later by
 # the runner/monitoring), not under executive-ui — make the root importable
@@ -147,6 +149,47 @@ def get_workspace_store():
     return _WORKSPACE_STORE
 
 
+# Phase R8a — accounts + sessions (path from AUTH_DB_PATH, default
+# runtime/auth.db). Lazy for the same reason.
+_AUTH_STORE = None
+
+
+def get_auth_store():
+    global _AUTH_STORE
+    if _AUTH_STORE is None:
+        _AUTH_STORE = auth_store.AuthStore()
+    return _AUTH_STORE
+
+
+SESSION_COOKIE = "botim_session"
+
+
+def auth_required():
+    """Phase R8a — enforcement is opt-in per deployment. Default 'off'
+    preserves the existing single-tenant behavior; any value other than an
+    explicit off-switch enables enforcement (a typo FAILS CLOSED — it never
+    silently disables auth). Read per request so tests can toggle it."""
+    value = os.environ.get("BOTIM_AUTH_MODE", "off").strip().lower()
+    return value not in ("", "off", "0", "disabled", "none")
+
+
+def registration_open():
+    """Open registration by default; the operator can close it once the
+    intended accounts exist (AUTH_ALLOW_REGISTRATION=0)."""
+    return os.environ.get("AUTH_ALLOW_REGISTRATION", "1").strip().lower() \
+        not in ("0", "off", "false", "no")
+
+
+def _cookie_secure():
+    """Secure flag on the session cookie: on by default (production is
+    HTTPS), explicitly disable with AUTH_COOKIE_SECURE=0 for plain-HTTP
+    local runs; test mode defaults it off so the offline suites work."""
+    explicit = os.environ.get("AUTH_COOKIE_SECURE")
+    if explicit is not None:
+        return explicit.strip().lower() not in ("0", "off", "false", "no")
+    return modes.get_mode() != "test"
+
+
 class Handler(BaseHTTPRequestHandler):
     repo_root = "."
 
@@ -154,17 +197,92 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     # -- helpers ----------------------------------------------------------- #
-    def _json(self, obj, status=200):
+    def _json(self, obj, status=200, extra_headers=None):
         body = json.dumps(obj, default=str).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Content-Length", str(len(body)))
+        for name, value in (extra_headers or []):
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
     def _error(self, status, msg):
         self._json({"error": msg}, status=status)
+
+    # -- Phase R8a: sessions -------------------------------------------------- #
+
+    def _session_token(self):
+        header = self.headers.get("Cookie")
+        if not header:
+            return None
+        from http.cookies import SimpleCookie
+        try:
+            jar = SimpleCookie()
+            jar.load(header)
+        except Exception:
+            return None
+        morsel = jar.get(SESSION_COOKIE)
+        return morsel.value if morsel else None
+
+    def _current_user(self):
+        token = self._session_token()
+        if not token:
+            return None
+        try:
+            return get_auth_store().session_user(token)
+        except auth_store.AuthError:
+            return None
+
+    def _session_cookie_header(self, token, clear=False):
+        parts = [f"{SESSION_COOKIE}={'' if clear else token}", "Path=/",
+                 "HttpOnly", "SameSite=Lax",
+                 f"Max-Age={0 if clear else auth_store.SESSION_TTL_DAYS * 86400}"]
+        if _cookie_secure():
+            parts.append("Secure")
+        return ("Set-Cookie", "; ".join(parts))
+
+    def _require_session(self):
+        """The signed-in user, or an emitted 401 (returns None). Callers must
+        stop when None. Only consulted when auth_required()."""
+        user = self._current_user()
+        if user is None:
+            self._json({"error": "authentication required",
+                        "code": "auth_required"}, status=401)
+        return user
+
+    # /auth/* — always reachable (sign-in must work before a session exists)
+    def _auth_api(self, method, sub):
+        store = get_auth_store()
+        try:
+            if sub == "/auth/me" and method == "GET":
+                return self._json({"auth_mode": "required" if auth_required() else "off",
+                                   "registration_open": registration_open(),
+                                   "user": self._current_user()})
+            if sub == "/auth/register" and method == "POST":
+                if not registration_open():
+                    return self._error(403, "registration is closed on this deployment")
+                body = self._read_json_body()
+                user = store.register(body.get("email"), body.get("password"),
+                                      display_name=body.get("display_name"))
+                _, token = store.login(body.get("email"), body.get("password"))
+                return self._json({"user": user}, status=201,
+                                  extra_headers=[self._session_cookie_header(token)])
+            if sub == "/auth/login" and method == "POST":
+                body = self._read_json_body()
+                user, token = store.login(body.get("email"), body.get("password"))
+                return self._json({"user": user},
+                                  extra_headers=[self._session_cookie_header(token)])
+            if sub == "/auth/logout" and method == "POST":
+                store.logout(self._session_token())
+                return self._json({"signed_out": True},
+                                  extra_headers=[self._session_cookie_header("", clear=True)])
+            return self._error(404, "unknown auth endpoint")
+        except auth_store.AuthError as exc:
+            return self._error(exc.status, str(exc))
+        except Exception as exc:  # never leak hashes/SQL/paths
+            return self._error(500, f"{type(exc).__name__}: internal error")
 
     def do_OPTIONS(self):  # CORS preflight
         self.send_response(204)
@@ -225,6 +343,9 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         if path.startswith("/copilot-api/"):
+            # Phase R8a — under required-auth mode, chat needs a session too
+            if auth_required() and self._require_session() is None:
+                return
             length = int(self.headers.get("Content-Length", 0) or 0)
             if length > COPILOT_PROXY_MAX_BODY_BYTES:
                 # Rejected on the declared Content-Length alone — never
@@ -239,6 +360,12 @@ class Handler(BaseHTTPRequestHandler):
         if not path.startswith("/api/"):
             return self._error(404, "not found")
         sub = path[len("/api"):]
+        # Phase R8a — sign-in/register/logout are reachable without a session;
+        # every other API write requires one when enforcement is on.
+        if sub.startswith("/auth/"):
+            return self._auth_api("POST", sub)
+        if auth_required() and self._require_session() is None:
+            return
         # Phase 6/7 — user-opportunity writes (create / archive / restore /
         # monitoring pause+resume)
         if sub.startswith("/user-opportunities"):
@@ -367,14 +494,27 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(404, "unknown endpoint")
         opp_id, action, mon_action = m.group(1), m.group(2), m.group(3)
         store = get_user_store()
+        # Phase R8a — per-user scoping under required-auth mode. Legacy rows
+        # (NULL owner, created before auth existed) stay visible to every
+        # signed-in user; new records belong to their creator; another
+        # user's record answers 404 (indistinguishable from nonexistent).
+        owner = self._current_user() if auth_required() else None
         try:
             if method == "GET" and opp_id is None:
                 include_archived = (query.get("include_archived") or ["0"])[0] in ("1", "true")
-                return self._json({"user_opportunities": store.list(include_archived=include_archived)})
+                return self._json({"user_opportunities": store.list(
+                    include_archived=include_archived,
+                    visible_to=owner["id"] if owner else None)})
             if method == "POST" and opp_id is None:
-                return self._json(store.create(self._read_json_body()), status=201)
+                return self._json(store.create(
+                    self._read_json_body(),
+                    owner_user_id=owner["id"] if owner else None), status=201)
             if opp_id is None:
                 return self._error(405, "method not allowed")
+            if owner is not None:
+                record_owner = store.get(opp_id).get("owner_user_id")
+                if record_owner is not None and record_owner != owner["id"]:
+                    return self._error(404, "user opportunity not found")
             if action is None:
                 if method == "GET":
                     return self._json(store.get(opp_id))
@@ -586,6 +726,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        if auth_required() and self._require_session() is None:  # Phase R8a
+            return
         if path.startswith("/copilot-api/"):
             return self._proxy_to_copilot("DELETE", path[len("/copilot-api"):], parsed.query, b"")
         sub = self._executive_sub(path)
@@ -595,6 +737,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PATCH(self):
         parsed = urlparse(self.path)
+        if auth_required() and self._require_session() is None:  # Phase R8a
+            return
         sub = self._executive_sub(parsed.path)
         if sub is not None and sub.startswith("/user-opportunities"):
             return self._user_api("PATCH", sub, parse_qs(parsed.query))
@@ -602,6 +746,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         parsed = urlparse(self.path)
+        if auth_required() and self._require_session() is None:  # Phase R8a
+            return
         sub = self._executive_sub(parsed.path)
         if sub is not None and sub.startswith("/user-opportunities"):
             return self._user_api("PUT", sub, parse_qs(parsed.query))
@@ -621,16 +767,27 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         if path.startswith("/copilot-api/"):
+            # Phase R8a — the proxy requires a session under required-auth mode
+            if auth_required() and self._require_session() is None:
+                return
             return self._proxy_to_copilot("GET", path[len("/copilot-api"):], parsed.query, b"")
         if path.startswith("/executive-api/"):
             return self._api(path[len("/executive-api"):], parse_qs(parsed.query))
         if path.startswith("/api/"):
             return self._api(path[len("/api"):], parse_qs(parsed.query))
+        # static files stay reachable — the sign-in screen has to load
         return self._static(path)
 
     def _api(self, path, query):
         root = self.repo_root
         mode = modes.get_mode()
+        # Phase R8a — /auth/me is the mode/identity probe and must work
+        # without a session; everything else requires one when enforcement
+        # is on (the read models include user data and grounded evidence).
+        if path.startswith("/auth/"):
+            return self._auth_api("GET", path)
+        if auth_required() and self._require_session() is None:
+            return
         try:
             # Phase 6/7 — user-opportunity reads (mode-independent: persisted
             # user records are real product data in every mode)

@@ -4,6 +4,37 @@
 > decision would surprise a future maintainer or constrains future work.
 > Format: date · decision · reasoning · alternatives · consequences.
 
+## 2026-07-17 — R8a authentication: stdlib email+password, opt-in enforcement, legacy rows shared
+
+- **Decision:** Accounts are email + password hashed with PBKDF2-HMAC-SHA256
+  (600k iterations, per-user salt, versioned hash format), sessions are opaque
+  256-bit tokens stored **only as SHA-256 hashes** and delivered as an
+  HttpOnly/SameSite=Lax cookie (Secure outside test mode). Enforcement is
+  **opt-in per deployment** via `BOTIM_AUTH_MODE` (default `off`; any
+  unrecognized value fails CLOSED to required). Under required mode every
+  `/api` route and the copilot proxy demand a session; `/auth/*` and static
+  files stay reachable. Tenancy: `user_opportunities.owner_user_id` — new
+  records belong to their creator; pre-auth rows keep a NULL owner and remain
+  **visible to all signed-in users** (legacy shared), never silently
+  reassigned; another user's record answers an indistinguishable 404.
+  `AUTH_ALLOW_REGISTRATION=0` closes sign-ups once the intended accounts exist.
+- **Reasoning:** Pure-stdlib backends rule out OAuth SDKs and external IdPs;
+  magic-link sign-in needs the R6 email infrastructure that does not exist
+  yet. Password auth with honest limitations (no reset until R6, stated in
+  the UI) is the smallest real implementation that unblocks R6/R7. Opt-in
+  enforcement means existing single-tenant deployments and the offline test
+  matrix keep working unchanged; fail-closed parsing means a typo can never
+  silently disable auth.
+- **Alternatives rejected:** OAuth/Google sign-in (external dependency +
+  operator registration; can be added later behind the same session layer);
+  auto-assigning legacy rows to the first registrant (silent data grab);
+  default-on enforcement (breaks every existing deploy on upgrade).
+- **Consequences:** R8b remains: per-user scoping of copilot conversations
+  and research runs (identity propagation through the fixed proxy),
+  merchant-voice token replacement, per-user quotas, password reset with R6
+  email. Email recipients (R6) and private documents (R7) now have an
+  identity to scope to.
+
 ## 2026-07-16 — Versioned preliminary analysis workspace per saved chat (R5 model)
 
 - **Decision:** Each saved chat gets a **versioned, snapshotted analysis
