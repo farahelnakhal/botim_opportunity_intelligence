@@ -96,7 +96,7 @@ def _preliminary_score(opportunity_id, kb_hits, accepted_claims):
 def build_workspace(ws_store, research_store, opportunity, *, trigger,
                     question=None, search_provider=None, llm_provider=None,
                     llm_config=None, kb_records=None, execute_run_fn=None,
-                    keep=DEFAULT_KEEP):
+                    keep=DEFAULT_KEEP, document_store=None, viewer_user_id=None):
     """Run the full chain and return the finished workspace version dict.
 
     `opportunity` is the saved opportunity dict (needs at least `id` and
@@ -121,6 +121,32 @@ def build_workspace(ws_store, research_store, opportunity, *, trigger,
         if not kb_matches:
             gaps.append("no related internal evidence records matched — this "
                         "analysis has no committed KB support yet")
+
+        # 1b. Uploaded documents (Phase R7) — bounded verbatim excerpts via
+        # deterministic chunk retrieval. Document text is USER-PROVIDED DATA,
+        # never instructions; excerpts are snapshotted on the version so the
+        # analysis stays traceable even if the file is later deleted.
+        document_evidence = []
+        if document_store is not None:
+            query_text = " ".join(p for p in (question, opportunity.get("title"),
+                                              opportunity.get("target_segment"),
+                                              opportunity.get("problem_statement")) if p)
+            corpus = document_store.chunks_for_opportunity(
+                opportunity.get("id"), visible_to=viewer_user_id)
+            if not corpus:
+                gaps.append("no uploaded documents are attached to this opportunity")
+            else:
+                from shared.documents import search_chunks
+                indexed = [(i, text) for i, (_doc, _seq, text) in enumerate(corpus)]
+                hits = search_chunks(query_text, indexed)
+                if not hits:
+                    gaps.append("no uploaded document content matched this analysis")
+                for score, i, text in hits:
+                    doc, seq, _ = corpus[i]
+                    document_evidence.append({
+                        "document_id": doc["id"], "filename": doc["filename"],
+                        "chunk_seq": seq, "match": score,
+                        "excerpt": text[:500]})
 
         # 2. External research — bounded run, or an honest gap
         queries = build_queries(opportunity, question)
@@ -180,12 +206,13 @@ def build_workspace(ws_store, research_store, opportunity, *, trigger,
             "research_run_id": run_id,
             "search_provider": type(search_provider).__name__ if search_provider else None,
             "extraction_model": extraction_model,
+            "document_ids": sorted({d["document_id"] for d in document_evidence}),
             "builder": "shared.workspace.builder/v1",
         }
         finished_version = ws_store.complete_version(
             version["id"], kb_evidence=kb_matches, claim_ids=claim_ids,
             preliminary_score=score, gaps=gaps, provenance=provenance,
-            research_run_id=run_id)
+            research_run_id=run_id, document_evidence=document_evidence)
         ws_store.prune(opp_id, keep=keep)
         return finished_version
     except Exception as exc:

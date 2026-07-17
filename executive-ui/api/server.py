@@ -50,6 +50,7 @@ try:
     from shared.research import extract as research_extract
     from shared.llm import provider as llm_provider
     from shared import workspace as workspace_pkg
+    from shared import documents as documents_pkg
 except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -62,6 +63,7 @@ except ImportError:
     from shared.research import extract as research_extract
     from shared.llm import provider as llm_provider
     from shared import workspace as workspace_pkg
+    from shared import documents as documents_pkg
 
 
 class _ExtractionLLMConfig:
@@ -161,6 +163,18 @@ def get_auth_store():
     return _AUTH_STORE
 
 
+# Phase R7 — uploaded-document store (path from DOCUMENTS_DB_PATH, default
+# runtime/documents.db). Lazy like the others.
+_DOCUMENT_STORE = None
+
+
+def get_document_store():
+    global _DOCUMENT_STORE
+    if _DOCUMENT_STORE is None:
+        _DOCUMENT_STORE = documents_pkg.DocumentStore()
+    return _DOCUMENT_STORE
+
+
 SESSION_COOKIE = "botim_session"
 
 
@@ -184,7 +198,8 @@ def registration_open():
 # under required-auth mode (no identity, no quota). Overridable per action:
 # QUOTA_CHAT_PER_DAY, QUOTA_RESEARCH_EXECUTE_PER_DAY, ...
 QUOTA_DEFAULTS = {"chat": 200, "research_execute": 25, "research_extract": 25,
-                  "workspace_refresh": 25, "monitoring_run": 25}
+                  "workspace_refresh": 25, "monitoring_run": 25,
+                  "document_upload": 25}
 
 
 def quota_limit(action):
@@ -556,7 +571,7 @@ class Handler(BaseHTTPRequestHandler):
     def _user_api(self, method, sub, query):
         m = re.match(r"^/user-opportunities"
                      r"(?:/(UOPP-[0-9a-f]{12})"
-                     r"(?:/(archive|restore|monitoring|workspace)"
+                     r"(?:/(archive|restore|monitoring|workspace|documents)"
                      r"(?:/(pause|resume|run|events|refresh|versions|diff))?)?)?/?$", sub)
         if not m:
             # a syntactically different id shape (e.g. OPP-010) is a client
@@ -596,6 +611,8 @@ class Handler(BaseHTTPRequestHandler):
                     confirm = (query.get("confirm") or [None])[0]
                     return self._json(store.delete(opp_id, confirm=confirm))
                 return self._error(405, "method not allowed")
+            if action == "documents":
+                return self._documents_api(method, opp_id, owner)
             if action == "workspace":
                 return self._workspace_api(method, opp_id, mon_action, store)
             if action == "archive" and method == "POST":
@@ -648,6 +665,66 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:  # never leak SQL/stack detail
             return self._error(500, f"{type(exc).__name__}: internal error")
 
+    # -- Phase R7: uploaded documents ---------------------------------------- #
+    # POST .../documents           -> upload {filename, content_base64};
+    #                                  extraction is synchronous and honest —
+    #                                  a failed extraction fails the upload.
+    # GET  .../documents           -> list for this opportunity
+    # DELETE /api/documents/{DOC-} -> permanent delete (document + chunks)
+    def _documents_api(self, method, opp_id, owner):
+        docs = get_document_store()
+        try:
+            if method == "GET":
+                return self._json({"documents": docs.list_documents(
+                    opp_id, visible_to=owner["id"] if owner else None)})
+            if method == "POST":
+                if not self._quota_guard("document_upload"):
+                    return
+                body = self._read_json_body()
+                filename = body.get("filename")
+                encoded = body.get("content_base64")
+                if not isinstance(filename, str) or not isinstance(encoded, str):
+                    return self._error(400, "body must carry 'filename' and 'content_base64'")
+                import base64
+                try:
+                    data = base64.b64decode(encoded, validate=True)
+                except (ValueError, TypeError):
+                    return self._error(400, "content_base64 is not valid base64")
+                try:
+                    text, meta = documents_pkg.extract_text(filename, data)
+                except documents_pkg.ExtractionError as exc:
+                    return self._error(exc.status, str(exc))
+                chunks = documents_pkg.chunk_text(text)
+                doc = docs.add_document(opp_id, filename, meta, chunks,
+                                        owner_user_id=owner["id"] if owner else None)
+                return self._json(doc, status=201)
+            return self._error(405, "method not allowed")
+        except documents_pkg.DocumentStoreError as exc:
+            return self._error(exc.status, str(exc))
+        except Exception as exc:  # never leak content/SQL
+            return self._error(500, f"{type(exc).__name__}: internal error")
+
+    def _document_delete(self, doc_id):
+        docs = get_document_store()
+        try:
+            doc = docs.get_document(doc_id)
+            # the document follows its opportunity's ownership AND its own
+            owner = self._current_user() if auth_required() else None
+            if owner is not None:
+                if doc.get("owner_user_id") not in (None, owner["id"]):
+                    return self._error(404, "document not found")
+                rec = get_user_store().get(doc["opportunity_id"])
+                if rec.get("owner_user_id") not in (None, owner["id"]):
+                    return self._error(404, "document not found")
+            return self._json(docs.delete_document(doc_id))
+        except documents_pkg.DocumentStoreError as exc:
+            return self._error(exc.status, str(exc))
+        except user_store.StoreError:
+            # opportunity gone but the document remains -> still deletable
+            return self._json(docs.delete_document(doc_id))
+        except Exception as exc:
+            return self._error(500, f"{type(exc).__name__}: internal error")
+
     # -- Phase R5/PR4: versioned analysis workspace -------------------------- #
     # POST .../workspace/refresh  -> run the full chain, append a new version
     # GET  .../workspace          -> latest complete version (+staleness)
@@ -673,11 +750,14 @@ class Handler(BaseHTTPRequestHandler):
                 cfg = _ExtractionLLMConfig()
                 llm = (llm_provider.make_provider(cfg)
                        if cfg.provider in ("anthropic", "openai_compatible") else None)
+                viewer = self._current_user() if auth_required() else None
                 version = workspace_pkg.build_workspace(
                     ws, get_research_store(), opp, trigger=trigger,
                     question=body.get("question") if isinstance(body.get("question"), str) else None,
                     search_provider=search_provider,
-                    llm_provider=llm, llm_config=cfg if llm else None)
+                    llm_provider=llm, llm_config=cfg if llm else None,
+                    document_store=get_document_store(),
+                    viewer_user_id=viewer["id"] if viewer else None)
                 return self._json(self._workspace_view(ws, version), status=201)
             if sub_action == "versions" and method == "GET":
                 return self._json({"versions": ws.list_versions(opp_id)})
@@ -809,6 +889,10 @@ class Handler(BaseHTTPRequestHandler):
         sub = self._executive_sub(path)
         if sub is not None and sub.startswith("/user-opportunities"):
             return self._user_api("DELETE", sub, parse_qs(parsed.query))
+        if sub is not None:
+            m = re.match(r"^/documents/(DOC-[0-9a-f]{12})$", sub)
+            if m:  # Phase R7 — permanent document deletion
+                return self._document_delete(m.group(1))
         return self._error(404, "not found")
 
     def do_PATCH(self):

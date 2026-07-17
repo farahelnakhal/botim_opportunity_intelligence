@@ -32,7 +32,7 @@ import uuid
 import datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_DB_PATH = REPO / "runtime" / "workspace.db"
@@ -53,7 +53,7 @@ ERROR_MAX = 1000
 DEFAULT_KEEP = 10
 DEFAULT_STALE_HOURS = 24
 
-_JSON_LIST_FIELDS = ("kb_evidence", "claim_ids", "gaps")
+_JSON_LIST_FIELDS = ("kb_evidence", "claim_ids", "gaps", "document_evidence")
 _JSON_DICT_FIELDS = ("preliminary_score", "provenance")
 
 
@@ -136,6 +136,15 @@ class WorkspaceStore:
                     UNIQUE (opportunity_id, version))""")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_awv_opp "
                              "ON workspace_versions(opportunity_id, version)")
+            if version < 2:
+                # Phase R7 — verbatim excerpts from the user's uploaded
+                # documents that grounded this version (snapshot: kept even
+                # if the document is later deleted). Idempotent PRAGMA guard.
+                existing = {row["name"] for row in
+                            conn.execute("PRAGMA table_info(workspace_versions)")}
+                if "document_evidence" not in existing:
+                    conn.execute("ALTER TABLE workspace_versions "
+                                 "ADD COLUMN document_evidence TEXT NOT NULL DEFAULT '[]'")
             conn.execute("INSERT OR REPLACE INTO meta (key, value) "
                          "VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
 
@@ -200,12 +209,12 @@ class WorkspaceStore:
 
     def complete_version(self, version_id, *, kb_evidence=None, claim_ids=None,
                          preliminary_score=None, gaps=None, provenance=None,
-                         research_run_id=None):
+                         research_run_id=None, document_evidence=None):
         """Finish a running version as `complete` with the chain's outputs.
         Empty outputs are honest (they show up as gaps), never invented."""
         _validate_awv_id(version_id)
         for name, value in (("kb_evidence", kb_evidence), ("claim_ids", claim_ids),
-                            ("gaps", gaps)):
+                            ("gaps", gaps), ("document_evidence", document_evidence)):
             if value is not None and not isinstance(value, list):
                 raise WorkspaceStoreError(f"'{name}' must be a list")
         for name, value in (("preliminary_score", preliminary_score),
@@ -217,12 +226,14 @@ class WorkspaceStore:
             conn.execute(
                 """UPDATE workspace_versions SET status='complete', error=NULL,
                    kb_evidence=?, claim_ids=?, preliminary_score=?, gaps=?,
-                   provenance=?, research_run_id=?, completed_at=? WHERE id=?""",
+                   provenance=?, research_run_id=?, document_evidence=?,
+                   completed_at=? WHERE id=?""",
                 (json.dumps(kb_evidence or []), json.dumps(claim_ids or []),
                  json.dumps(preliminary_score) if preliminary_score else None,
                  json.dumps(gaps or []),
                  json.dumps(provenance) if provenance else None,
-                 research_run_id, _now(), version_id))
+                 research_run_id, json.dumps(document_evidence or []),
+                 _now(), version_id))
         return self.get_version(version_id)
 
     def fail_version(self, version_id, error):

@@ -537,6 +537,7 @@ def get_analysis_workspace(opportunity_ref):
         "is_stale": ws.is_stale(latest),
         "preliminary_score": latest.get("preliminary_score"),
         "kb_evidence": latest.get("kb_evidence") or [],
+        "document_evidence": latest.get("document_evidence") or [],
         "claims": claims,
         "gaps": latest.get("gaps") or [],
         "research_run_id": latest.get("research_run_id"),
