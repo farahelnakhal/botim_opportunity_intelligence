@@ -677,10 +677,13 @@ class ResearchStore:
         """{source_id: latest revalidation dict} for one run's sources."""
         _validate_id(run_id, RUN_RE, "research run id")
         with self._connect() as conn:
+            # rowid tiebreak: checked_at has second precision, so two checks
+            # in the same second must still resolve "latest" by insertion
+            # order, not by random-uuid id order.
             rows = conn.execute(
                 """SELECT r.* FROM source_revalidations r
                     JOIN research_sources s ON s.id = r.source_id
-                    WHERE s.run_id=? ORDER BY r.checked_at, r.id""", (run_id,)).fetchall()
+                    WHERE s.run_id=? ORDER BY r.checked_at, r.rowid""", (run_id,)).fetchall()
         latest = {}
         for row in rows:  # ordered ascending — the last write per source wins
             latest[row["source_id"]] = dict(row)

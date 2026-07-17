@@ -1,6 +1,26 @@
 # Decision log
 
-> Major product/architecture decisions, newest first. Add an entry whenever a
+> Major product/architecture decisions, newest first.
+
+## 2026-07-16 — Canonical vendor-neutral LLM configuration (BOTIM_LLM_*)
+
+- **Decision:** All live-model functionality resolves configuration through
+  `BOTIM_LLM_API_KEY` / `BOTIM_LLM_MODEL` / `BOTIM_LLM_BASE_URL` /
+  `BOTIM_LLM_PROVIDER` (`shared.llm.provider.resolve_llm_env`). Vendor
+  variables (`ANTHROPIC_API_KEY`, `GROQ_API_KEY`, `COPILOT_*`) are optional
+  aliases only. An OpenAI-compatible provider removes the Anthropic hard
+  dependency. The deterministic mock responder is selected ONLY explicitly
+  (or defaulted by start.sh in demo/test mode) — a missing key in normal
+  mode yields an "unconfigured" provider with honest chat errors, never
+  silent demo output.
+- **Reasoning:** The deployment configured `BOTIM_LLM_*`, but those were
+  read only by the deprecated legacy scaffold; the chat path keyed on
+  `ANTHROPIC_API_KEY` and silently fell back to mock — exactly the failure
+  the honesty rules exist to prevent.
+- **Consequences:** `GET /api/health` on the copilot reports the active
+  provider/model/config source (never keys); startup logs the same;
+  non-Anthropic endpoints need `BOTIM_LLM_BASE_URL` unless implied by the
+  Groq alias. Add an entry whenever a
 > decision would surprise a future maintainer or constrains future work.
 > Format: date · decision · reasoning · alternatives · consequences.
 
