@@ -171,10 +171,18 @@ always-on scheduler, and email infrastructure.
 
 **Depends on:** nothing hard; **gates R6 and R7** (email recipients and
 private documents must be scoped to a user).
-- Real auth for the executive API + per-user scoping of chats, workspaces,
-  documents, monitoring configs, and email recipients; replaces the
-  single-tenant SQLite assumption. Merchant-voice auth replacement folds in
-  here. Per-user rate/quota once identity exists.
+- ✅ **R8a (DONE, this branch):** email+password accounts (PBKDF2, stdlib),
+  hashed session tokens in an HttpOnly cookie, `/auth/*` routes, opt-in
+  enforcement via `BOTIM_AUTH_MODE` (default off; typos fail closed), all
+  `/api` routes + copilot proxy gated under required mode, per-user
+  ownership of user opportunities (legacy NULL-owner rows stay shared),
+  `AUTH_ALLOW_REGISTRATION` switch, frontend sign-in gate + session bar.
+  Design: decision-log 2026-07-17. Password reset needs R6 email — honest
+  UI note until then.
+- **R8b (remaining):** per-user scoping of copilot conversations and
+  research runs (identity propagation through the fixed proxy),
+  merchant-voice token replacement, per-user rate/quota, password reset
+  once R6 email exists.
 
 ## Phase C1 — Deterministic calculations
 
