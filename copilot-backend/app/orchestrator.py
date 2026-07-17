@@ -98,7 +98,7 @@ class Orchestrator:
 
     # -- public entrypoint ---------------------------------------------------
 
-    def chat(self, message, conversation_id=None, request_context=None):
+    def chat(self, message, conversation_id=None, request_context=None, user_id=None):
         err = security.validate_message(message, self.config.max_message_chars)
         if err:
             return {"error": {"code": "message_too_long" if "limit" in err else "invalid_request",
@@ -107,6 +107,12 @@ class Orchestrator:
         is_new_conversation = conversation_id is None
         if conversation_id:
             conv = self.store.get_conversation(conversation_id)
+            # Phase R8b — another user's conversation is indistinguishable
+            # from a nonexistent one (legacy NULL-owner conversations stay
+            # accessible to everyone, like the other stores).
+            if conv is not None and user_id is not None \
+                    and conv.get("owner_user_id") not in (None, user_id):
+                conv = None
             if conv is None:
                 # Phase 3 — a distinct code from generic "not_found" so the
                 # frontend can safely auto-recover (drop the stale id, retry
@@ -116,7 +122,7 @@ class Orchestrator:
                                   "message": "the conversation no longer exists", "retryable": False}}
             stored_context = conv["context"]
         else:
-            conversation_id = self.store.create_conversation()
+            conversation_id = self.store.create_conversation(owner_user_id=user_id)
             stored_context = {}
 
         self.store.add_message(conversation_id, "user", message)

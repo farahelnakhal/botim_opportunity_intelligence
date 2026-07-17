@@ -179,10 +179,19 @@ private documents must be scoped to a user).
   `AUTH_ALLOW_REGISTRATION` switch, frontend sign-in gate + session bar.
   Design: decision-log 2026-07-17. Password reset needs R6 email — honest
   UI note until then.
-- **R8b (remaining):** per-user scoping of copilot conversations and
-  research runs (identity propagation through the fixed proxy),
-  merchant-voice token replacement, per-user rate/quota, password reset
-  once R6 email exists.
+- ✅ **R8b (DONE, this branch):** conversation ownership in copilot-backend
+  (session-validated identity forwarded as `X-Botim-User` by the proxy,
+  honored only with `COPILOT_TRUST_PROXY_USER=1`; foreign conversations =
+  `conversation_not_found`), research-run ownership (store schema v4;
+  create/list/detail/execute/candidates/review/revalidate/extract all
+  scoped; legacy NULL-owner rows shared), per-user daily quotas
+  (`quota_events` in the auth DB; chat 200/day, research execute / extract /
+  workspace refresh / monitoring run 25/day; `QUOTA_*_PER_DAY` overrides;
+  honest 429). **Still open (small):** merchant-voice static-token
+  replacement (standalone service, not exposed through the proxy),
+  grounding-side per-user filter for `get_external_research` (approved
+  claims are human-reviewed external research), password reset once R6
+  email exists.
 
 ## Phase C1 — Deterministic calculations
 

@@ -173,6 +173,21 @@ and review decisions are never modified** (propose, never auto-apply):
   claim's `source_health` is `changed`/`unreachable`. The claim still
   grounds (its approval is untouched) — re-review is a human decision.
 
+## Per-user ownership (Phase R8b) — schema v4
+
+Schema v4 adds `research_runs.owner_user_id` (nullable, in-place idempotent
+migration). Under required-auth deployments (`BOTIM_AUTH_MODE`, see
+docs/decision-log.md R8a/R8b): runs created via the API carry their
+creator's `USER-` id; listings (`GET /research/runs`,
+`GET /research/candidates`) show a user their own rows plus legacy
+NULL-owner rows; acting on another user's run (detail, execute, candidates,
+review, revalidate, extract) answers an **indistinguishable 404**.
+Candidates follow their run's ownership. With auth off nothing changes.
+Known, documented limitation until grounding-side scoping lands: the
+copilot's `get_external_research` tool reads approved candidates without a
+per-user filter (approved claims are human-reviewed, clearly-external
+research).
+
 ## Machine claim extraction (PR3) — schema v3
 
 Schema v3 adds two columns to `candidate_evidence` (v2 databases migrate in

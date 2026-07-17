@@ -39,6 +39,11 @@ class Config:
         self.port = int(e.get("COPILOT_PORT", 8010))
         self.cors_origin = e.get("COPILOT_CORS_ORIGIN", "http://localhost:8000")
         self.api_token = e.get("COPILOT_API_TOKEN", "")
+        # Phase R8b — honor the executive proxy's X-Botim-User identity
+        # header. Off by default: only enable where this backend is
+        # unreachable except through the session-validating proxy (the
+        # single-container deploy binds it to 127.0.0.1).
+        self.trust_proxy_user = e.get("COPILOT_TRUST_PROXY_USER", "") == "1"
         self.debug_trace = e.get("COPILOT_DEBUG_TRACE", "") == "1"
         self.max_concurrency = int(e.get("COPILOT_MAX_CONCURRENCY", 4))
         self.db_path = Path(e.get("COPILOT_DB_PATH", BACKEND_ROOT / "data" / "conversations.db"))

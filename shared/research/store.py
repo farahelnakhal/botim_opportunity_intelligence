@@ -47,7 +47,7 @@ try:
 except ImportError:  # imported with repo root not on sys.path (e.g. as shared.research from elsewhere)
     from ..source_urls import safe_url
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_DB_PATH = REPO / "runtime" / "research.db"
@@ -197,6 +197,8 @@ class ResearchStore:
                 self._migrate_to_v2(conn)
             if version < 3:
                 self._migrate_to_v3(conn)
+            if version < 4:
+                self._migrate_to_v4(conn)
             conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)",
                          (str(SCHEMA_VERSION),))
 
@@ -337,7 +339,17 @@ class ResearchStore:
 
     # -- runs -------------------------------------------------------------- #
 
-    def create_run(self, payload):
+    @staticmethod
+    def _migrate_to_v4(conn):
+        # Phase R8b — per-user ownership of research runs. Pre-auth rows keep
+        # a NULL owner and stay visible to every signed-in user (legacy
+        # shared); new runs created under required-auth mode carry their
+        # creator's USER- id. Idempotent (PRAGMA guard).
+        existing = {row["name"] for row in conn.execute("PRAGMA table_info(research_runs)")}
+        if "owner_user_id" not in existing:
+            conn.execute("ALTER TABLE research_runs ADD COLUMN owner_user_id TEXT")
+
+    def create_run(self, payload, owner_user_id=None):
         if not isinstance(payload, dict):
             raise ResearchStoreError("payload must be an object")
         title = _require_str(payload, "title", TITLE_MAX, required=True)
@@ -355,10 +367,10 @@ class ResearchStore:
             conn.execute(
                 """INSERT INTO research_runs
                    (id, title, objective, objectives, profile, opportunity_ref,
-                    status, notes, created_at, updated_at)
-                   VALUES (?,?,?,?,?,?,'pending',?,?,?)""",
+                    status, notes, created_at, updated_at, owner_user_id)
+                   VALUES (?,?,?,?,?,?,'pending',?,?,?,?)""",
                 (run_id, title, objective, json.dumps(objectives), profile,
-                 opportunity_ref, notes, now, now))
+                 opportunity_ref, notes, now, now, owner_user_id))
         return self.get_run(run_id)
 
     def get_run(self, run_id, include_children=False):
@@ -393,7 +405,7 @@ class ResearchStore:
                 cand["source_health"] = self.source_health(cand, latest)
         return result
 
-    def list_runs(self, status=None, opportunity_ref=None, limit=100):
+    def list_runs(self, status=None, opportunity_ref=None, limit=100, visible_to=None):
         if status is not None and status not in RUN_STATUSES:
             raise ResearchStoreError("unknown run status filter")
         if opportunity_ref is not None and not OPP_REF_RE.match(str(opportunity_ref)):
@@ -406,6 +418,10 @@ class ResearchStore:
         if opportunity_ref:
             clauses.append("opportunity_ref=?")
             params.append(opportunity_ref)
+        if visible_to is not None:
+            # Phase R8b — a user sees their own runs plus legacy shared rows
+            clauses.append("(owner_user_id IS NULL OR owner_user_id=?)")
+            params.append(visible_to)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         with self._connect() as conn:
             rows = conn.execute(
@@ -610,6 +626,17 @@ class ResearchStore:
             return self._candidate_dict(conn.execute(
                 "SELECT * FROM candidate_evidence WHERE id=?", (candidate_id,)).fetchone())
 
+    def get_candidate(self, candidate_id):
+        """One candidate claim by id (Phase R8b — lets routes resolve the
+        owning run before acting on a candidate)."""
+        _validate_id(candidate_id, CANDIDATE_RE, "candidate id")
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM candidate_evidence WHERE id=?", (candidate_id,)).fetchone()
+        if row is None:
+            raise ResearchStoreError("candidate not found", status=404)
+        return self._candidate_dict(row)
+
     def review_candidate(self, candidate_id, action, note=None):
         """Human review (Phase R3): pending_review -> approved | rejected,
         exactly once. Approval NEVER makes the claim authoritative knowledge —
@@ -637,7 +664,8 @@ class ResearchStore:
             return self._candidate_dict(conn.execute(
                 "SELECT * FROM candidate_evidence WHERE id=?", (candidate_id,)).fetchone())
 
-    def list_candidates(self, status=None, opportunity_ref=None, limit=100):
+    def list_candidates(self, status=None, opportunity_ref=None, limit=100,
+                        visible_to=None):
         """Cross-run candidate listing (the review queue / grounding read).
         Each row carries its run's title, status, and opportunity_ref."""
         if status is not None and status not in CANDIDATE_STATUSES:
@@ -652,6 +680,10 @@ class ResearchStore:
         if opportunity_ref:
             clauses.append("r.opportunity_ref=?")
             params.append(opportunity_ref)
+        if visible_to is not None:
+            # Phase R8b — candidates follow their run's ownership
+            clauses.append("(r.owner_user_id IS NULL OR r.owner_user_id=?)")
+            params.append(visible_to)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         with self._connect() as conn:
             rows = conn.execute(
