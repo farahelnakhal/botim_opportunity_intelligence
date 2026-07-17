@@ -163,9 +163,15 @@ always-on scheduler, and email infrastructure.
 ## Phase R7 — Attachments + internal-document ingestion
 
 **Depends on:** PR3, R5; best after R8 (documents are user-private).
-- Upload → text extraction (PDF/docx) → scoped RAG (chunk + embed) → candidate
-  evidence feeding the workspace chain. Size/type limits; document text is
-  data-never-instructions; deletion path.
+- ✅ **DONE (this branch):** upload (.txt/.md/.csv/.docx, 2 MB cap, base64
+  JSON) → stdlib extraction (PDF = honest 415, see decision-log) →
+  deterministic chunking + transparent lexical retrieval (embedding seam
+  ready) → verbatim excerpts snapshotted into workspace versions
+  (schema v2 `document_evidence`) and grounded in chat as USER-PROVIDED
+  data-never-instructions; Files tab with upload/list/permanent-delete;
+  ownership + `document_upload` quota (R8 policies). **Open:** PDF support
+  (needs a dependency decision), document-driven claim extraction into the
+  research store (candidates from documents, not just excerpts).
 
 ## Phase R8 — Authentication + tenancy (sign-in)
 

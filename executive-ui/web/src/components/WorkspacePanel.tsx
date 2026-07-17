@@ -233,6 +233,29 @@ export default function WorkspacePanel({ oppId }: { oppId: string }) {
           </div>
 
           <div className="ws-section">
+            <h4>Excerpts from your uploaded documents</h4>
+            {(workspace.document_evidence ?? []).length === 0 ? (
+              <p className="empty-note" data-testid="workspace-no-documents">
+                No uploaded document content was used in this version — attach files in
+                the Files tab and refresh.
+              </p>
+            ) : (
+              (workspace.document_evidence ?? []).map((d) => (
+                <div className="research-source" key={`${d.document_id}-${d.chunk_seq}`}
+                  data-testid="workspace-document-excerpt">
+                  <div className="research-source-main">
+                    <div className="research-source-title">{d.filename}</div>
+                    <div className="research-source-meta">
+                      user-provided document · {d.document_id} · chunk {d.chunk_seq}
+                    </div>
+                    <div className="ws-doc-excerpt">“{d.excerpt}”</div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="ws-section">
             <h4>Related committed evidence</h4>
             {workspace.kb_evidence.length === 0 ? (
               <p className="empty-note" data-testid="workspace-no-kb">

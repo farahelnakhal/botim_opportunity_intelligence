@@ -746,3 +746,8 @@ select.field-input{appearance:none; -webkit-appearance:none; cursor:pointer; bac
   border-bottom:1px solid var(--border);background:var(--bg-inset);}
 .auth-signout{background:none;border:none;color:var(--accent);font-size:11.5px;
   font-weight:600;cursor:pointer;padding:2px 0;}
+
+/* ---------------- Uploaded-document excerpts (Phase R7) ---------------- */
+.ws-doc-excerpt{margin-top:6px;font-size:12.5px;color:var(--text-secondary);
+  line-height:1.5;border-left:3px solid var(--border);padding-left:10px;
+  font-style:italic;}

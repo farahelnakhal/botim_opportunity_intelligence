@@ -7,6 +7,7 @@ import {
   FilesPanel, InterviewsPanel, KnowledgePanel, MonitoringPanel, ReportsPanel, SettingsPanel, SourcesPanel,
 } from "./panels";
 import { UserMonitoringPanel, UserOpportunityDetails } from "./UserOpportunityPanel";
+import UserDocumentsPanel from "./UserDocumentsPanel";
 import WorkspacePanel from "./WorkspacePanel";
 
 const TABS: { key: Tab; label: string }[] = [
@@ -28,6 +29,7 @@ const USER_TABS: { key: Tab; label: string }[] = [
   { key: "chat", label: "Chat" },
   { key: "analysis", label: "Analysis" }, // Phase R5 PR4-UI — the preliminary workspace
   { key: "knowledge", label: "Details" },
+  { key: "files", label: "Files" },       // Phase R7 — uploaded documents
   { key: "monitoring", label: "Monitoring" },
 ];
 
@@ -108,6 +110,7 @@ export default function ProjectWorkspace() {
         <>
           {effectiveTab === "analysis" && <div className="tab-panel"><WorkspacePanel oppId={opp.id} /></div>}
           {effectiveTab === "knowledge" && <div className="tab-panel"><UserOpportunityDetails oppId={opp.id} /></div>}
+          {effectiveTab === "files" && <div className="tab-panel"><UserDocumentsPanel oppId={opp.id} /></div>}
           {effectiveTab === "monitoring" && <div className="tab-panel"><UserMonitoringPanel oppId={opp.id} /></div>}
         </>
       ) : (
