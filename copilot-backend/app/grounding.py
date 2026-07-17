@@ -381,6 +381,57 @@ def build(intent, executed, ids):
                 pack.conf_sources["external research (candidate)"] = "low"
             pack.needs_no_decision = True
 
+        elif name == "get_analysis_workspace":
+            # Phase R5/PR4 — the latest preliminary analysis workspace.
+            # Everything is machine-generated and labelled PRELIMINARY; the
+            # score is engine-capped; approved vs pending claims are kept
+            # visibly apart. Reading never triggers a rebuild.
+            w = r.get("workspace")
+            if not w:
+                pack.unknowns.append("no analysis workspace has been built for this "
+                                     "opportunity yet (run a workspace refresh)")
+            else:
+                pack.facts.append(
+                    f"PRELIMINARY ANALYSIS WORKSPACE v{w['version']} for "
+                    f"{w['opportunity_ref']} (machine-generated, trigger "
+                    f"{w['trigger']}, completed {w.get('completed_at') or '?'}) — "
+                    "NOT authoritative repository evidence:")
+                score = w.get("preliminary_score") or {}
+                if score:
+                    pack.facts.append(
+                        f"- Preliminary score (computed by the real scoring engine on an "
+                        f"all-assumption card): composite {score.get('composite')}, "
+                        f"{score.get('assumption_count')}/17 assumption-based, "
+                        f"classification capped at '{score.get('max_classification')}' — "
+                        f"{score.get('classification')}.")
+                kb = w.get("kb_evidence") or []
+                if kb:
+                    pack.facts.append("- Related committed evidence found by the build: "
+                                      + ", ".join(e["id"] for e in kb[:8]) + ".")
+                    for e in kb[:8]:
+                        pack.cite(e["id"], "evidence", e.get("title", ""), "contextual")
+                approved = [c for c in (w.get("claims") or []) if c["status"] == "approved"]
+                pending = [c for c in (w.get("claims") or []) if c["status"] == "pending_review"]
+                for c in approved[:8]:
+                    pack.facts.append(f"- APPROVED external claim: {c['claim']}")
+                    pack.cite_research_candidate({"candidate_id": c["candidate_id"],
+                                                  "claim": c["claim"], "run_id": c["run_id"],
+                                                  "run_title": None, "sources": []})
+                if pending:
+                    pack.facts.append(
+                        f"- {len(pending)} extracted claim(s) are PENDING HUMAN REVIEW "
+                        "(candidate research only — must not be treated as established):")
+                    for c in pending[:8]:
+                        pack.facts.append(f"  · [pending review] {c['claim']}")
+                for gap in (w.get("gaps") or [])[:8]:
+                    pack.unknowns.append(f"workspace gap: {gap}")
+                if w.get("is_stale"):
+                    pack.warnings.append(
+                        "the analysis workspace is stale (older than the configured "
+                        "threshold) — refresh it before relying on this analysis")
+                pack.conf_sources["analysis workspace (preliminary)"] = "low"
+            pack.needs_no_decision = True
+
         elif name == "search_product_knowledge":
             if r["results"]:
                 pack.facts.append("Related records found:")

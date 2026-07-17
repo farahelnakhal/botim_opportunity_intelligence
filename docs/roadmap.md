@@ -124,11 +124,11 @@ follow-ups reuse the stored workspace cheaply.
 **Depends on:** PR3 (claim extraction) first.
 
 Ships as a sequence of focused PRs:
-- **PR3 — claim extraction:** Merchant-Voice-grade source-verified extraction
+- ✅ **PR3 — claim extraction (DONE, PR #46):** Merchant-Voice-grade source-verified extraction
   turning research/document text into `pending_review` candidate claims
   (exact-substring source verification, quantitative-claim safeguards,
   single-source claims never market-wide, provenance). No orchestration yet.
-- **PR4 — workspace store + orchestrator:** versioned per-chat workspace
+- ✅ **PR4 — workspace store + orchestrator (DONE, this branch):** versioned per-chat workspace
   (new runtime store, sibling of user/research stores), snapshotted with
   first-class per-version provenance; orchestrator composes existing engines;
   **preliminary score via the real 17-dim engine on a synthetic scorecard**

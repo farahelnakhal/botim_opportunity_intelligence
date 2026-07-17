@@ -58,7 +58,8 @@ ENV PORT=7860 \
     HOME=/data \
     BOTIM_APP_MODE=$APP_MODE \
     USER_OPPORTUNITIES_DB_PATH=/data/runtime/user-opportunities.db \
-    RESEARCH_DB_PATH=/data/runtime/research.db
+    RESEARCH_DB_PATH=/data/runtime/research.db \
+    WORKSPACE_DB_PATH=/data/runtime/workspace.db
 RUN mkdir -p /data && chmod -R 777 /data
 
 WORKDIR /app

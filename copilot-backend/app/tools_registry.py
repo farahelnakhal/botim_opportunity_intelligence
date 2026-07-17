@@ -493,6 +493,59 @@ def get_external_research(opportunity_ref=None):
                      "claims — clearly external, not authoritative repository evidence.")}
 
 
+def get_analysis_workspace(opportunity_ref):
+    """Latest COMPLETE preliminary analysis workspace version for a saved
+    opportunity (Phase R5/PR4). Everything in it is machine-generated
+    PRELIMINARY analysis: the preliminary score is an all-assumption card
+    evaluated (and capped) by the real scoring engine; claims are candidate
+    external research with their CURRENT human-review status (approvals live
+    on the claims, never on the workspace). Reading a workspace never
+    triggers a build — refreshes happen only via the explicit triggers."""
+    if not isinstance(opportunity_ref, str) or not re.match(
+            r"^(OPP-\d{3}|UOPP-[0-9a-f]{12})$", opportunity_ref):
+        raise ToolError("opportunity_ref must be an OPP-nnn or UOPP- id")
+    from shared.workspace import WorkspaceStore, WorkspaceStoreError
+    from shared.research import ResearchStore, ResearchStoreError
+    try:
+        ws = WorkspaceStore()
+        latest = ws.latest(opportunity_ref)
+    except WorkspaceStoreError as exc:
+        raise ToolError(f"workspace store unavailable: {exc}")
+    if latest is None:
+        return {"workspace": None,
+                "note": ("no analysis workspace exists for this opportunity yet — "
+                         "a workspace refresh must be run first")}
+    claims = []
+    if latest.get("research_run_id") and latest.get("claim_ids"):
+        try:
+            detail = ResearchStore().get_run(latest["research_run_id"],
+                                             include_children=True)
+            by_id = {c["id"]: c for c in detail.get("candidate_evidence", [])}
+            for cid in latest["claim_ids"]:
+                c = by_id.get(cid)
+                if c:
+                    claims.append({"candidate_id": c["id"], "claim": c["claim"],
+                                   "status": c["status"], "origin": c.get("origin"),
+                                   "run_id": latest["research_run_id"]})
+        except ResearchStoreError:
+            pass  # workspace still reports its ids; claims just can't resolve
+    return {"workspace": {
+        "id": latest["id"], "opportunity_ref": opportunity_ref,
+        "version": latest["version"], "trigger": latest["trigger"],
+        "question": latest.get("question"),
+        "completed_at": latest.get("completed_at"),
+        "is_stale": ws.is_stale(latest),
+        "preliminary_score": latest.get("preliminary_score"),
+        "kb_evidence": latest.get("kb_evidence") or [],
+        "claims": claims,
+        "gaps": latest.get("gaps") or [],
+        "research_run_id": latest.get("research_run_id"),
+        "provenance": latest.get("provenance"),
+    }, "note": ("PRELIMINARY machine-generated analysis — nothing here is "
+                "authoritative repository evidence; unreviewed claims remain "
+                "pending human review.")}
+
+
 # --- registry ----------------------------------------------------------------
 
 def _schema(props, required):
@@ -521,6 +574,9 @@ REGISTRY = {
     "get_external_research": (get_external_research,
                               _schema({"opportunity_ref": _ID}, []),
                               "Human-approved external web-research candidates (never authoritative KB evidence)"),
+    "get_analysis_workspace": (get_analysis_workspace,
+                               _schema({"opportunity_ref": _ID}, ["opportunity_ref"]),
+                               "Latest preliminary analysis workspace for a saved opportunity (machine-generated, pending review)"),
     "generate_research_request_draft": (generate_research_request_draft, _schema({"assumption_id": _ID}, ["assumption_id"]), "Draft research request (ephemeral)"),
     "generate_executive_brief": (generate_executive_brief, _schema({"opp_id": _ID}, ["opp_id"]), "Draft executive brief (ephemeral)"),
     "generate_impact_proposal_draft": (generate_impact_proposal_draft,

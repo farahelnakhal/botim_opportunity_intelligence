@@ -47,6 +47,7 @@ try:
     from shared.research import revalidate as research_revalidate
     from shared.research import extract as research_extract
     from shared.llm import provider as llm_provider
+    from shared import workspace as workspace_pkg
 except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -58,6 +59,7 @@ except ImportError:
     from shared.research import revalidate as research_revalidate
     from shared.research import extract as research_extract
     from shared.llm import provider as llm_provider
+    from shared import workspace as workspace_pkg
 
 
 class _ExtractionLLMConfig:
@@ -131,6 +133,18 @@ def get_research_store():
     if _RESEARCH_STORE is None:
         _RESEARCH_STORE = research_store.ResearchStore()
     return _RESEARCH_STORE
+
+
+# Phase R5/PR4 — shared runtime store for versioned analysis workspaces
+# (path from WORKSPACE_DB_PATH, default runtime/workspace.db). Lazy too.
+_WORKSPACE_STORE = None
+
+
+def get_workspace_store():
+    global _WORKSPACE_STORE
+    if _WORKSPACE_STORE is None:
+        _WORKSPACE_STORE = workspace_pkg.WorkspaceStore()
+    return _WORKSPACE_STORE
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -343,7 +357,8 @@ class Handler(BaseHTTPRequestHandler):
     def _user_api(self, method, sub, query):
         m = re.match(r"^/user-opportunities"
                      r"(?:/(UOPP-[0-9a-f]{12})"
-                     r"(?:/(archive|restore|monitoring)(?:/(pause|resume|run|events))?)?)?/?$", sub)
+                     r"(?:/(archive|restore|monitoring|workspace)"
+                     r"(?:/(pause|resume|run|events|refresh|versions))?)?)?/?$", sub)
         if not m:
             # a syntactically different id shape (e.g. OPP-010) is a client
             # error, not a missing record — never resolves to committed data
@@ -369,6 +384,8 @@ class Handler(BaseHTTPRequestHandler):
                     confirm = (query.get("confirm") or [None])[0]
                     return self._json(store.delete(opp_id, confirm=confirm))
                 return self._error(405, "method not allowed")
+            if action == "workspace":
+                return self._workspace_api(method, opp_id, mon_action, store)
             if action == "archive" and method == "POST":
                 return self._json(store.archive(opp_id))
             if action == "restore" and method == "POST":
@@ -416,6 +433,78 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(exc.status, str(exc))
         except Exception as exc:  # never leak SQL/stack detail
             return self._error(500, f"{type(exc).__name__}: internal error")
+
+    # -- Phase R5/PR4: versioned analysis workspace -------------------------- #
+    # POST .../workspace/refresh  -> run the full chain, append a new version
+    # GET  .../workspace          -> latest complete version (+staleness)
+    # GET  .../workspace/versions -> version summaries (newest first)
+    # Follow-up chat NEVER hits refresh — the chain runs only on the explicit
+    # triggers locked in docs/decision-log.md.
+    def _workspace_api(self, method, opp_id, sub_action, store):
+        ws = get_workspace_store()
+        try:
+            opp = store.get(opp_id)  # 404 for unknown opportunity
+            if sub_action == "refresh" and method == "POST":
+                body = self._read_json_body()
+                # first build for this opportunity is 'first_analysis'; later
+                # explicit refreshes are 'manual_refresh'
+                trigger = ("first_analysis" if not ws.list_versions(opp_id, limit=1)
+                           else "manual_refresh")
+                try:
+                    search_provider = research_providers.from_env()
+                except research_providers.SearchProviderError:
+                    search_provider = None  # builder records an honest gap
+                cfg = _ExtractionLLMConfig()
+                llm = (llm_provider.make_provider(cfg)
+                       if cfg.provider in ("anthropic", "openai_compatible") else None)
+                version = workspace_pkg.build_workspace(
+                    ws, get_research_store(), opp, trigger=trigger,
+                    question=body.get("question") if isinstance(body.get("question"), str) else None,
+                    search_provider=search_provider,
+                    llm_provider=llm, llm_config=cfg if llm else None)
+                return self._json(self._workspace_view(ws, version), status=201)
+            if sub_action == "versions" and method == "GET":
+                return self._json({"versions": ws.list_versions(opp_id)})
+            if sub_action is None and method == "GET":
+                latest = ws.latest(opp_id)
+                if latest is None:
+                    return self._json({"workspace": None,
+                                       "note": "no analysis workspace exists yet — "
+                                               "run a refresh to build the first version"})
+                return self._json({"workspace": self._workspace_view(ws, latest)})
+            return self._error(405, "method not allowed")
+        except workspace_pkg.WorkspaceStoreError as exc:
+            return self._error(exc.status, str(exc))
+        except user_store.StoreError as exc:
+            return self._error(exc.status, str(exc))
+        except research_store.ResearchStoreError as exc:
+            return self._error(exc.status, str(exc))
+        except Exception as exc:  # never leak SQL/stack detail
+            return self._error(500, f"{type(exc).__name__}: internal error")
+
+    @staticmethod
+    def _workspace_view(ws, version):
+        """A version enriched with deterministic staleness and the CURRENT
+        review status of its candidate claims (read from the research store —
+        approvals attach to claims, so they survive across versions)."""
+        view = dict(version)
+        view["is_stale"] = ws.is_stale(version)
+        claims = []
+        if version.get("research_run_id") and version.get("claim_ids"):
+            try:
+                detail = get_research_store().get_run(version["research_run_id"],
+                                                      include_children=True)
+                by_id = {c["id"]: c for c in detail.get("candidate_evidence", [])}
+                for cid in version["claim_ids"]:
+                    c = by_id.get(cid)
+                    if c:
+                        claims.append({"id": c["id"], "claim": c["claim"],
+                                       "status": c["status"], "origin": c.get("origin"),
+                                       "source_ids": c.get("source_ids", [])})
+            except research_store.ResearchStoreError:
+                pass  # claims stay listable by id even if the run vanished
+        view["claims"] = claims
+        return view
 
     # -- Phase 5: mode-aware read models ------------------------------------ #
     def _mode_overview(self, root, mode):

@@ -28,6 +28,9 @@ INTENTS = ("portfolio_summary", "opportunity_explanation", "opportunity_comparis
            "unknown_or_unsupported")
 
 OPP_REF = re.compile(r"\bOPP-\d{3}\b", re.I)
+# user-opportunity ids carry a lowercase-hex suffix — matched case-insensitively
+# in text, normalized to the canonical lowercase-hex form
+UOPP_REF = re.compile(r"\bUOPP-[0-9a-f]{12}\b", re.I)
 EV_REF = re.compile(r"\bEV-\d{4}-W\d{2}-\d{3}\b", re.I)
 SEG_REF = re.compile(r"\bSEG-[a-z0-9-]+\b", re.I)
 ASM_REF = re.compile(r"\bASM-OPP-\d{3}-[a-z0-9_]+\b", re.I)
@@ -126,7 +129,11 @@ def extract_ids(text):
             "assumptions": ASM_REF.findall(text),
             # not case-normalized: unlike OPP-/EV- ids, campaign ids carry a
             # lowercase-hex suffix (MVC-4f0cfb3ad4) — preserve exactly as typed
-            "campaigns": MVC_REF.findall(text)}
+            "campaigns": MVC_REF.findall(text),
+            # Phase R5/PR4 — saved user opportunities (workspace lookups);
+            # canonical form is UOPP- + lowercase hex
+            "user_opportunities": ["UOPP-" + m.split("-", 1)[1].lower()
+                                   for m in UOPP_REF.findall(text)]}
 
 
 def is_out_of_scope(text):
