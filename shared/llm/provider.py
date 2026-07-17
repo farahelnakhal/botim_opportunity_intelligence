@@ -38,6 +38,10 @@ import urllib.request
 
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+# Descriptive client identifier sent on every live request — API vendors use
+# it to identify the calling application (matches the research module's
+# convention). Never contains secrets.
+USER_AGENT = "BOTIM-Opportunity-Intelligence-copilot/1.0"
 
 
 class ProviderError(Exception):
@@ -98,7 +102,8 @@ class AnthropicProvider(ConversationModel):
             data=json.dumps(body).encode("utf-8"),
             headers={"content-type": "application/json",
                      "x-api-key": configuration.api_key,
-                     "anthropic-version": self.VERSION},
+                     "anthropic-version": self.VERSION,
+                     "user-agent": USER_AGENT},
             method="POST",
         )
         try:
@@ -161,7 +166,8 @@ class OpenAICompatibleProvider(ConversationModel):
                 "name": t["name"], "description": t["description"],
                 "parameters": t["input_schema"]}} for t in tools]
         headers = {"content-type": "application/json",
-                   "authorization": f"Bearer {configuration.api_key}"}
+                   "authorization": f"Bearer {configuration.api_key}",
+                   "user-agent": USER_AGENT}
         fetch = self._fetch or self._http
         url = f"{base_url}/chat/completions"
         for attempt in (1, 2):
