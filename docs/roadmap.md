@@ -136,8 +136,13 @@ Ships as a sequence of focused PRs:
   change / stale / monitoring); follow-ups read the latest complete version;
   approvals attach to claims, inherited across versions; per-run cost/timeout
   caps; retention policy. Graceful degradation when search/LLM unavailable.
-- **PR4-UI:** staged "running analysis" UX, preliminary badges on all
-  machine numbers, the workspace/evidence/logic view, and the diff surface.
+- ✅ **PR4-UI (DONE, this branch):** the Analysis tab on saved user
+  opportunities — honest "running the chain" state (real step names, no fake
+  per-step completion), PRELIMINARY badges on all machine numbers with the
+  engine cap stated, approved-vs-pending claim separation, gaps always
+  listed, version history, provenance, stale banner, and the diff surface
+  (`GET …/workspace/diff`, `compare_versions` of the two newest complete
+  versions — the same diff R6 will email).
 - **Acceptance:** the critical test — "Analyse the value proposition of SME
   cards for UAE SMEs" from a fresh account — produces a coherent workspace-
   backed analysis distinguishing confirmed / preliminary / assumed / unknown,

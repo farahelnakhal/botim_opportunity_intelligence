@@ -358,7 +358,7 @@ class Handler(BaseHTTPRequestHandler):
         m = re.match(r"^/user-opportunities"
                      r"(?:/(UOPP-[0-9a-f]{12})"
                      r"(?:/(archive|restore|monitoring|workspace)"
-                     r"(?:/(pause|resume|run|events|refresh|versions))?)?)?/?$", sub)
+                     r"(?:/(pause|resume|run|events|refresh|versions|diff))?)?)?/?$", sub)
         if not m:
             # a syntactically different id shape (e.g. OPP-010) is a client
             # error, not a missing record — never resolves to committed data
@@ -465,6 +465,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(self._workspace_view(ws, version), status=201)
             if sub_action == "versions" and method == "GET":
                 return self._json({"versions": ws.list_versions(opp_id)})
+            if sub_action == "diff" and method == "GET":
+                # deterministic diff of the two newest COMPLETE versions —
+                # the same pure comparison R6 notifications will use
+                complete = [v for v in ws.list_versions(opp_id)
+                            if v["status"] == "complete"][:2]
+                if len(complete) < 2:
+                    return self._json({"diff": None,
+                                       "note": "fewer than two complete versions exist "
+                                               "— nothing to compare yet"})
+                newer = ws.get_version(complete[0]["id"])
+                older = ws.get_version(complete[1]["id"])
+                return self._json({"diff": workspace_pkg.compare_versions(older, newer)})
             if sub_action is None and method == "GET":
                 latest = ws.latest(opp_id)
                 if latest is None:

@@ -153,6 +153,23 @@ class WorkspaceRoutes(unittest.TestCase):
         self.assertTrue(v["research_run_id"].startswith("RRUN-"))
         self.assertEqual(v["provenance"]["trigger"], "first_analysis")
 
+    def test_diff_route_compares_the_two_newest_complete_versions(self):
+        opp = self._make_opp("Diff opportunity")
+        # fewer than two versions -> honest note, no fabricated diff
+        _, empty = self._req("GET",
+                             f"/api/user-opportunities/{opp['id']}/workspace/diff")
+        self.assertIsNone(empty["diff"])
+        self.assertIn("fewer than two", empty["note"])
+        self._req("POST", f"/api/user-opportunities/{opp['id']}/workspace/refresh", {})
+        self._req("POST", f"/api/user-opportunities/{opp['id']}/workspace/refresh", {})
+        _, result = self._req("GET",
+                              f"/api/user-opportunities/{opp['id']}/workspace/diff")
+        diff = result["diff"]
+        self.assertEqual(diff["composite_delta"], 0.0)   # same all-assumption card
+        self.assertEqual(diff["new_claim_ids"], [])
+        self.assertTrue(diff["newer_id"].startswith("AWV-"))
+        self.assertNotEqual(diff["newer_id"], diff["older_id"])
+
     def test_unknown_opportunity_404_and_bad_method_405(self):
         with self.assertRaises(urllib.error.HTTPError) as cm:
             urlopen(f"http://127.0.0.1:{self.port}"
