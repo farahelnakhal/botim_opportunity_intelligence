@@ -1,6 +1,61 @@
 # Decision log
 
-> Major product/architecture decisions, newest first.
+> Major product/architecture decisions, newest first. Add an entry whenever a
+> decision would surprise a future maintainer or constrains future work.
+> Format: date · decision · reasoning · alternatives · consequences.
+
+## 2026-07-16 — Versioned preliminary analysis workspace per saved chat (R5 model)
+
+- **Decision:** Each saved chat gets a **versioned, snapshotted analysis
+  workspace**. The full customer-intelligence → opportunity-intelligence →
+  scoring/calculation chain runs only on defined triggers (below); normal
+  follow-up questions reuse the latest complete workspace version instead of
+  re-running the chain. Everything machine-generated in a workspace is
+  labelled **preliminary until a human reviews it**, and nothing auto-writes
+  the committed knowledge base.
+- **Concrete triggers** (a re-run producing a new version): first analysis of
+  the chat; explicit manual "refresh analysis"; a *meaningful change* —
+  defined narrowly as a new attachment, an edited opportunity field, or newly
+  **approved** evidence attached (NOT an ordinary follow-up message);
+  *staleness* — workspace age exceeds a configured threshold; or a monitoring
+  trigger (R6). Anything else reads the stored version.
+- **Retrieval split:** structured records/claims/scores/calculations stay in
+  the existing traceable tool/ID system (`shared/research`, engines, impact);
+  RAG (chunk + embed) is used **only** for unstructured content — uploaded
+  documents and long fetched source bodies — and its chunks feed the same
+  candidate-evidence → review → grounding pipeline.
+- **Preliminary scores use the REAL engine, not an LLM guess:** a workspace
+  score is produced by building a synthetic in-memory scorecard from the
+  workspace's (preliminary) evidence and running it through the existing
+  17-dimension `opportunity_engine` — so the assumption-cap discipline and
+  determinism hold — then labelling the result preliminary and never writing
+  it to committed scores. The LLM never estimates a numeric score.
+- **Approvals attach to claims/evidence, not to the version:** a re-run
+  (v3→v4) re-evaluates but inherits prior human approvals for unchanged
+  claims; monitoring diffs highlight "new since last approved," not "new
+  since last version."
+- **Per-version provenance is first-class:** each version records the KB
+  state, research runs, documents, and model/prompt it used — this record IS
+  the "share sources / explain logic" surface and the reproducibility
+  guarantee, not a later add-on.
+- **Reasoning:** Gives the desired UX (ask → chain runs once → answer from the
+  generated dataset with sources and logic; cheap follow-ups) without turning
+  the tool into something that fabricates validated conclusions or re-runs an
+  expensive chain per message. Fits existing store/orchestrator/review
+  patterns; breaks no invariant.
+- **Alternatives considered:** (a) run the full chain on every message —
+  rejected (cost, latency, and it still wouldn't help follow-ups); (b) feed
+  auto-generated evidence into *committed* scores — rejected (violates the
+  human-review invariant); (c) replace grounded tool retrieval with vector
+  RAG wholesale — rejected (loses traceability/precision for a small
+  structured corpus; RAG scoped to unstructured content instead).
+- **Consequences:** New versioned per-chat workspace store (a sibling of
+  `user_store`/research store); an orchestrator composing existing engines;
+  concurrency rule (append versions, chat reads latest *complete*, in-progress
+  runs visible but not readable); per-run cost/timeout caps still required;
+  version retention/pruning policy (keep last N + all human-approved). Depends
+  on PR3 (claim extraction). Monitoring email/scheduler (R6) and attachments
+  (R7) build on this; sign-in/tenancy (R8) gates R6 and R7.
 
 ## 2026-07-16 — Canonical vendor-neutral LLM configuration (BOTIM_LLM_*)
 
@@ -20,9 +75,7 @@
 - **Consequences:** `GET /api/health` on the copilot reports the active
   provider/model/config source (never keys); startup logs the same;
   non-Anthropic endpoints need `BOTIM_LLM_BASE_URL` unless implied by the
-  Groq alias. Add an entry whenever a
-> decision would surprise a future maintainer or constrains future work.
-> Format: date · decision · reasoning · alternatives · consequences.
+  Groq alias.
 
 ## 2026-07-15 — Committed knowledge base stays read-only at runtime
 
