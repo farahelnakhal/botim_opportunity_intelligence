@@ -45,10 +45,33 @@ USER_AGENT = "BOTIM-Opportunity-Intelligence-copilot/1.0"
 
 
 class ProviderError(Exception):
-    def __init__(self, message, retryable=False, timeout=False):
+    def __init__(self, message, retryable=False, timeout=False, retry_after=None):
         super().__init__(message)
         self.retryable = retryable
         self.timeout = timeout
+        # Server-advised wait before retrying (seconds), when the provider sent
+        # a usable Retry-After header — otherwise None and the caller falls
+        # back to its own backoff. Never contains anything vendor-specific.
+        self.retry_after = retry_after
+
+
+def _parse_retry_after(headers):
+    """Best-effort Retry-After (in seconds) from a provider HTTP response.
+
+    Only the integer/float-seconds form is honored; the HTTP-date form and any
+    malformed value yield None so the caller uses its own backoff instead.
+    Never raises — a bad header must not turn into a second failure."""
+    try:
+        value = headers.get("Retry-After") or headers.get("retry-after")
+    except AttributeError:
+        return None
+    if not value:
+        return None
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return None
+    return seconds if seconds >= 0 else None
 
 
 class ModelResponse:
@@ -111,7 +134,8 @@ class AnthropicProvider(ConversationModel):
                 data = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             retryable = exc.code in (429, 500, 502, 503, 529)
-            raise ProviderError(f"provider HTTP {exc.code}", retryable=retryable)
+            raise ProviderError(f"provider HTTP {exc.code}", retryable=retryable,
+                                retry_after=_parse_retry_after(exc.headers) if retryable else None)
         except TimeoutError:
             raise ProviderError("provider timeout", retryable=True, timeout=True)
         except urllib.error.URLError as exc:
@@ -182,7 +206,8 @@ class OpenAICompatibleProvider(ConversationModel):
                     body.pop("tools", None)
                     continue
                 retryable = exc.code in (429, 500, 502, 503, 529)
-                raise ProviderError(f"provider HTTP {exc.code}", retryable=retryable)
+                raise ProviderError(f"provider HTTP {exc.code}", retryable=retryable,
+                                    retry_after=_parse_retry_after(exc.headers) if retryable else None)
             except TimeoutError:
                 raise ProviderError("provider timeout", retryable=True, timeout=True)
             except urllib.error.URLError as exc:

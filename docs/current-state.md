@@ -107,6 +107,32 @@ deploy 1 · frontend Vitest 23 files. Gate: `python3 shared/integration_check.py
 - Copilot `context.user_opportunity` hardening against adversarial payloads was
   deferred to the hardening milestone (noted in PR #34).
 
+## Post-audit hardening (branch `claude/repo-audit-integration-8jab15`)
+
+A live end-to-end audit (frontend proxy → executive API → copilot → live Groq
+model) confirmed the stack works; three fixes landed from it:
+
+1. **Chat resilience under provider rate limits.** The copilot's tool loop
+   re-sent the full ~33-tool catalog on every iteration, and retryable
+   provider errors (429/5xx/timeout) failed the whole turn with no retry — so
+   the default Groq free tier (12k tokens/min) tripped a fatal 429 on
+   multi-iteration questions. Now the tool catalog is offered only on the
+   first model pass (later passes fold in results and write prose), and
+   `Orchestrator._generate_with_retry` retries *retryable* errors with a
+   bounded, capped backoff (honoring `Retry-After` when sent, capped by
+   `COPILOT_PROVIDER_RETRY_MAX_S`, default 4s; `COPILOT_PROVIDER_MAX_RETRIES`,
+   default 2). Non-retryable errors still fail immediately and honestly.
+   Verified live: the previously-failing portfolio question now completes in
+   two calls (~7.6k tokens) with proper executive-summary synthesis.
+2. **Generic research profile is genuinely generic.** `profiles.py` no longer
+   applies a single UAE/SME/corporate-card default to every profile; each
+   profile declares its own `defaults` (`generic` = none, whitespace collapsed;
+   `sme-financial-product` keeps its documented validation-case defaults).
+3. **Monitoring runner UI copy corrected.** The status note claimed manual
+   runs "will become available"; the R4a runner already ships, so the note now
+   states manual runs work (given a search provider) and that only the
+   scheduler is still absent.
+
 ## Known defects
 
 None currently tracked. (PR #34's deferred-risk list is captured above and in

@@ -32,6 +32,13 @@ class Config:
         self.timeout_s = _int("COPILOT_TIMEOUT_S", 60) if env is None else int(e.get("COPILOT_TIMEOUT_S", 60))
         self.max_history = int(e.get("COPILOT_MAX_HISTORY", 20))
         self.max_tool_iterations = int(e.get("COPILOT_MAX_TOOL_ITERATIONS", 3))
+        # Bounded retry for RETRYABLE provider failures (429 rate limits,
+        # transient 5xx, timeouts). Kept small and capped so total time stays
+        # well within the executive-API proxy's 30s budget — a persistent
+        # outage still surfaces honestly rather than hanging.
+        self.max_provider_retries = int(e.get("COPILOT_PROVIDER_MAX_RETRIES", 2))
+        self.provider_retry_base_s = float(e.get("COPILOT_PROVIDER_RETRY_BASE_S", 0.75))
+        self.provider_retry_max_s = float(e.get("COPILOT_PROVIDER_RETRY_MAX_S", 4.0))
         self.max_response_chars = int(e.get("COPILOT_MAX_RESPONSE_CHARS", 20000))
         self.max_message_chars = int(e.get("COPILOT_MAX_MESSAGE_CHARS", 4000))
         self.max_body_bytes = int(e.get("COPILOT_MAX_BODY_BYTES", 65536))

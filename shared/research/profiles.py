@@ -13,18 +13,27 @@ per the BOTIM constraint its objectives investigate viability and structure
 (issuer/partner/program roles, non-card alternatives) rather than assuming
 BOTIM issues cards or extends credit.
 
-Context keys (all optional, with neutral defaults): `market` (e.g. "UAE",
-"GCC"), `segment` (e.g. "SME"), `product` (e.g. "corporate card"),
-`extra_terms` (list of free keywords appended as their own queries).
+Context keys (all optional): `market` (e.g. "UAE", "GCC"), `segment` (e.g.
+"SME"), `product` (e.g. "corporate card"), `extra_terms` (list of free
+keywords appended as their own queries). Each profile declares its own
+`defaults`; `generic` deliberately defaults to nothing (so an unparameterised
+generic run stays genuinely generic, never the validation case), while
+`sme-financial-product` defaults to its documented UAE/SME/corporate-card
+focus. Empty fields collapse cleanly out of the generated query text.
 """
+
+import re
 
 PROFILE_MAX_QUERIES = 20
 
-_DEFAULT_CONTEXT = {"market": "UAE", "segment": "SME", "product": "corporate card"}
+# A profile with no defaults of its own falls back to these — empty, i.e. no
+# assumed market/segment/product. Never bake the validation case in here.
+_NEUTRAL_CONTEXT = {"market": "", "segment": "", "product": ""}
 
 PROFILES = {
     "generic": {
         "title": "Generic opportunity research",
+        "defaults": {},  # genuinely generic: no assumed market/segment/product
         "objectives": [
             ("market size", ["{market} {segment} {product} market size",
                              "{market} {segment} {product} adoption statistics"]),
@@ -37,6 +46,9 @@ PROFILES = {
     },
     "sme-financial-product": {
         "title": "SME financial-product opportunity (first validation profile)",
+        # This profile IS the UAE/GCC SME validation case, so it legitimately
+        # defaults to that focus; any run may still override via context.
+        "defaults": {"market": "UAE", "segment": "SME", "product": "corporate card"},
         "objectives": [
             ("market size and segmentation",
              ["{market} SME market size number of businesses statistics",
@@ -81,7 +93,8 @@ def generate_queries(profile_name, context=None, max_queries=PROFILE_MAX_QUERIES
     """[(objective, query_text), …] — deterministic, bounded, no fabrication:
     unknown profile raises KeyError for the caller to handle honestly."""
     profile = PROFILES[profile_name]
-    ctx = dict(_DEFAULT_CONTEXT)
+    ctx = dict(_NEUTRAL_CONTEXT)
+    ctx.update(profile.get("defaults") or {})
     for key in ("market", "segment", "product"):
         value = (context or {}).get(key)
         if isinstance(value, str) and value.strip():
@@ -89,8 +102,16 @@ def generate_queries(profile_name, context=None, max_queries=PROFILE_MAX_QUERIES
     out = []
     for objective, templates in profile["objectives"]:
         for template in templates:
-            out.append((objective, template.format(**ctx)))
+            out.append((objective, _collapse(template.format(**ctx))))
     for term in (context or {}).get("extra_terms") or []:
         if isinstance(term, str) and term.strip():
-            out.append(("additional focus", f"{ctx['market']} {ctx['segment']} {term.strip()}"))
+            out.append(("additional focus",
+                        _collapse(f"{ctx['market']} {ctx['segment']} {term.strip()}")))
     return out[:max(1, min(int(max_queries), PROFILE_MAX_QUERIES))]
+
+
+def _collapse(text):
+    """Normalise whitespace so empty context fields don't leave gaps or
+    stray leading/trailing spaces in a query (e.g. the generic profile with
+    no market/segment/product supplied)."""
+    return re.sub(r"\s+", " ", text).strip()
