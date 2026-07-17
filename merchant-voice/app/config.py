@@ -45,9 +45,15 @@ class Config:
         self.max_body_bytes = _int(e, "MV_MAX_BODY_BYTES", 5 * 1024 * 1024)
         self.max_concurrency = _int(e, "MV_MAX_CONCURRENCY", 4)
 
+        # Canonical BOTIM_LLM_* configuration with MV_PROVIDER/MV_MODEL as
+        # service-local overrides (Merchant Voice keeps its safe default of
+        # mock — extraction on a live model is an explicit opt-in here).
+        from shared.llm.provider import resolve_llm_env
+        llm = resolve_llm_env(e)
         self.provider = e.get("MV_PROVIDER", "mock")
-        self.model = e.get("MV_MODEL", "claude-sonnet-5")
-        self.api_key = e.get("ANTHROPIC_API_KEY", "")
+        self.model = e.get("MV_MODEL") or llm["model"]
+        self.api_key = llm["api_key"]
+        self.base_url = llm["base_url"]
         self.timeout_s = _int(e, "MV_PROVIDER_TIMEOUT_S", 60)
 
         # "label:token:role,label:token:role,..." — labels are for safe

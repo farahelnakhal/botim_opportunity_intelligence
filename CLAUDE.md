@@ -25,8 +25,10 @@ partnership assumptions stay labelled as assumptions.
 
 1. `knowledge-base/` is **read-only at runtime** — changes land only via human Git
    commits (or `impact/` CLI with `--approver`). Never add an HTTP write path to it.
-2. All LLM calls go through `shared/llm/provider.py` (Anthropic | MockProvider).
-   Never bypass it; never remove MockProvider.
+2. All LLM calls go through `shared/llm/provider.py` (canonical config
+   `BOTIM_LLM_API_KEY/MODEL/BASE_URL/PROVIDER`; Anthropic | OpenAI-compatible |
+   MockProvider — mock is explicit-only, never a silent fallback). Never
+   bypass it; never remove MockProvider.
 3. Normal chat goes through `copilot-backend` (`/copilot-api/*`). The legacy
    `generate.py`/`router.py` scaffold stays behind `ENABLE_LEGACY_UNGROUNDED_ROUTES=1`.
 4. Backend owns application mode (`BOTIM_APP_MODE`, default `normal`; invalid →

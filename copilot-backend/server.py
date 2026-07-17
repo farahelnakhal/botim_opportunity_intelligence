@@ -101,8 +101,16 @@ def main():
     semaphore = threading.BoundedSemaphore(config.max_concurrency)
     server = ThreadingHTTPServer((config.host, config.port),
                                  build_handler(api, config, semaphore))
+    # Startup health report — active provider/model from the canonical
+    # BOTIM_LLM_* resolution (safe source note only; never key values).
     print(f"copilot backend listening on http://{config.host}:{config.port} "
-          f"(provider={config.provider}, CORS origin={config.cors_origin})")
+          f"(provider={config.provider}, model={config.model}, "
+          f"CORS origin={config.cors_origin})")
+    print(f"copilot llm config: {config.llm_source}")
+    if config.provider == "unconfigured":
+        print("copilot WARNING: no model provider configured — chat will return "
+              "honest provider errors until BOTIM_LLM_API_KEY is set "
+              "(BOTIM_LLM_PROVIDER=mock selects the deterministic demo responder).")
     server.serve_forever()
 
 

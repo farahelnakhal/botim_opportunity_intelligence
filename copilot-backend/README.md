@@ -7,7 +7,7 @@ The repository is the copilot's evidence and decision-support layer. All facts (
 ## Run
 
 ```bash
-cp copilot-backend/.env.example copilot-backend/.env   # fill in ANTHROPIC_API_KEY (never commit)
+cp copilot-backend/.env.example copilot-backend/.env   # fill in BOTIM_LLM_API_KEY (+MODEL; never commit)
 set -a; source copilot-backend/.env; set +a
 python3 copilot-backend/server.py
 # → http://127.0.0.1:8010  (binds localhost only by default)

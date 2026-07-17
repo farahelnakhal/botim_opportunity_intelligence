@@ -69,6 +69,42 @@ class RuntimeMode(unittest.TestCase):
             self.assertNotIn(leak, blob)
 
 
+class CanonicalLlmConfig(unittest.TestCase):
+    """BOTIM_LLM_* is canonical; mock is explicit-only; health reports the
+    active provider/model without secrets."""
+
+    def test_health_route_reports_active_provider_and_model(self):
+        from app.api import Api
+        cfg = Config(env={"COPILOT_PROVIDER": "mock"})
+        cfg.db_path = Path(tempfile.mkdtemp()) / "conv.db"
+        store = ConversationStore(cfg.db_path)
+        api = Api(Orchestrator(cfg, store), store)
+        status, body = api.handle("GET", "/api/health", b"")
+        self.assertEqual(status, 200)
+        self.assertEqual(body["provider"], "mock")
+        self.assertEqual(body["runtime_mode"], "deterministic_demo")
+        self.assertTrue(body["llm_configured"])
+        blob = str(body)
+        for leak in ("sk-ant", "api_key", "ANTHROPIC_API_KEY=", "Bearer"):
+            self.assertNotIn(leak, blob)
+
+    def test_unconfigured_chat_fails_honestly_never_mock(self):
+        cfg = Config(env={})  # no key, no explicit provider
+        cfg.db_path = Path(tempfile.mkdtemp()) / "conv.db"
+        self.assertEqual(cfg.provider, "unconfigured")
+        o = Orchestrator(cfg, ConversationStore(cfg.db_path))
+        r = o.chat("Tell me about OPP-013", conversation_id=None)
+        self.assertIn("error", r)
+        self.assertEqual(r["error"]["code"], "provider_error")
+
+    def test_botim_llm_vars_drive_the_copilot_config(self):
+        cfg = Config(env={"BOTIM_LLM_API_KEY": "gsk_x",
+                          "BOTIM_LLM_MODEL": "llama-3.3-70b",
+                          "BOTIM_LLM_BASE_URL": "https://api.groq.com/openai/v1"})
+        self.assertEqual(cfg.provider, "openai_compatible")
+        self.assertEqual(cfg.model, "llama-3.3-70b")
+
+
 class ConversationNotFound(unittest.TestCase):
     def test_unknown_conversation_id_returns_conversation_not_found(self):
         cfg = Config(env={"COPILOT_PROVIDER": "mock"})

@@ -66,7 +66,8 @@ See `docs/architecture.md` for the full route table. Key env vars:
 |---|---|
 | `BOTIM_APP_MODE` | `normal` (default) \| `demo` \| `test`; backend-authoritative |
 | `USER_OPPORTUNITIES_DB_PATH` | runtime SQLite (default `runtime/user-opportunities.db`, gitignored) |
-| `COPILOT_PROVIDER` | `anthropic` (default, needs `ANTHROPIC_API_KEY`) \| `mock` |
+| `BOTIM_LLM_API_KEY` / `BOTIM_LLM_MODEL` / `BOTIM_LLM_BASE_URL` / `BOTIM_LLM_PROVIDER` | **canonical LLM config** (all services). Provider inferred: base_url→openai_compatible; claude-*/sk-ant→anthropic; no key→unconfigured (honest errors). Mock only when explicitly set (or defaulted by start.sh in demo/test mode) |
+| `ANTHROPIC_API_KEY`, `GROQ_API_KEY`, `COPILOT_MODEL`, `COPILOT_PROVIDER` | optional **aliases** resolving into the canonical values (Groq alias implies the Groq endpoint) |
 | `COPILOT_UPSTREAM_URL` | fixed proxy destination (default `http://127.0.0.1:8010`) |
 | `ENABLE_LEGACY_UNGROUNDED_ROUTES` | opt-in for legacy `/chat` + `/analyze` (default off) |
 | `COPILOT_HOST/PORT`, `COPILOT_API_TOKEN`, `COPILOT_MAX_*` | copilot bind/auth/bounds (`copilot-backend/app/config.py`) |

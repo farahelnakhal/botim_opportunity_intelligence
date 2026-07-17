@@ -17,9 +17,18 @@ def _int(name, default):
 class Config:
     def __init__(self, env=None):
         e = env if env is not None else os.environ
-        self.provider = e.get("COPILOT_PROVIDER", "anthropic")
-        self.model = e.get("COPILOT_MODEL", "claude-sonnet-5")
-        self.api_key = e.get("ANTHROPIC_API_KEY", "")
+        # Canonical, vendor-neutral LLM configuration (BOTIM_LLM_API_KEY /
+        # BOTIM_LLM_MODEL / BOTIM_LLM_BASE_URL / BOTIM_LLM_PROVIDER), with
+        # ANTHROPIC_API_KEY / GROQ_API_KEY / COPILOT_MODEL / COPILOT_PROVIDER
+        # as optional aliases — see shared.llm.provider.resolve_llm_env.
+        # Mock is only ever selected explicitly, never because a key is absent.
+        from shared.llm.provider import resolve_llm_env
+        llm = resolve_llm_env(e)
+        self.provider = llm["provider"]
+        self.model = llm["model"]
+        self.api_key = llm["api_key"]
+        self.base_url = llm["base_url"]
+        self.llm_source = llm["source"]  # safe note for logs/health — never the key
         self.timeout_s = _int("COPILOT_TIMEOUT_S", 60) if env is None else int(e.get("COPILOT_TIMEOUT_S", 60))
         self.max_history = int(e.get("COPILOT_MAX_HISTORY", 20))
         self.max_tool_iterations = int(e.get("COPILOT_MAX_TOOL_ITERATIONS", 3))

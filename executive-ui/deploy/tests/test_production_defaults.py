@@ -43,21 +43,37 @@ class MockProviderWarning(unittest.TestCase):
             env={"PATH": "/usr/bin:/bin", **dict(env_pairs)},
         ).stdout
 
-    def test_normal_mode_with_mock_provider_warns_loudly(self):
+    def test_normal_mode_with_no_key_errors_loudly_and_never_defaults_to_mock(self):
         out = self._prelude_output({})  # no key, no explicit provider, no mode
+        self.assertIn("ERROR", out)
+        self.assertIn("BOTIM_LLM_API_KEY", out)
+        # mock is NOT silently selected — runtime mode is 'unconfigured'
+        self.assertNotIn("COPILOT_PROVIDER=mock", out)
+        self.assertNotIn("deterministic mock responder", out)
+
+    def test_demo_mode_with_no_key_defaults_to_mock_without_error(self):
+        out = self._prelude_output({"BOTIM_APP_MODE": "demo"})
+        self.assertIn("deterministic mock responder", out)
+        self.assertNotIn("ERROR", out)
+        self.assertNotIn("WARNING", out)
+
+    def test_normal_mode_with_explicit_mock_warns_loudly(self):
+        out = self._prelude_output({"BOTIM_LLM_PROVIDER": "mock"})
         self.assertIn("WARNING", out)
         self.assertIn("MOCK", out)
-        self.assertIn("ANTHROPIC_API_KEY", out)
+        self.assertIn("BOTIM_LLM_API_KEY", out)
 
-    def test_demo_mode_with_mock_provider_does_not_warn(self):
-        out = self._prelude_output({"BOTIM_APP_MODE": "demo"})
+    def test_normal_mode_with_canonical_key_is_silent(self):
+        out = self._prelude_output({"BOTIM_LLM_API_KEY": "k-secret-value"})
         self.assertNotIn("WARNING", out)
+        self.assertNotIn("ERROR", out)
+        self.assertNotIn("k-secret-value", out)  # key never echoed
 
-    def test_normal_mode_with_live_provider_does_not_warn(self):
-        out = self._prelude_output({"ANTHROPIC_API_KEY": "x"})
-        self.assertNotIn("WARNING", out)
-        # and the key value itself is never echoed
-        self.assertNotIn('"x"', out)
+    def test_alias_keys_also_count_as_configured(self):
+        for var in ("ANTHROPIC_API_KEY", "GROQ_API_KEY"):
+            out = self._prelude_output({var: "k-alias-value"})
+            self.assertNotIn("ERROR", out, var)
+            self.assertNotIn("k-alias-value", out, var)
 
 
 if __name__ == "__main__":

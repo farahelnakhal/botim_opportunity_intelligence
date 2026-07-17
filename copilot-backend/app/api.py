@@ -36,6 +36,8 @@ class Api:
             return 500, error_body("internal", "an internal error occurred")
 
     def _route(self, method, path, body_bytes):
+        if method == "GET" and path == "/api/health":
+            return self._health()
         if method == "POST" and path == "/api/chat":
             return self._chat(body_bytes)
         m = re.match(r"^/api/conversations/([^/]+)(/messages)?$", path)
@@ -48,6 +50,18 @@ class Api:
             if method == "DELETE" and not messages:
                 return self._delete(cid)
         return 404, error_body("not_found", "unknown endpoint")
+
+    def _health(self):
+        """Configuration health (canonical BOTIM_LLM_* resolution). Reports
+        the ACTIVE provider and model — never key values, never whether a
+        specific vendor variable holds the key beyond the safe source note."""
+        cfg = self.orchestrator.config
+        configured = cfg.provider in ("anthropic", "openai_compatible") and bool(cfg.api_key)
+        return 200, {"schema_version": "1.0", "status": "ok",
+                     "provider": cfg.provider, "model": cfg.model,
+                     "llm_configured": configured or cfg.provider == "mock",
+                     "runtime_mode": self.orchestrator._runtime_mode(),
+                     "config_source": cfg.llm_source}
 
     def _chat(self, body_bytes):
         try:

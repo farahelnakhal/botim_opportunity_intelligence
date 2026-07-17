@@ -32,31 +32,48 @@ COPILOT_READINESS_INTERVAL_SECONDS="${COPILOT_READINESS_INTERVAL_SECONDS:-0.5}"
 COPILOT_ENTRYPOINT="${COPILOT_ENTRYPOINT:-/app/copilot-backend/server.py}"
 EXECUTIVE_API_ENTRYPOINT="${EXECUTIVE_API_ENTRYPOINT:-/app/executive-ui/api/server.py}"
 
-# Demo-safe default: if no live provider key is configured, run copilot-backend
-# with the deterministic MockProvider rather than failing every chat request.
-# MockProvider never fabricates — it only ever echoes the same grounded facts
-# block a live model would also have received (see shared/llm/provider.py).
-if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -z "${COPILOT_PROVIDER:-}" ]; then
-  export COPILOT_PROVIDER=mock
-  echo "start.sh: no ANTHROPIC_API_KEY set — running copilot-backend with COPILOT_PROVIDER=mock (deterministic, grounded-facts-only demo mode)"
+# Canonical LLM configuration is BOTIM_LLM_API_KEY / BOTIM_LLM_MODEL
+# (+ BOTIM_LLM_BASE_URL / BOTIM_LLM_PROVIDER); ANTHROPIC_API_KEY /
+# GROQ_API_KEY / COPILOT_* are optional aliases resolved by
+# shared/llm/provider.py. The deterministic MOCK responder is only ever
+# selected EXPLICITLY, or defaulted here in demo/test mode — a missing key in
+# normal mode starts the copilot "unconfigured" (chat returns honest provider
+# errors) rather than silently serving demo output.
+HAS_LLM_KEY=""
+if [ -n "${BOTIM_LLM_API_KEY:-}" ] || [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${GROQ_API_KEY:-}" ]; then
+  HAS_LLM_KEY=1
 fi
-if [ "${COPILOT_PROVIDER:-anthropic}" = "mock" ]; then
+EXPLICIT_PROVIDER="${BOTIM_LLM_PROVIDER:-${COPILOT_PROVIDER:-}}"
+if [ -z "$HAS_LLM_KEY" ] && [ -z "$EXPLICIT_PROVIDER" ]; then
+  if [ "${BOTIM_APP_MODE:-normal}" = "demo" ] || [ "${BOTIM_APP_MODE:-normal}" = "test" ]; then
+    export COPILOT_PROVIDER=mock
+    echo "start.sh: ${BOTIM_APP_MODE} mode with no BOTIM_LLM_API_KEY — using the deterministic mock responder (grounded-facts-only demo output)"
+  else
+    echo "start.sh: ERROR =============================================================="
+    echo "start.sh: ERROR  No LLM is configured (BOTIM_LLM_API_KEY is empty) and this"
+    echo "start.sh: ERROR  is ${BOTIM_APP_MODE:-normal} mode. Chat will return honest provider"
+    echo "start.sh: ERROR  errors until BOTIM_LLM_API_KEY (+ BOTIM_LLM_MODEL, and"
+    echo "start.sh: ERROR  BOTIM_LLM_BASE_URL for non-Anthropic endpoints) is set."
+    echo "start.sh: ERROR  Set BOTIM_LLM_PROVIDER=mock only for an explicit demo."
+    echo "start.sh: ERROR =============================================================="
+  fi
+fi
+if [ "${BOTIM_LLM_PROVIDER:-${COPILOT_PROVIDER:-}}" = "mock" ]; then
   RUNTIME_MODE="deterministic_demo"
+elif [ -z "$HAS_LLM_KEY" ]; then
+  RUNTIME_MODE="unconfigured"
 else
   RUNTIME_MODE="live_model"
 fi
 
-# PR1 — a NORMAL-mode (production-shaped) deployment running on the mock
-# provider is almost certainly a misconfiguration (missing ANTHROPIC_API_KEY):
-# chat would echo raw grounding facts instead of live synthesis. It still
-# starts (local keyless development is legitimate) but NEVER silently — this
-# warning plus the UI's persistent "Demo mode" badge disclose it loudly.
+# A NORMAL-mode deployment explicitly running on mock is still disclosed
+# loudly (never silently) — the UI badge is the second disclosure layer.
 if [ "${BOTIM_APP_MODE:-normal}" != "demo" ] && [ "$RUNTIME_MODE" = "deterministic_demo" ]; then
   echo "start.sh: WARNING ============================================================"
   echo "start.sh: WARNING  BOTIM_APP_MODE=${BOTIM_APP_MODE:-normal} but the chat provider is MOCK."
   echo "start.sh: WARNING  Production users would see deterministic demo output, not"
-  echo "start.sh: WARNING  live model synthesis. Set ANTHROPIC_API_KEY (and unset"
-  echo "start.sh: WARNING  COPILOT_PROVIDER, or set it to 'anthropic') for real use."
+  echo "start.sh: WARNING  live model synthesis. Set BOTIM_LLM_API_KEY (and remove the"
+  echo "start.sh: WARNING  explicit mock provider setting) for real use."
   echo "start.sh: WARNING ============================================================"
 fi
 
@@ -102,7 +119,7 @@ trap 'on_signal INT' INT
 trap 'on_signal TERM' TERM
 trap term_children EXIT   # safety net so no child ever survives this process
 
-log "starting copilot-backend on ${COPILOT_HOST}:${COPILOT_PORT} (provider=${COPILOT_PROVIDER:-anthropic}, runtime_mode=${RUNTIME_MODE})"
+log "starting copilot-backend on ${COPILOT_HOST}:${COPILOT_PORT} (provider=${BOTIM_LLM_PROVIDER:-${COPILOT_PROVIDER:-auto}}, runtime_mode=${RUNTIME_MODE})"
 python3 "$COPILOT_ENTRYPOINT" &
 COPILOT_PID=$!
 
