@@ -112,6 +112,65 @@ research, despite the UI existing first.
   KB-maintenance phase) and any scheduler discussion (only after manual runs
   prove trustworthy in real use).
 
+## Phase R5 — Chat-orchestrated analysis workspace (the priority feature)
+
+> Full design + rationale: `docs/decision-log.md` 2026-07-16 "Versioned
+> preliminary analysis workspace". This is the current top priority.
+
+**Value:** asking a strategic question runs the customer-intel →
+opportunity-intel → scoring chain once, produces a persisted **preliminary
+analysis workspace**, and the copilot answers from it (sources + logic);
+follow-ups reuse the stored workspace cheaply.
+**Depends on:** PR3 (claim extraction) first.
+
+Ships as a sequence of focused PRs:
+- **PR3 — claim extraction:** Merchant-Voice-grade source-verified extraction
+  turning research/document text into `pending_review` candidate claims
+  (exact-substring source verification, quantitative-claim safeguards,
+  single-source claims never market-wide, provenance). No orchestration yet.
+- **PR4 — workspace store + orchestrator:** versioned per-chat workspace
+  (new runtime store, sibling of user/research stores), snapshotted with
+  first-class per-version provenance; orchestrator composes existing engines;
+  **preliminary score via the real 17-dim engine on a synthetic scorecard**
+  (never an LLM guess); trigger model (first / manual refresh / meaningful
+  change / stale / monitoring); follow-ups read the latest complete version;
+  approvals attach to claims, inherited across versions; per-run cost/timeout
+  caps; retention policy. Graceful degradation when search/LLM unavailable.
+- **PR4-UI:** staged "running analysis" UX, preliminary badges on all
+  machine numbers, the workspace/evidence/logic view, and the diff surface.
+- **Acceptance:** the critical test — "Analyse the value proposition of SME
+  cards for UAE SMEs" from a fresh account — produces a coherent workspace-
+  backed analysis distinguishing confirmed / preliminary / assumed / unknown,
+  with a recommendation and next steps; follow-ups don't re-run the chain.
+
+## Phase R6 — Scheduled monitoring re-run + email-on-change
+
+**Depends on:** R5 (re-run the chain), R8 (recipients need identity), an
+always-on scheduler, and email infrastructure.
+- Per-saved-chat re-run on a configurable cadence; snapshot + diff the
+  workspace; email the delta of changed numbers/predictions to opted-in
+  recipients; changed items stay preliminary until reviewed.
+- **Gotchas (decide before building):** the free-tier container sleeps — needs
+  an always-on plan or external cron trigger; no email sender exists yet
+  (provider + verified sender + opt-in/unsubscribe); throttling/budget per
+  user; concurrency with live edits.
+
+## Phase R7 — Attachments + internal-document ingestion
+
+**Depends on:** PR3, R5; best after R8 (documents are user-private).
+- Upload → text extraction (PDF/docx) → scoped RAG (chunk + embed) → candidate
+  evidence feeding the workspace chain. Size/type limits; document text is
+  data-never-instructions; deletion path.
+
+## Phase R8 — Authentication + tenancy (sign-in)
+
+**Depends on:** nothing hard; **gates R6 and R7** (email recipients and
+private documents must be scoped to a user).
+- Real auth for the executive API + per-user scoping of chats, workspaces,
+  documents, monitoring configs, and email recipients; replaces the
+  single-tenant SQLite assumption. Merchant-voice auth replacement folds in
+  here. Per-user rate/quota once identity exists.
+
 ## Phase C1 — Deterministic calculations
 
 **Value:** transparent market-sizing / unit-economics math for briefs and the SME
@@ -130,13 +189,13 @@ case's deck. Independent of R-phases; can run in parallel after R1.
 ## Phase H1 — Hardening milestone (the deferred full sweep)
 
 **Depends on:** whenever the above stabilize; explicitly owed from PR #34.
-- Real authentication/tenancy for executive API + user store; merchant-voice auth
-  replacement before any non-synthetic data.
-- Adversarial tests for copilot `context.user_opportunity`.
+- Adversarial tests for copilot `context.user_opportunity` and for workspace/
+  document ingestion (prompt injection from uploaded/fetched content).
 - Full combined test matrix, browser/e2e sweeps across modes, persistence/restart,
   service-failure, mobile, dark mode, citation integrity, research partial/failed
   states, security/trust-boundary tests.
-- Real attachment processing (if still wanted) enters here, not before.
+- (Auth/tenancy and attachments are now first-class phases R8/R7, no longer
+  deferred here.)
 
 ## Explicit exclusions (do not build without a product decision)
 
