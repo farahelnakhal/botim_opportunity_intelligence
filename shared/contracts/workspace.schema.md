@@ -100,6 +100,7 @@ reason stored and the error re-raised).
 | `POST /user-opportunities/{UOPP-id}/workspace/refresh` | run the chain; body `{question?}`. First build → trigger `first_analysis`, later → `manual_refresh`. Providers resolved from the environment; missing ones become gaps. 201 with the finished version (enriched view below) |
 | `GET /user-opportunities/{UOPP-id}/workspace` | latest complete version, or `{workspace: null, note}` when none exists (honest empty) |
 | `GET /user-opportunities/{UOPP-id}/workspace/versions` | version summaries, newest first |
+| `GET /user-opportunities/{UOPP-id}/workspace/diff` | deterministic `compare_versions` of the two newest **complete** versions; `{diff: null, note}` when fewer than two exist (PR4-UI) |
 
 The enriched view adds `is_stale` (deterministic: `completed_at` older than
 `WORKSPACE_STALE_HOURS`, default 24) and `claims` — each claim id resolved

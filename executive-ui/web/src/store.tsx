@@ -45,7 +45,8 @@ export function userOppAsProject(u: UserOpportunity): Opportunity {
   };
 }
 export type Tab =
-  | "chat" | "knowledge" | "interviews" | "reports" | "monitoring" | "files" | "sources" | "settings";
+  | "chat" | "knowledge" | "interviews" | "reports" | "monitoring" | "files" | "sources" | "settings"
+  | "analysis"; // Phase R5 PR4-UI — the workspace tab for saved user opportunities
 
 // Generic detail-drawer target — a lighter-weight sibling to the opportunity
 // drawer (drawerOppId) for record types that aren't opportunities. Kept

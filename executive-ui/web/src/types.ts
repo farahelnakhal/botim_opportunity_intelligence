@@ -595,3 +595,77 @@ export interface CopilotChatResult {
   // Absent is safe/backward-compatible (treated as unknown, no badge shown).
   runtimeMode?: "deterministic_demo" | "live_model";
 }
+
+/* ---------------- Analysis workspace (Phase R5, PR4-UI) ---------------- */
+// shared/contracts/workspace.schema.md — everything a workspace contains is
+// machine-generated PRELIMINARY analysis; the UI must always badge it as
+// such and show gaps honestly.
+
+export type WorkspaceTrigger =
+  | "first_analysis" | "manual_refresh" | "meaningful_change" | "stale" | "monitoring";
+
+export interface WorkspaceKbEvidence {
+  id: string;
+  title: string;
+  segment: string | null;
+  status: string | null;
+  evidence_confidence: string | null;
+  match: number;
+}
+
+export interface WorkspacePreliminaryScore {
+  preliminary: boolean;
+  engine: string;
+  composite: number;
+  assumption_count: number;
+  assumption_capped: boolean;
+  max_classification: string;
+  classification: string;
+  confidence: string;
+  basis_note?: string;
+  inputs_found?: { kb_evidence_records: number; accepted_candidate_claims: number };
+}
+
+export interface WorkspaceClaim {
+  id: string;
+  claim: string;
+  status: ResearchCandidateStatus;
+  origin: "human" | "extracted" | null;
+  source_ids: string[];
+}
+
+export interface WorkspaceVersionSummary {
+  id: string;
+  opportunity_id: string;
+  version: number;
+  status: "running" | "complete" | "failed";
+  trigger: WorkspaceTrigger;
+  question: string | null;
+  error: string | null;
+  research_run_id: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface WorkspaceVersion extends WorkspaceVersionSummary {
+  kb_evidence: WorkspaceKbEvidence[];
+  claim_ids: string[];
+  preliminary_score: WorkspacePreliminaryScore | null;
+  gaps: string[];
+  provenance: Record<string, unknown> | null;
+  // enrichment from the GET/refresh view
+  is_stale?: boolean;
+  claims?: WorkspaceClaim[];
+}
+
+export interface WorkspaceDiff {
+  older_id: string;
+  newer_id: string;
+  composite_before: number | null;
+  composite_after: number | null;
+  composite_delta: number | null;
+  new_claim_ids: string[];
+  removed_claim_ids: string[];
+  new_gaps: string[];
+  resolved_gaps: string[];
+}
