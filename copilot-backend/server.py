@@ -8,6 +8,7 @@ Run:  python3 copilot-backend/server.py
 """
 
 import json
+import re
 import sys
 import threading
 import time
@@ -18,6 +19,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import logging_util                      # noqa: E402
+
+USER_ID_RE = re.compile(r"^USER-[0-9a-f]{12}$")
 from app.api import Api, error_body               # noqa: E402
 from app.config import Config                     # noqa: E402
 from app.orchestrator import Orchestrator         # noqa: E402
@@ -65,8 +68,18 @@ def build_handler(api, config, semaphore):
             if not semaphore.acquire(timeout=config.timeout_s):
                 self._send(429, error_body("rate_limited", "server busy", retryable=True))
                 return
+            # Phase R8b — proxy-authenticated identity. Honored ONLY when the
+            # deployment explicitly trusts the fronting proxy
+            # (COPILOT_TRUST_PROXY_USER=1, the single-container deploy where
+            # this backend binds 127.0.0.1 and is reachable only through the
+            # executive proxy, which strips client-supplied copies).
+            user_id = None
+            if config.trust_proxy_user:
+                header = self.headers.get("X-Botim-User", "")
+                if USER_ID_RE.match(header):
+                    user_id = header
             try:
-                status, payload = api.handle(method, self.path, body)
+                status, payload = api.handle(method, self.path, body, user_id=user_id)
             finally:
                 semaphore.release()
             self._send(status, payload)

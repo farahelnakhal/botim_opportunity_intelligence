@@ -180,6 +180,21 @@ def registration_open():
         not in ("0", "off", "false", "no")
 
 
+# Phase R8b — per-user daily quotas on expensive actions, enforced only
+# under required-auth mode (no identity, no quota). Overridable per action:
+# QUOTA_CHAT_PER_DAY, QUOTA_RESEARCH_EXECUTE_PER_DAY, ...
+QUOTA_DEFAULTS = {"chat": 200, "research_execute": 25, "research_extract": 25,
+                  "workspace_refresh": 25, "monitoring_run": 25}
+
+
+def quota_limit(action):
+    raw = os.environ.get(f"QUOTA_{action.upper()}_PER_DAY", "")
+    try:
+        return max(1, int(raw)) if raw.strip() else QUOTA_DEFAULTS[action]
+    except ValueError:
+        return QUOTA_DEFAULTS[action]
+
+
 def _cookie_secure():
     """Secure flag on the session cookie: on by default (production is
     HTTPS), explicitly disable with AUTH_COOKIE_SECURE=0 for plain-HTTP
@@ -252,6 +267,34 @@ class Handler(BaseHTTPRequestHandler):
                         "code": "auth_required"}, status=401)
         return user
 
+    def _quota_guard(self, action):
+        """Phase R8b — count-and-record one expensive action for the current
+        user. True = proceed; False = a 429 was already emitted. A no-op
+        (True) when enforcement is off — no identity, no quota."""
+        if not auth_required():
+            return True
+        user = self._current_user()
+        if user is None:   # the session guard upstream already handles this
+            return True
+        try:
+            get_auth_store().check_quota(user["id"], action, quota_limit(action))
+            return True
+        except auth_store.AuthError as exc:
+            self._error(exc.status, str(exc))
+            return False
+
+    def _research_owner_guard(self, store, run_id):
+        """Phase R8b — True when the current user may act on the run (own
+        run or legacy NULL-owner). Emits an indistinguishable 404 otherwise."""
+        if not auth_required():
+            return True
+        user = self._current_user()
+        run = store.get_run(run_id)
+        if user is not None and run.get("owner_user_id") not in (None, user["id"]):
+            self._error(404, "research run not found")
+            return False
+        return True
+
     # /auth/* — always reachable (sign-in must work before a session exists)
     def _auth_api(self, method, sub):
         store = get_auth_store()
@@ -302,6 +345,14 @@ class Handler(BaseHTTPRequestHandler):
         if query:
             url += "?" + query
         headers = {"content-type": "application/json", "accept": "application/json"}
+        # Phase R8b — propagate the session-validated identity to the copilot
+        # backend so conversations can be owner-scoped. The header dict is
+        # built fresh here (a client-supplied X-Botim-User is never
+        # forwarded); copilot honors it only with COPILOT_TRUST_PROXY_USER=1.
+        if auth_required():
+            user = self._current_user()
+            if user:
+                headers["x-botim-user"] = user["id"]
         # Forwarded unchanged, never logged (see log_message override above
         # and logging_util on the copilot-backend side — neither ever prints
         # header values).
@@ -345,6 +396,9 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/copilot-api/"):
             # Phase R8a — under required-auth mode, chat needs a session too
             if auth_required() and self._require_session() is None:
+                return
+            # Phase R8b — chat calls count against the user's daily quota
+            if path.endswith("/chat") and not self._quota_guard("chat"):
                 return
             length = int(self.headers.get("Content-Length", 0) or 0)
             if length > COPILOT_PROXY_MAX_BODY_BYTES:
@@ -412,7 +466,9 @@ class Handler(BaseHTTPRequestHandler):
             if sub in ("/research/runs", "/research/runs/"):
                 body = self._read_json_body()
                 profile_name = body.get("profile")
-                run = store.create_run(body)
+                owner = self._current_user() if auth_required() else None
+                run = store.create_run(body,
+                                       owner_user_id=owner["id"] if owner else None)
                 # a profile pre-plans the run's queries deterministically
                 if profile_name:
                     try:
@@ -432,6 +488,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(store.get_run(run["id"], include_children=True), status=201)
             m = re.match(r"^/research/runs/(RRUN-[0-9a-f]{12})/execute$", sub)
             if m:
+                if not self._research_owner_guard(store, m.group(1)):
+                    return
+                if not self._quota_guard("research_execute"):
+                    return
                 try:
                     provider = research_providers.from_env()
                 except research_providers.SearchProviderError as exc:
@@ -442,10 +502,16 @@ class Handler(BaseHTTPRequestHandler):
             # Approval never mints an EV id or touches the knowledge base.
             m = re.match(r"^/research/runs/(RRUN-[0-9a-f]{12})/candidates$", sub)
             if m:
+                if not self._research_owner_guard(store, m.group(1)):
+                    return
                 body = self._read_json_body()
                 return self._json(store.add_candidate(m.group(1), body), status=201)
             m = re.match(r"^/research/candidates/(RCAND-[0-9a-f]{12})/review$", sub)
             if m:
+                # ownership follows the candidate's run (Phase R8b)
+                cand = store.get_candidate(m.group(1))
+                if not self._research_owner_guard(store, cand["run_id"]):
+                    return
                 body = self._read_json_body()
                 return self._json(store.review_candidate(
                     m.group(1), body.get("action"), note=body.get("note")))
@@ -453,6 +519,8 @@ class Handler(BaseHTTPRequestHandler):
             # nothing auto-applied. Works on finished runs (that is the point).
             m = re.match(r"^/research/runs/(RRUN-[0-9a-f]{12})/revalidate$", sub)
             if m:
+                if not self._research_owner_guard(store, m.group(1)):
+                    return
                 summary = research_revalidate.revalidate_run(store, m.group(1))
                 detail = self._research_run_detail(store, m.group(1))
                 detail["revalidation_summary"] = summary
@@ -462,6 +530,10 @@ class Handler(BaseHTTPRequestHandler):
             # 'extracted'); nothing shortcuts human review. Needs a live model.
             m = re.match(r"^/research/runs/(RRUN-[0-9a-f]{12})/extract$", sub)
             if m:
+                if not self._research_owner_guard(store, m.group(1)):
+                    return
+                if not self._quota_guard("research_extract"):
+                    return
                 cfg = _ExtractionLLMConfig()
                 if cfg.provider not in ("anthropic", "openai_compatible"):
                     return self._error(400, "no model provider configured for extraction "
@@ -539,6 +611,8 @@ class Handler(BaseHTTPRequestHandler):
                 # cadence remains intended configuration). Provider failure
                 # is recorded honestly on the config, never fabricated away.
                 if mon_action == "run" and method == "POST":
+                    if not self._quota_guard("monitoring_run"):
+                        return
                     try:
                         provider = research_providers.from_env()
                     except research_providers.SearchProviderError as exc:
@@ -585,6 +659,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             opp = store.get(opp_id)  # 404 for unknown opportunity
             if sub_action == "refresh" and method == "POST":
+                if not self._quota_guard("workspace_refresh"):
+                    return
                 body = self._read_json_body()
                 # first build for this opportunity is 'first_analysis'; later
                 # explicit refreshes are 'manual_refresh'
@@ -800,24 +876,30 @@ class Handler(BaseHTTPRequestHandler):
                 status = (query.get("status") or [None])[0]
                 opp_ref = (query.get("opportunity_ref") or [None])[0]
                 limit = (query.get("limit") or ["100"])[0]
+                viewer = self._current_user() if auth_required() else None
                 try:
                     runs = get_research_store().list_runs(
                         status=status, opportunity_ref=opp_ref,
-                        limit=int(limit) if str(limit).isdigit() else 100)
+                        limit=int(limit) if str(limit).isdigit() else 100,
+                        visible_to=viewer["id"] if viewer else None)
                 except research_store.ResearchStoreError as exc:
                     return self._error(exc.status, str(exc))
                 return self._json({"runs": runs})
             if path == "/research/candidates":
                 status_f = (query.get("status") or [None])[0]
                 opp_ref = (query.get("opportunity_ref") or [None])[0]
+                viewer = self._current_user() if auth_required() else None
                 try:
                     return self._json({"candidates": get_research_store().list_candidates(
-                        status=status_f, opportunity_ref=opp_ref)})
+                        status=status_f, opportunity_ref=opp_ref,
+                        visible_to=viewer["id"] if viewer else None)})
                 except research_store.ResearchStoreError as exc:
                     return self._error(exc.status, str(exc))
             m = re.match(r"^/research/runs/([A-Za-z0-9-]{1,40})$", path)
             if m:
                 try:
+                    if not self._research_owner_guard(get_research_store(), m.group(1)):
+                        return
                     return self._json(self._research_run_detail(
                         get_research_store(), m.group(1)))
                 except research_store.ResearchStoreError as exc:

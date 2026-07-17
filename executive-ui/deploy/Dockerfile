@@ -60,7 +60,8 @@ ENV PORT=7860 \
     USER_OPPORTUNITIES_DB_PATH=/data/runtime/user-opportunities.db \
     RESEARCH_DB_PATH=/data/runtime/research.db \
     WORKSPACE_DB_PATH=/data/runtime/workspace.db \
-    AUTH_DB_PATH=/data/runtime/auth.db
+    AUTH_DB_PATH=/data/runtime/auth.db \
+    COPILOT_TRUST_PROXY_USER=1
 RUN mkdir -p /data && chmod -R 777 /data
 
 WORKDIR /app

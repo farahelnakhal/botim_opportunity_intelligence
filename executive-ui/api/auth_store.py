@@ -31,7 +31,7 @@ import threading
 import uuid
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_DB_PATH = REPO / "runtime" / "auth.db"
@@ -133,6 +133,17 @@ class AuthStore:
                     expires_at TEXT NOT NULL)""")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user "
                              "ON sessions(user_id)")
+            if version < 2:
+                # Phase R8b — per-user quota accounting for expensive actions
+                # (chat calls, research executions, workspace refreshes, ...).
+                # One row per performed action; counted over a sliding window
+                # and pruned opportunistically. Survives restarts by design.
+                conn.execute("""CREATE TABLE IF NOT EXISTS quota_events (
+                    user_id TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    at TEXT NOT NULL)""")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_quota_user_action "
+                             "ON quota_events(user_id, action, at)")
             conn.execute("INSERT OR REPLACE INTO meta (key, value) "
                          "VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
 
@@ -243,6 +254,32 @@ class AuthStore:
                 conn.execute("DELETE FROM sessions WHERE token_hash=?", (th,))
                 return None
         return self._user_dict(row)
+
+    # -- per-user quotas (Phase R8b) ------------------------------------------ #
+
+    def check_quota(self, user_id, action, limit, window_s=86400):
+        """Count-then-record one action for a user. Raises AuthError 429 when
+        the user already performed `limit` actions inside the window; on
+        success the action is recorded and counts against future calls.
+        Old rows are pruned opportunistically."""
+        if not isinstance(user_id, str) or not USER_RE.match(user_id):
+            raise AuthError("invalid user id")
+        now = _now_dt()
+        window_start = _iso(now - datetime.timedelta(seconds=window_s))
+        with self._connect() as conn:
+            conn.execute("DELETE FROM quota_events WHERE at < ?",
+                         (_iso(now - datetime.timedelta(seconds=window_s * 2)),))
+            used = conn.execute(
+                "SELECT COUNT(*) AS n FROM quota_events "
+                "WHERE user_id=? AND action=? AND at >= ?",
+                (user_id, action, window_start)).fetchone()["n"]
+            if used >= max(1, int(limit)):
+                raise AuthError(
+                    f"daily limit reached for {action.replace('_', ' ')} "
+                    f"({limit} per day) — try again later", status=429)
+            conn.execute("INSERT INTO quota_events (user_id, action, at) VALUES (?,?,?)",
+                         (user_id, action, _iso(now)))
+        return {"action": action, "used": used + 1, "limit": int(limit)}
 
     def logout(self, token):
         if not isinstance(token, str) or not token:

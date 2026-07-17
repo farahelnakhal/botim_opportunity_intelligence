@@ -163,3 +163,15 @@ const data = await r.json();   // shape above
   "warnings": [],
   "safe_tool_trace": [] }
 ```
+
+## Per-user conversation ownership (Phase R8b) — additive
+
+`conversations.owner_user_id` (nullable, idempotent in-place migration).
+The executive proxy validates the session cookie and forwards the identity
+as an `X-Botim-User` header (client-supplied copies are never forwarded);
+copilot-backend honors it ONLY when `COPILOT_TRUST_PROXY_USER=1` (the
+single-container deploy, where the backend binds 127.0.0.1 and is reachable
+only through the proxy). A conversation created with an identity belongs to
+that user; another user's access — chat continuation, reads, delete — gets
+the existing `conversation_not_found` / `not_found` shape (indistinguishable
+from nonexistent). Legacy NULL-owner conversations stay accessible.

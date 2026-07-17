@@ -24,26 +24,36 @@ class ConversationStore:
         self._db.execute("""CREATE TABLE IF NOT EXISTS messages (
             id TEXT PRIMARY KEY, conversation_id TEXT, role TEXT, content TEXT,
             cited_json TEXT, created_at TEXT)""")
+        # Phase R8b — per-user ownership. Pre-auth conversations keep a NULL
+        # owner (legacy shared); new ones created with an authenticated
+        # identity carry the USER- id. Idempotent PRAGMA-guarded migration.
+        existing = {r[1] for r in self._db.execute("PRAGMA table_info(conversations)")}
+        if "owner_user_id" not in existing:
+            self._db.execute("ALTER TABLE conversations ADD COLUMN owner_user_id TEXT")
         self._db.commit()
 
-    def create_conversation(self, context=None):
+    def create_conversation(self, context=None, owner_user_id=None):
         cid = "conv_" + uuid.uuid4().hex[:12]
         now = _now()
-        self._db.execute("INSERT INTO conversations VALUES (?,?,?,?)",
-                         (cid, now, now, json.dumps(context or {})))
+        self._db.execute("INSERT INTO conversations "
+                         "(id, created_at, updated_at, context_json, owner_user_id) "
+                         "VALUES (?,?,?,?,?)",
+                         (cid, now, now, json.dumps(context or {}), owner_user_id))
         self._db.commit()
         return cid
 
     def get_conversation(self, cid):
         row = self._db.execute(
-            "SELECT id, created_at, updated_at, context_json FROM conversations WHERE id=?",
+            "SELECT id, created_at, updated_at, context_json, owner_user_id "
+            "FROM conversations WHERE id=?",
             (cid,)).fetchone()
         if row is None:
             return None
         count = self._db.execute("SELECT COUNT(*) FROM messages WHERE conversation_id=?",
                                  (cid,)).fetchone()[0]
         return {"conversation_id": row[0], "created_at": row[1], "updated_at": row[2],
-                "context": json.loads(row[3] or "{}"), "message_count": count}
+                "context": json.loads(row[3] or "{}"), "message_count": count,
+                "owner_user_id": row[4]}
 
     def update_context(self, cid, context):
         self._db.execute("UPDATE conversations SET context_json=?, updated_at=? WHERE id=?",

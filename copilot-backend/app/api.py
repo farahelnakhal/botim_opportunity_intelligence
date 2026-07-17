@@ -28,27 +28,29 @@ class Api:
         self.orchestrator = orchestrator
         self.store = store
 
-    def handle(self, method, path, body_bytes):
-        """Returns (status, dict_body)."""
+    def handle(self, method, path, body_bytes, user_id=None):
+        """Returns (status, dict_body). `user_id` is the proxy-authenticated
+        identity (Phase R8b) — None when auth is off or untrusted."""
         try:
-            return self._route(method, path, body_bytes)
+            return self._route(method, path, body_bytes, user_id)
         except Exception:  # never leak stack traces
             return 500, error_body("internal", "an internal error occurred")
 
-    def _route(self, method, path, body_bytes):
+    def _route(self, method, path, body_bytes, user_id=None):
         if method == "GET" and path == "/api/health":
             return self._health()
         if method == "POST" and path == "/api/chat":
-            return self._chat(body_bytes)
+            return self._chat(body_bytes, user_id)
         m = re.match(r"^/api/conversations/([^/]+)(/messages)?$", path)
         if m:
             cid, messages = m.group(1), bool(m.group(2))
             if not CONV_RE.match(cid):
                 return 400, error_body("invalid_request", "malformed conversation id")
             if method == "GET":
-                return self._get_messages(cid) if messages else self._get_conversation(cid)
+                return (self._get_messages(cid, user_id) if messages
+                        else self._get_conversation(cid, user_id))
             if method == "DELETE" and not messages:
-                return self._delete(cid)
+                return self._delete(cid, user_id)
         return 404, error_body("not_found", "unknown endpoint")
 
     def _health(self):
@@ -63,7 +65,7 @@ class Api:
                      "runtime_mode": self.orchestrator._runtime_mode(),
                      "config_source": cfg.llm_source}
 
-    def _chat(self, body_bytes):
+    def _chat(self, body_bytes, user_id=None):
         try:
             payload = json.loads(body_bytes.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError):
@@ -78,25 +80,37 @@ class Api:
             return 400, error_body("invalid_request", "malformed conversation id")
         if not isinstance(context, dict):
             return 400, error_body("invalid_request", "context must be an object")
-        result = self.orchestrator.chat(message, conversation_id, context)
+        result = self.orchestrator.chat(message, conversation_id, context, user_id=user_id)
         if "error" in result:
             code = result["error"]["code"]
             return ERROR_STATUS.get(code, 500), {"schema_version": "1.0", "error": result["error"]}
         return 200, result
 
-    def _get_conversation(self, cid):
+    def _accessible(self, cid, user_id):
+        """The conversation, or None. Phase R8b: another user's conversation
+        is indistinguishable from a nonexistent one; legacy NULL-owner rows
+        stay accessible to everyone."""
         conv = self.store.get_conversation(cid)
+        if conv is not None and user_id is not None \
+                and conv.get("owner_user_id") not in (None, user_id):
+            return None
+        return conv
+
+    def _get_conversation(self, cid, user_id=None):
+        conv = self._accessible(cid, user_id)
         if conv is None:
             return 404, error_body("not_found", "conversation not found")
         return 200, {"schema_version": "1.0", **conv}
 
-    def _get_messages(self, cid):
-        if self.store.get_conversation(cid) is None:
+    def _get_messages(self, cid, user_id=None):
+        if self._accessible(cid, user_id) is None:
             return 404, error_body("not_found", "conversation not found")
         return 200, {"schema_version": "1.0", "conversation_id": cid,
                      "messages": self.store.get_messages(cid)}
 
-    def _delete(self, cid):
+    def _delete(self, cid, user_id=None):
+        if self._accessible(cid, user_id) is None:
+            return 404, error_body("not_found", "conversation not found")
         if not self.store.delete_conversation(cid):
             return 404, error_body("not_found", "conversation not found")
         return 200, {"schema_version": "1.0", "deleted": True, "conversation_id": cid}
