@@ -4,6 +4,31 @@
 > decision would surprise a future maintainer or constrains future work.
 > Format: date · decision · reasoning · alternatives · consequences.
 
+## 2026-07-17 — R7 documents: stdlib extraction, honest PDF gap, lexical retrieval seam
+
+- **Decision:** Document attachments support `.txt/.md/.csv/.docx` with pure
+  stdlib extraction (DOCX = zip + XML paragraphs). **PDF returns an honest
+  415 "not supported yet"** rather than shipping a fragile pure-stdlib PDF
+  parser that silently yields garbage. "Scoped RAG" is implemented as
+  deterministic chunking + transparent keyword-overlap retrieval
+  (`search_chunks`) — the same discipline as the KB search — with vector
+  embeddings able to replace the scorer behind the same signature later.
+  Retrieved excerpts are quoted verbatim, bounded, snapshotted onto the
+  workspace version (kept even if the file is deleted), and labelled
+  USER-PROVIDED DATA — never instructions, never repository evidence.
+  Deletion is real (document + all chunks). Uploads travel as base64 JSON
+  (2 MB cap) to keep the stdlib server free of multipart parsing.
+- **Reasoning:** No dependencies is a hard constraint; honesty beats
+  capability theater (a bad PDF extractor fabricates content); deterministic
+  retrieval is testable offline and transparent to reviewers.
+- **Alternatives rejected:** bundling a PDF library (violates the stdlib
+  constraint — revisit only as a logged decision); embedding-based RAG now
+  (needs a model + storage; the seam is ready); multipart upload parsing
+  (complexity without user value at 2 MB caps).
+- **Consequences:** PDF users must export to .docx/.txt (stated in the UI).
+  R6 monitoring diffs already include document-driven changes because
+  excerpts live on versions.
+
 ## 2026-07-17 — R8a authentication: stdlib email+password, opt-in enforcement, legacy rows shared
 
 - **Decision:** Accounts are email + password hashed with PBKDF2-HMAC-SHA256

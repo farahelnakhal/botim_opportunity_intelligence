@@ -647,8 +647,17 @@ export interface WorkspaceVersionSummary {
   completed_at: string | null;
 }
 
+export interface WorkspaceDocumentEvidence {
+  document_id: string;
+  filename: string;
+  chunk_seq: number;
+  match: number;
+  excerpt: string;
+}
+
 export interface WorkspaceVersion extends WorkspaceVersionSummary {
   kb_evidence: WorkspaceKbEvidence[];
+  document_evidence?: WorkspaceDocumentEvidence[];
   claim_ids: string[];
   preliminary_score: WorkspacePreliminaryScore | null;
   gaps: string[];

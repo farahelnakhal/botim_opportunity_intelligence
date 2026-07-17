@@ -1,4 +1,4 @@
-# Analysis workspace (Phase R5, PR4) — schema v1
+# Analysis workspace (Phase R5, PR4) — schema v2
 
 Persistence + build contract for versioned preliminary analysis workspaces.
 Implementation: `shared/workspace/` (`store.py` — runtime SQLite at
@@ -55,6 +55,7 @@ trigger**: follow-up questions reuse the latest stored version.
 | `research_run_id` | `RRUN-…` \| null | the run this build executed |
 | `kb_evidence` | `[{id, title, segment, status, evidence_confidence, match}]` | committed records matched by deterministic keyword overlap |
 | `claim_ids` | `RCAND-…[]` | claims extracted by this build (PR3 pipeline; always `pending_review` at birth) |
+| `document_evidence` | `[{document_id, filename, chunk_seq, match, excerpt}]` | Phase R7 (schema v2, in-place migration): bounded verbatim excerpts from the user's uploaded documents that matched this build — USER-PROVIDED data, snapshotted on the version (kept even if the file is later deleted) |
 | `preliminary_score` | object \| null | see below |
 | `gaps` | string[] | honest record of everything that was skipped/missing |
 | `provenance` | object \| null | `{question, trigger, queries, kb_record_ids, research_run_id, search_provider, extraction_model, builder}` |
@@ -76,6 +77,10 @@ accepted_candidate_claims}` (context counts — they never change the score).
 
 1. **KB context** — deterministic keyword search over committed evidence
    records (read-only). No match → an honest gap.
+1b. **Uploaded documents** (Phase R7) — deterministic chunk retrieval over
+   the opportunity's attached documents (`shared/documents/`); matching
+   excerpts are quoted verbatim and snapshotted. No documents / no match →
+   honest gaps.
 2. **External research** — a bounded research run (existing R2 runner) from
    queries derived ONLY from the opportunity's own fields + the question
    (never a hardcoded market/product). No search provider → gap, never
