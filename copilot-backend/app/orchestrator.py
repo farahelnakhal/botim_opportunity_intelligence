@@ -164,6 +164,16 @@ class Orchestrator:
 
         plan = intents.tool_plan(intent, ids, message)
 
+        # Phase R5/PR4 — when a saved user opportunity is in play (selected as
+        # context or referenced by UOPP id), READ its latest preliminary
+        # analysis workspace. Reading never triggers a build: the chain runs
+        # only on the explicit workspace-refresh triggers, so an ordinary
+        # follow-up question reuses the stored version.
+        workspace_ref = ((ids.get("user_opportunities") or [None])[0]
+                         or (ctx.get("user_opportunity") or {}).get("id"))
+        if workspace_ref:
+            plan.insert(0, ("get_analysis_workspace", {"opportunity_ref": workspace_ref}))
+
         executed, seen, not_found = [], set(), []
         for name, args in plan:
             key = (name, tuple(sorted(args.items())))

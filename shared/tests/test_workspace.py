@@ -147,7 +147,10 @@ class BuildChain(unittest.TestCase):
         def payload():
             runs = self.rs.list_runs()
             detail = self.rs.get_run(runs[0]["id"], include_children=True)
-            sid = detail["sources"][0]["id"]
+            # cite the primary (non-duplicate) source — the one carrying the
+            # stored excerpt the validator checks quotes against
+            sid = next(s["id"] for s in detail["sources"]
+                       if not s.get("duplicate_of") and s.get("excerpt"))
             return json.dumps({"claims": [{
                 "claim": "Settlement takes 4 days on average for the segment.",
                 "sources": [{"source_id": sid,
