@@ -129,6 +129,15 @@ class OpenAICompatible(unittest.TestCase):
         self.assertIn("tools", calls[0][1])
         self.assertNotIn("tools", calls[1][1])
 
+    def test_sends_descriptive_user_agent_never_a_default_urllib_ua(self):
+        p, calls = self._provider([{"choices": [{"message": {"content": "ok"},
+                                                 "finish_reason": "stop"}]}])
+        p.generate([{"role": "user", "content": "q"}], [], "SYS", _Cfg())
+        _, _, headers = calls[0]
+        self.assertEqual(headers["user-agent"], llm.USER_AGENT)
+        self.assertIn("BOTIM", headers["user-agent"])
+        self.assertNotIn("urllib", headers["user-agent"].lower())
+
     def test_missing_base_url_fails_with_clear_message(self):
         p = llm.OpenAICompatibleProvider(fetch_fn=lambda *a: b"{}")
         with self.assertRaises(llm.ProviderError) as cm:

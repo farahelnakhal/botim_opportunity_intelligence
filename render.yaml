@@ -1,10 +1,10 @@
-# Render Blueprint — one-click free deployment of the BOTIM Opportunity
-# Intelligence assistant (frontend + read-only API). See
+# Render Blueprint — deploy the BOTIM Opportunity Intelligence assistant
+# (frontend + read-only dashboard API + grounded copilot). See
 # executive-ui/README.md, "Deploy for free", for the full walkthrough.
 #
 # In the Render dashboard: New + -> Blueprint -> connect this repo -> Render
 # reads this file automatically. Env vars marked `sync: false` are prompted
-# for in the dashboard and never stored in the repo.
+# for in the dashboard and NEVER stored in the repo (secrets stay on request).
 services:
   - type: web
     name: botim-opportunity-intelligence
@@ -16,18 +16,41 @@ services:
     healthCheckPath: /api/overview
     autoDeployTrigger: commit
     envVars:
-      # AI generation of new opportunities — pick ONE provider (or leave both
-      # unset to run the honest offline scaffold with no AI at all):
+      # ---- Application mode --------------------------------------------- #
+      # normal = the real product (clean workspace, no demo corpus/persona).
+      # Set to `demo` only for a public showcase build. Explicit here so the
+      # served mode is unambiguous (the image also defaults to normal).
+      - key: BOTIM_APP_MODE
+        value: normal
+
+      # ---- Canonical LLM configuration (drives ALL grounded chat) ------- #
+      # The copilot, synthesis, research claim-extraction, and Merchant Voice
+      # all resolve through these BOTIM_LLM_* variables (shared/llm/provider.py).
+      # An OpenAI-compatible endpoint (Groq, OpenAI, Ollama, vLLM, ...) needs
+      # BASE_URL + MODEL; an Anthropic Claude model is inferred from a claude-*
+      # model name / sk-ant- key and needs no BASE_URL.
       #
-      # Option A: a free, no-card-required hosted API (e.g. Groq — an
-      # OpenAI-compatible endpoint at https://api.groq.com/openai/v1):
+      # Default: Groq (free, OpenAI-compatible). The 70B model is chosen over a
+      # small/instant model because decision-oriented synthesis is the product's
+      # core value — a smaller model gives noticeably shallower analysis. Both
+      # support tool use (needed for the copilot's grounded tool loop).
       - key: BOTIM_LLM_BASE_URL
         value: https://api.groq.com/openai/v1
       - key: BOTIM_LLM_MODEL
-        value: llama-3.1-8b-instant
+        value: llama-3.3-70b-versatile
+      # The model API key — prompted for in the dashboard, never committed.
       - key: BOTIM_LLM_API_KEY
         sync: false
-      # Option B: Anthropic Claude (needs a paid key) — set this instead and
-      # leave the three BOTIM_LLM_* vars above blank:
-      - key: ANTHROPIC_API_KEY
+      # NOTE: with NO key set, chat returns honest "not configured" errors —
+      # it never silently falls back to the deterministic demo responder in
+      # normal mode. Set BOTIM_LLM_PROVIDER=mock only for an explicit demo.
+
+      # ---- Live external research + monitoring (optional) --------------- #
+      # Enables the Research workspace's live runs and manual monitoring runs.
+      # Without these, research/monitoring fail honestly ("no search provider
+      # configured") — the rest of the product works normally. Brave Search
+      # has a free tier (https://brave.com/search/api).
+      - key: RESEARCH_SEARCH_PROVIDER
+        value: brave
+      - key: BRAVE_SEARCH_API_KEY
         sync: false
