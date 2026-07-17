@@ -33,7 +33,7 @@ import uuid
 import datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_DB_PATH = REPO / "runtime" / "user-opportunities.db"
@@ -148,6 +148,8 @@ class UserStore:
                 self._migrate_to_v1(conn)
             if version < 2:
                 self._migrate_to_v2(conn)
+            if version < 3:
+                self._migrate_to_v3(conn)
             conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)",
                          (str(SCHEMA_VERSION),))
 
@@ -224,6 +226,19 @@ class UserStore:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_mevents_opp "
                      "ON monitoring_events(opportunity_id)")
 
+    @staticmethod
+    def _migrate_to_v3(conn):
+        # Phase R8a — per-user ownership. Existing (pre-auth) rows keep a
+        # NULL owner and are treated as legacy shared records: visible to
+        # every signed-in user, never silently reassigned to whoever signs
+        # up first. New records created under required-auth mode carry
+        # their creator's USER- id. Idempotent (PRAGMA guard) like the
+        # research store's v3 migration.
+        existing = {row["name"] for row in conn.execute(
+            "PRAGMA table_info(user_opportunities)")}
+        if "owner_user_id" not in existing:
+            conn.execute("ALTER TABLE user_opportunities ADD COLUMN owner_user_id TEXT")
+
     # -- serialization ---------------------------------------------------- #
 
     @staticmethod
@@ -246,7 +261,7 @@ class UserStore:
 
     # -- opportunity CRUD -------------------------------------------------- #
 
-    def create(self, payload):
+    def create(self, payload, owner_user_id=None):
         if not isinstance(payload, dict):
             raise StoreError("body must be a JSON object")
         allowed = {"title", "status", "source_conversation_id", "created_from_analysis",
@@ -275,26 +290,32 @@ class UserStore:
                     target_segment, customer_description, value_proposition,
                     assumptions, risks, unknowns, next_actions,
                     source_conversation_id, created_from_analysis,
-                    version, created_at, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)""",
+                    version, created_at, updated_at, owner_user_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?)""",
                 (opp_id, title, status,
                  fields["product_definition"], fields["problem_statement"],
                  fields["target_segment"], fields["customer_description"],
                  fields["value_proposition"],
                  json.dumps(lists["assumptions"]), json.dumps(lists["risks"]),
                  json.dumps(lists["unknowns"]), json.dumps(lists["next_actions"]),
-                 conv, int(created_from_analysis), now, now))
+                 conv, int(created_from_analysis), now, now, owner_user_id))
         return self.get(opp_id)
 
-    def list(self, include_archived=False):
+    def list(self, include_archived=False, visible_to=None):
+        """All records, or — when `visible_to` is a USER- id (required-auth
+        mode) — that user's own records plus legacy shared rows (NULL owner).
+        Another user's records are never listed."""
+        where, params = [], []
+        if not include_archived:
+            where.append("status != 'archived'")
+        if visible_to is not None:
+            where.append("(owner_user_id IS NULL OR owner_user_id = ?)")
+            params.append(visible_to)
+        clause = f" WHERE {' AND '.join(where)}" if where else ""
         with self._connect() as conn:
-            if include_archived:
-                rows = conn.execute(
-                    "SELECT * FROM user_opportunities ORDER BY created_at DESC").fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM user_opportunities WHERE status != 'archived' "
-                    "ORDER BY created_at DESC").fetchall()
+            rows = conn.execute(
+                f"SELECT * FROM user_opportunities{clause} ORDER BY created_at DESC",
+                params).fetchall()
         return [self._opp_dict(r) for r in rows]
 
     def get(self, opp_id):
