@@ -4,6 +4,202 @@
 > decision would surprise a future maintainer or constrains future work.
 > Format: date · decision · reasoning · alternatives · consequences.
 
+## 2026-07-19 — R6 scheduler: external cron against a protected endpoint, not an in-process timer
+
+- **Decision:** Scheduled workspace re-runs are driven by an **external cron
+  trigger** (a GitHub Actions scheduled workflow, mirroring
+  `deploy-huggingface.yml`) that issues an authenticated
+  `POST /api/monitoring/tick` to the deployed executive API. The endpoint is a
+  *dispatcher*: it finds subscriptions whose `next_run_at <= now`, atomically
+  claims each (advancing `next_run_at` inside the same transaction), then runs
+  the existing orchestrator for each claimed chat. It is protected by a shared
+  secret (`MONITORING_TICK_TOKEN`, constant-time compared; 404/401 without it),
+  caps work per call (`MONITORING_TICK_MAX_CHATS`), and does **no** work beyond
+  what is due. There is **no in-process scheduler thread**. The workflow runs
+  **hourly** (`cron: '0 * * * *'`) plus `workflow_dispatch`.
+- **Reasoning:** The deploy targets (HuggingFace Spaces free tier, Render free
+  tier) **sleep on idle** — an in-process timer would silently stop firing
+  exactly when no user is active, fabricating a reliability we don't have. An
+  external cron is the pattern the repo already uses for deploys, needs no
+  always-on plan, and is idempotent by design (claim-and-advance makes a
+  double-fired cron a no-op). GitHub's scheduler is itself best-effort — runs
+  are commonly delayed minutes and can be dropped under load — but because the
+  tick is driven by `next_run_at`, a dropped or late run is **recovered** by
+  the next hourly tick with no lost work, only bounded extra latency. The
+  endpoint reuses the existing stdlib `http.server` routing and the
+  `check_quota`/owner-scoping machinery in `server.py`.
+- **Alternatives rejected:** (a) in-process scheduler — dies with the sleeping
+  container, needs a paid always-on plan to be honest; (b) a paid always-on
+  plan purely to host a timer — cost with no other benefit and still less
+  robust than an idempotent trigger; (c) cron-job.com — viable but adds a
+  third-party account; GitHub Actions is already wired and auditable in-repo.
+  Operators on an always-on plan can point any scheduler at the same endpoint —
+  the mechanism is decoupled from the trigger.
+- **Consequences:** A new `MONITORING_TICK_TOKEN` secret and
+  `.github/workflows/monitoring-tick.yml`. Worst-case delivery latency for a
+  due chat ≈ the cron granularity (up to ~1h) **plus** GitHub's own scheduling
+  delay (typically minutes, occasionally longer). The cron frequency only needs
+  to be ≤ the smallest allowed cadence; per-chat cadence is enforced by
+  `next_run_at`, never by the cron frequency. The endpoint must stay safe to
+  call at any frequency and must record every run outcome on the subscription
+  (never fabricate a run that didn't happen).
+
+## 2026-07-19 — R6 email: stdlib `smtplib`/`email` over an operator-configured SMTP relay — no SDK
+
+- **Decision:** Email is sent with the Python **standard library only**
+  (`smtplib` + `email.message.EmailMessage`, STARTTLS/SSL) against an
+  **operator-configured SMTP relay** (`SMTP_HOST`/`SMTP_PORT`/`SMTP_USERNAME`/
+  `SMTP_PASSWORD`/`SMTP_FROM`/`SMTP_STARTTLS`). No provider SDK and **no new pip
+  dependency** is added. The backing provider (Amazon SES, Postmark, Resend, or
+  any SMTP server) is an **operator/deployment** choice — all expose SMTP, so
+  the code stays provider-neutral. A `MockEmailSender` (records to memory, never
+  opens a socket) is the explicit default in tests and when SMTP is
+  unconfigured — mirroring `MockProvider` in `shared/llm/provider.py`:
+  unconfigured is an honest "email not sent (no SMTP configured)" state,
+  **never** a silent success. The sender lives behind a `shared/email/` seam
+  (`sender.py`), injectable exactly like the research/LLM providers.
+- **Reasoning:** "Pure stdlib, nothing to pip-install" is a hard, load-bearing
+  invariant (`architecture.md`; reaffirmed by the R7 PDF and R8a auth
+  decisions). `smtplib`/`email` satisfy the requirement *without* deviating from
+  it, so — unlike the R7 PDF-library discussion — **no dependency sign-off is
+  needed**. SMTP is the lowest common denominator every candidate provider
+  supports, avoiding coupling to one vendor's REST SDK. The `render()`/no-send
+  split and overclaim guard already established in `impact/email.py` give a
+  proven honesty pattern to reuse for the body.
+- **Alternatives rejected:** (a) Postmark/Resend/SES **REST SDKs** — each adds a
+  pip dependency, violating the invariant and requiring sign-off; (b) a provider
+  REST API over `urllib` (stdlib but vendor-locked) — more brittle and
+  vendor-specific than SMTP for no gain; (c) a local `sendmail` binary — not
+  present in the slim container, unreliable deliverability. A future REST
+  provider SDK would be a separate logged deviation, same bar as the PDF library.
+- **Consequences:** Deliverability, SPF/DKIM, and a verified sending domain are
+  the **operator's** responsibility (documented in `deploy/` env docs), not the
+  app's. Recipients are restricted to verified account emails (see the recipient
+  decision); we do not do bulk/marketing sending. Send failures are caught and
+  recorded as an honest failed-notification state on the subscription; a failed
+  send is never logged as a delivered update.
+
+## 2026-07-19 — R6 cadence + recipients: per-chat `workspace_subscriptions` with a multi-recipient child table, owner-scoped, distinct from `MCFG-`
+
+- **Decision:** Scheduled-workspace-re-run configuration lives in **new tables**
+  in the workspace store (`WORKSPACE_DB_PATH`), separate from the `MCFG-`
+  monitoring config: a parent `workspace_subscriptions` row per chat
+  (`opportunity_id` unique; `owner_user_id` **required**; `enabled`,
+  `cadence_hours` per-chat, bounded `MONITORING_MIN_CADENCE_HOURS`..720, default
+  6 resolved against `MONITORING_DEFAULT_CADENCE_HOURS`; `last_run_at`,
+  `next_run_at`, `last_notified_version`, `last_outcome`), and a **child
+  `workspace_subscription_recipients` table** (one row per recipient:
+  `recipient_user_id` = a `USER-` account, `recipient_email` snapshot,
+  hashed `unsubscribe_token`, `enabled`, `opted_in_at`; unique on
+  `(opportunity_id, recipient_user_id)`). The **schema supports N recipients per
+  chat from day one** so adding teammates later needs no migration. Every
+  recipient is a **verified account email**, added only through a
+  **per-recipient, session-scoped opt-in** (a signed-in user opts *themselves*
+  in for a chat they can see — reusing the existing ownership/visibility guard);
+  there is **no free-text recipient entry** and **no unverified address ever**.
+  Unsubscribe is a tokened `GET /api/monitoring/unsubscribe?...` per recipient
+  (and a UI toggle) that flips that recipient's `enabled` off without a login.
+- **Reasoning:** The roadmap's explicit exclusions forbid changing how `MCFG-`
+  works "outside the scheduled-workspace-re-run path — that's R4, already done."
+  `MCFG-` drives the R4a runner that mints `MEVT-` events; R6 drives *workspace
+  versions + email*. Conflating them would repurpose R4's cadence field and blur
+  two runners, so R6 gets dedicated per-chat tables next to the versions they
+  govern. A separate recipients child table (rather than owner-only) means
+  teammates can be added with **zero schema churn** — the stated requirement —
+  while the per-recipient session-scoped opt-in keeps the "verified account
+  email, no unverified addresses, tied to identity" constraint intact: consent
+  is proven by the recipient's own session, never by the owner typing an
+  address. Per-chat cadence (not global, not per-user) matches the R5 per-chat
+  workspace model; a global default + bounds keeps it configurable without a
+  hardcoded interval.
+- **Alternatives rejected:** (a) reuse `MCFG-` cadence — violates the R4
+  exclusion, couples two runners; (b) owner-email-only column (no child table) —
+  rejected per the explicit ask: would force a migration to add teammates
+  later; (c) free-text recipient list on the parent row — would email
+  unverified third parties, breaking the R8 identity-scoping constraint;
+  (d) global-only cadence — the task explicitly rules out a hardcoded global
+  interval; (e) storing recipients in the auth DB — the subscription is per-chat
+  workspace state, so it belongs with the workspace store; identity is
+  referenced by `USER-` id, not duplicated.
+- **Consequences:** Workspace-store schema **v3** (additive, PRAGMA-guarded like
+  v2). PR6d's UI ships the **owner self-opt-in** path only (the owner adding
+  themselves); the store/routes already accept additional recipients, so once a
+  chat-sharing model exists (out of scope here) teammates opt in through the
+  same flow with no data-model change. If an account's email changes, the
+  recipient snapshot refreshes on the next opt-in touch. Bulk/external
+  recipients remain out of scope (each needs a controlling account + session).
+
+## 2026-07-19 — R6 throttling: reuse the R8b `quota_events` mechanism, scaled by active subscriptions
+
+- **Decision:** Every scheduled re-run passes through the existing
+  `AuthStore.check_quota(owner_user_id, action, limit)` with a **new action**
+  `monitoring_workspace_run` and per-subscription base env
+  `QUOTA_MONITORING_WORKSPACE_RUN_PER_DAY` (default 6 ≈ one chat at the ~4h end
+  of the cadence). The **effective daily limit scales with the user's active
+  enabled subscriptions**: `limit = base × max(1, active_subscription_count)`,
+  computed at call time and passed to `check_quota` — so a user monitoring
+  several chats is **never silently cut off** at a flat cap. The scheduled path
+  counts against this action, **not** the interactive `workspace_refresh` pool,
+  so scheduled load can't exhaust a user's manual-refresh budget or vice-versa.
+  The subscription read payload also **surfaces `quota_used`/`quota_limit`** so
+  the PR6d UI can show remaining runs. Over quota → the tick **skips** that chat
+  honestly (`last_outcome='skipped_quota'`), sends no email, and continues.
+- **Reasoning:** "Reuse the existing `quota_events`/`QUOTA_*_PER_DAY` pattern
+  rather than inventing a new quota mechanism" is a direct task constraint; the
+  pattern already stores per-action rows in the auth DB surviving restarts. A
+  distinct action prevents cross-contaminating the interactive budget. Scaling
+  the cap by active subscriptions is the structural fix for the "silently cut
+  off mid-day" risk (a flat cap punishes users who monitor more chats);
+  surfacing used/limit gives the UI an honest indicator on top.
+- **Alternatives rejected:** (a) flat per-user cap — silently cuts off
+  multi-chat users mid-day (the exact failure called out); (b) reuse
+  `workspace_refresh` quota — scheduled runs would eat the interactive budget;
+  (c) a new bespoke throttle table — duplicates `quota_events`, violates the
+  task constraint; (d) a global (not per-user) rate cap — doesn't scope cost to
+  the owner and breaks the R8b per-user model.
+- **Consequences:** One new action string + one env var, documented in
+  `current-state.md`. `check_quota` runs **once**, immediately before the
+  expensive chain (it both counts and enforces), so a run skipped for other
+  reasons is never counted. The effective limit shifts as the user
+  enables/disables subscriptions during the day — acceptable and honest, and
+  always ≥ the flat base.
+
+## 2026-07-19 — R6 concurrency: skip-if-running lock + claim-and-advance idempotency
+
+- **Decision:** Two rules. (1) **Manual-vs-scheduled lock:** before building,
+  the scheduled path checks `ws.latest(opp_id, status="running")`; if a version
+  is already `running` (a manual refresh or a prior tick in flight), the
+  scheduled run is **skipped** (`last_outcome='skipped_in_progress'`), not
+  queued — reusing the R5 rule that in-progress versions are visible but not
+  readable and that readers only ever see the latest `complete` version.
+  (2) **Idempotent claim:** the tick selects due subscriptions
+  (`enabled AND next_run_at <= now`) and, in the **same transaction**, advances
+  `next_run_at = now + cadence_hours` before running the chain, so a
+  double-fired cron or an overlapping tick finds nothing due. Diffing and
+  emailing baseline on `last_notified_version`, so a retry cannot re-send an
+  already-sent delta.
+- **Reasoning:** The append-only version model already makes concurrent builds
+  *safe for readers*; the remaining risks are (a) wasted cost from a scheduled
+  run duplicating a manual one and (b) duplicate emails from a re-fired trigger.
+  Skip-if-running addresses (a) with the existing running/complete distinction;
+  claim-and-advance + `last_notified_version` addresses (b) at the persistence
+  layer — the only place idempotency can hold against an at-least-once external
+  trigger.
+- **Alternatives rejected:** (a) queue scheduled runs behind manual ones — adds
+  a job queue the stdlib server lacks, and a slightly-stale scheduled run adds
+  no value over waiting for the next tick; (b) a global in-process lock —
+  doesn't survive multi-tick/at-least-once delivery or a restart; (c) diffing
+  against "previous version" unconditionally — re-emails the same delta every
+  cycle until a human approves; baselining on `last_notified_version` gives true
+  "new since last notified/approved."
+- **Consequences:** `next_run_at` is authoritative for scheduling; the cron
+  frequency only needs to be ≤ the smallest cadence. The email diff is
+  `compare_versions(baseline, newest)` with `baseline = last_notified_version`
+  (fallback: previous complete version); each `new_claim_id` is then resolved to
+  its **current** review status via the research store (the same lookup
+  `_workspace_view` already does) so the email labels "new since last approved"
+  and marks each claim approved/pending — **no second diff implementation**.
+
 ## 2026-07-17 — R7 documents: stdlib extraction, honest PDF gap, lexical retrieval seam
 
 - **Decision:** Document attachments support `.txt/.md/.csv/.docx` with pure
