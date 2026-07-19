@@ -143,5 +143,66 @@ class SubscriptionStore(unittest.TestCase):
         self.assertEqual(len(reopened.get_subscription(OPP)["recipients"]), 1)
 
 
+class TickScheduling(unittest.TestCase):
+    """The scheduler-facing store surface: due-selection and the atomic
+    claim-and-advance that makes an at-least-once cron idempotent."""
+
+    def _due_store(self):
+        s = make_store()
+        s.subscribe(OPP, OWNER, ALICE, "alice@example.com", cadence_hours=6)
+        # force the subscription due (opt-in schedules it one cadence forward)
+        import sqlite3
+        conn = sqlite3.connect(s.db_path)
+        conn.execute("UPDATE workspace_subscriptions SET next_run_at=? "
+                     "WHERE opportunity_id=?", ("2000-01-01T00:00:00Z", OPP))
+        conn.commit()
+        conn.close()
+        return s
+
+    def test_freshly_subscribed_is_not_immediately_due(self):
+        s = make_store()
+        s.subscribe(OPP, OWNER, ALICE, "alice@example.com", cadence_hours=6)
+        self.assertEqual(s.due_subscriptions(), [])
+
+    def test_due_subscriptions_lists_a_past_due_row(self):
+        s = self._due_store()
+        due = s.due_subscriptions()
+        self.assertEqual([d["opportunity_id"] for d in due], [OPP])
+        self.assertEqual(due[0]["owner_user_id"], OWNER)
+
+    def test_claim_due_is_idempotent_a_second_claim_returns_none(self):
+        s = self._due_store()
+        claimed = s.claim_due(OPP)
+        self.assertIsNotNone(claimed)
+        self.assertEqual(claimed["owner_user_id"], OWNER)
+        # the advance moved next_run_at into the future -> no longer due
+        self.assertIsNone(s.claim_due(OPP))
+        self.assertEqual(s.due_subscriptions(), [])
+
+    def test_claim_due_none_when_not_due_or_disabled(self):
+        s = make_store()
+        s.subscribe(OPP, OWNER, ALICE, "alice@example.com")   # scheduled forward
+        self.assertIsNone(s.claim_due(OPP))                   # not due yet
+        s2 = self._due_store()
+        s2.unsubscribe_recipient(OPP, ALICE)                  # disables the sub
+        self.assertIsNone(s2.claim_due(OPP))                  # due but disabled
+
+    def test_record_run_result_advances_last_run_only_when_a_build_ran(self):
+        s = self._due_store()
+        s.claim_due(OPP)
+        # a skip records the outcome but NEVER advances last_run_at
+        s.record_run_result(OPP, "skipped_in_progress")
+        sub = s.get_subscription(OPP)
+        self.assertEqual(sub["last_outcome"], "skipped_in_progress")
+        self.assertIsNone(sub["last_run_at"])
+        # a real build advances last_run_at and can set last_notified_version
+        s.record_run_result(OPP, "built", ran_at="2026-07-19T10:00:00Z",
+                            last_notified_version=4)
+        sub = s.get_subscription(OPP)
+        self.assertEqual(sub["last_outcome"], "built")
+        self.assertEqual(sub["last_run_at"], "2026-07-19T10:00:00Z")
+        self.assertEqual(sub["last_notified_version"], 4)
+
+
 if __name__ == "__main__":
     unittest.main()

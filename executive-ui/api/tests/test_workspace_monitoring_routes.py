@@ -47,6 +47,8 @@ class WorkspaceMonitoringRoutes(unittest.TestCase):
 
     def tearDown(self):
         os.environ["BOTIM_AUTH_MODE"] = "off"
+        os.environ.pop("MONITORING_TICK_TOKEN", None)
+        os.environ.pop("MONITORING_TICK_MAX_CHATS", None)
 
     def _req(self, method, path, payload=None, cookie=None):
         headers = {"content-type": "application/json"}
@@ -172,6 +174,88 @@ class WorkspaceMonitoringRoutes(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as cm:
             self._req("POST", base, {"cadence_hours": 1}, cookie=alice)
         self.assertEqual(cm.exception.code, 400)
+
+    # -- PR6b: the scheduled-monitoring tick -------------------------------- #
+
+    def _force_due(self, opp_id):
+        """Force a subscription past-due (opt-in schedules it one cadence out)."""
+        import sqlite3
+        ws = server.get_workspace_store()
+        conn = sqlite3.connect(ws.db_path)
+        conn.execute("UPDATE workspace_subscriptions SET next_run_at=? "
+                     "WHERE opportunity_id=?", ("2000-01-01T00:00:00Z", opp_id))
+        conn.commit()
+        conn.close()
+
+    def _tick(self, token="tick-secret"):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/api/monitoring/tick",
+            data=b"{}", method="POST",
+            headers={"content-type": "application/json",
+                     "X-Monitoring-Token": token})
+        with urllib.request.urlopen(req) as r:
+            return r.status, json.loads(r.read())
+
+    def _opt_in(self, email):
+        _, alice = self._register(email)
+        opp = self._make_opp(alice)
+        self._req("POST",
+                  f"/api/user-opportunities/{opp['id']}/workspace/monitoring",
+                  {"cadence_hours": 6}, cookie=alice)
+        return opp
+
+    def test_tick_is_404_when_the_feature_is_not_configured(self):
+        os.environ.pop("MONITORING_TICK_TOKEN", None)
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            self._tick()
+        self.assertEqual(cm.exception.code, 404)
+
+    def test_tick_rejects_a_wrong_or_missing_token(self):
+        os.environ["MONITORING_TICK_TOKEN"] = "tick-secret"
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            self._tick(token="wrong")
+        self.assertEqual(cm.exception.code, 401)
+
+    def test_tick_builds_a_due_chat_and_is_idempotent_on_refire(self):
+        os.environ["BOTIM_AUTH_MODE"] = "required"
+        os.environ["MONITORING_TICK_TOKEN"] = "tick-secret"
+        opp = self._opt_in("r6-tick@example.com")
+        self._force_due(opp["id"])
+        # first fire builds a monitoring version (no providers -> honest gaps,
+        # but the version still completes -> outcome 'built')
+        status, summary = self._tick()
+        self.assertEqual(status, 200)
+        self.assertEqual(summary["claimed"], 1)
+        self.assertEqual(summary["built"], 1)
+        self.assertEqual(summary["chats"][0]["opportunity_id"], opp["id"])
+        # the version carries the 'monitoring' trigger
+        ws = server.get_workspace_store()
+        self.assertEqual(ws.latest(opp["id"])["trigger"], "monitoring")
+        # an immediate re-fire finds nothing due (next_run_at advanced) — an
+        # at-least-once cron never double-runs the chat
+        _, again = self._tick()
+        self.assertEqual(again["claimed"], 0)
+
+    def test_tick_skips_a_chat_with_a_build_already_running(self):
+        os.environ["BOTIM_AUTH_MODE"] = "required"
+        os.environ["MONITORING_TICK_TOKEN"] = "tick-secret"
+        opp = self._opt_in("r6-tick-race@example.com")
+        self._force_due(opp["id"])
+        ws = server.get_workspace_store()
+        # simulate a manual refresh in flight: an open 'running' version
+        ws.create_version(opp["id"], "manual_refresh")
+        _, summary = self._tick()
+        self.assertEqual(summary["skipped_in_progress"], 1)
+        self.assertEqual(summary["built"], 0)
+        # no new COMPLETE version was produced by the scheduled run
+        self.assertIsNone(ws.latest(opp["id"], status="complete"))
+
+    def test_tick_ignores_chats_that_are_not_due(self):
+        os.environ["BOTIM_AUTH_MODE"] = "required"
+        os.environ["MONITORING_TICK_TOKEN"] = "tick-secret"
+        self._opt_in("r6-notdue@example.com")   # scheduled one cadence out
+        _, summary = self._tick()
+        self.assertEqual(summary["claimed"], 0)
 
 
 if __name__ == "__main__":

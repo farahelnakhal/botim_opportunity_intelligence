@@ -1,0 +1,59 @@
+name: Scheduled monitoring tick
+
+# Phase R6 — drives scheduled analysis-workspace re-runs on the deployed app.
+# The deploy target (HF Space / Render free tier) SLEEPS on idle, so an
+# in-process scheduler would silently stop firing; instead this external cron
+# POSTs a shared-secret-protected endpoint that runs only the subscriptions
+# whose per-chat cadence is due (see docs/decision-log.md, 2026-07-19 "R6
+# scheduler"). Requires two one-time repo settings (skipped harmlessly if
+# absent, so this never breaks CI for anyone who hasn't set it up):
+#   - Variable MONITORING_TICK_URL   : base URL of the deployed app
+#                                       (e.g. https://your-space.hf.space)
+#   - Secret   MONITORING_TICK_TOKEN : the same value set as MONITORING_TICK_TOKEN
+#                                       in the app's environment
+#
+# Runs HOURLY. The endpoint is idempotent (each due chat is claimed and its
+# next_run_at advanced atomically), so a delayed, duplicated, or dropped run —
+# all of which GitHub's best-effort scheduler can do — never double-runs a
+# chat and never loses one: the next hourly tick picks up whatever is due.
+# Worst-case latency for a due chat is ~1h (this granularity) plus GitHub's own
+# scheduling delay; tighten `cron` if a deployment needs faster delivery.
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch: {}
+
+# never let two ticks overlap
+concurrency:
+  group: monitoring-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fire the monitoring tick
+        env:
+          MONITORING_TICK_URL: ${{ vars.MONITORING_TICK_URL }}
+          MONITORING_TICK_TOKEN: ${{ secrets.MONITORING_TICK_TOKEN }}
+        run: |
+          if [ -z "$MONITORING_TICK_URL" ] || [ -z "$MONITORING_TICK_TOKEN" ]; then
+            echo "MONITORING_TICK_URL variable and/or MONITORING_TICK_TOKEN secret are not set — skipping."
+            echo "See docs/roadmap.md (Phase R6) to enable scheduled monitoring."
+            exit 0
+          fi
+          # -sS: quiet but show errors; -f: nonzero exit on HTTP >= 400 so a
+          # failing tick surfaces in the Actions log (the token is only ever
+          # sent as a header, never echoed).
+          code=$(curl -sS -o /tmp/tick-body.json -w '%{http_code}' \
+            -X POST "${MONITORING_TICK_URL%/}/api/monitoring/tick" \
+            -H "X-Monitoring-Token: ${MONITORING_TICK_TOKEN}" \
+            -H "Content-Type: application/json" -d '{}') || true
+          echo "tick HTTP status: ${code}"
+          cat /tmp/tick-body.json || true
+          echo
+          if [ "$code" != "200" ]; then
+            echo "monitoring tick did not return 200"
+            exit 1
+          fi

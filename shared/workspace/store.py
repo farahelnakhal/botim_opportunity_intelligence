@@ -544,6 +544,73 @@ class WorkspaceStore:
                 "WHERE owner_user_id=? AND enabled=1", (owner_user_id,)).fetchone()
         return row["n"]
 
+    # -- R6 scheduled-monitoring tick (scheduler-facing) ---------------------- #
+
+    def due_subscriptions(self, limit=25):
+        """Enabled subscriptions whose next_run_at has arrived (or is unset),
+        oldest-due first. Read-only: the tick must still claim_due() each one
+        before running it — the claim is the idempotency lock, not this read."""
+        now = _now()
+        limit = max(1, min(int(limit), 500))
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT opportunity_id, owner_user_id, cadence_hours, next_run_at,
+                          last_notified_version
+                   FROM workspace_subscriptions
+                   WHERE enabled=1 AND (next_run_at IS NULL OR next_run_at <= ?)
+                   ORDER BY (next_run_at IS NULL) DESC, next_run_at ASC LIMIT ?""",
+                (now, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+    def claim_due(self, opportunity_id):
+        """Atomically claim a due subscription and advance next_run_at by one
+        cadence. Returns the claimed subscription, or None when it is no longer
+        enabled/due — a concurrent or double-fired tick already took it. This
+        conditional advance IS the at-least-once idempotency guard: the second
+        writer's UPDATE re-checks due-ness against the just-advanced value and
+        matches zero rows."""
+        _validate_opp_ref(opportunity_id)
+        now = _now()
+        with self._connect() as conn:
+            row = conn.execute(
+                """SELECT owner_user_id, cadence_hours, last_notified_version
+                   FROM workspace_subscriptions
+                   WHERE opportunity_id=? AND enabled=1
+                         AND (next_run_at IS NULL OR next_run_at <= ?)""",
+                (opportunity_id, now)).fetchone()
+            if row is None:
+                return None
+            cur = conn.execute(
+                """UPDATE workspace_subscriptions SET next_run_at=?, updated_at=?
+                   WHERE opportunity_id=? AND enabled=1
+                         AND (next_run_at IS NULL OR next_run_at <= ?)""",
+                (_shift_hours(now, row["cadence_hours"]), now, opportunity_id, now))
+            if cur.rowcount != 1:
+                return None
+        return {"opportunity_id": opportunity_id, "owner_user_id": row["owner_user_id"],
+                "cadence_hours": row["cadence_hours"],
+                "last_notified_version": row["last_notified_version"]}
+
+    def record_run_result(self, opportunity_id, outcome, ran_at=None,
+                          last_notified_version=None):
+        """Record a scheduled run's honest outcome on the subscription.
+        `last_run_at` advances ONLY when a build actually ran (`ran_at` given) —
+        a skipped or never-attempted run is never presented as having run."""
+        _validate_opp_ref(opportunity_id)
+        now = _now()
+        sets, params = ["last_outcome=?", "updated_at=?"], [str(outcome)[:OUTCOME_MAX], now]
+        if ran_at is not None:
+            sets.append("last_run_at=?")
+            params.append(ran_at)
+        if last_notified_version is not None:
+            sets.append("last_notified_version=?")
+            params.append(int(last_notified_version))
+        params.append(opportunity_id)
+        with self._connect() as conn:
+            conn.execute(f"UPDATE workspace_subscriptions SET {', '.join(sets)} "
+                         "WHERE opportunity_id=?", params)
+        return self.get_subscription(opportunity_id)
+
 
 def _new_wsub_id():
     return f"WSUB-{uuid.uuid4().hex[:12]}"

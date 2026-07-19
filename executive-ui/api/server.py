@@ -433,6 +433,11 @@ class Handler(BaseHTTPRequestHandler):
         # every other API write requires one when enforcement is on.
         if sub.startswith("/auth/"):
             return self._auth_api("POST", sub)
+        # Phase R6 — the scheduled-monitoring tick is authenticated by a shared
+        # secret (external cron), NOT a user session; it must bypass the session
+        # gate exactly like /auth/*.
+        if sub == "/monitoring/tick":
+            return self._monitoring_tick()
         if auth_required() and self._require_session() is None:
             return
         # Phase 6/7 — user-opportunity writes (create / archive / restore /
@@ -745,19 +750,13 @@ class Handler(BaseHTTPRequestHandler):
                 # explicit refreshes are 'manual_refresh'
                 trigger = ("first_analysis" if not ws.list_versions(opp_id, limit=1)
                            else "manual_refresh")
-                try:
-                    search_provider = research_providers.from_env()
-                except research_providers.SearchProviderError:
-                    search_provider = None  # builder records an honest gap
-                cfg = _ExtractionLLMConfig()
-                llm = (llm_provider.make_provider(cfg)
-                       if cfg.provider in ("anthropic", "openai_compatible") else None)
+                search_provider, llm, llm_cfg = self._resolve_build_providers()
                 viewer = self._current_user() if auth_required() else None
                 version = workspace_pkg.build_workspace(
                     ws, get_research_store(), opp, trigger=trigger,
                     question=body.get("question") if isinstance(body.get("question"), str) else None,
                     search_provider=search_provider,
-                    llm_provider=llm, llm_config=cfg if llm else None,
+                    llm_provider=llm, llm_config=llm_cfg,
                     document_store=get_document_store(),
                     viewer_user_id=viewer["id"] if viewer else None)
                 return self._json(self._workspace_view(ws, version), status=201)
@@ -883,6 +882,84 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    @staticmethod
+    def _resolve_build_providers():
+        """Resolve the search + LLM providers for a workspace build from the
+        environment (same discipline as the manual refresh). A missing provider
+        is returned as None so the builder records an HONEST gap on a complete
+        version — it never fabricates a step. Shared by the manual refresh and
+        the scheduled tick so both paths call the same orchestrator identically."""
+        try:
+            search_provider = research_providers.from_env()
+        except research_providers.SearchProviderError:
+            search_provider = None
+        cfg = _ExtractionLLMConfig()
+        llm = (llm_provider.make_provider(cfg)
+               if cfg.provider in ("anthropic", "openai_compatible") else None)
+        return search_provider, llm, (cfg if llm else None)
+
+    # -- Phase R6: scheduled-monitoring tick (external-cron dispatcher) ------- #
+    # POST /api/monitoring/tick  (shared-secret protected; NO user session)
+    # For each due subscription: atomically claim-and-advance (idempotent
+    # against an at-least-once cron), skip if a build is already running, else
+    # run the SAME orchestrator the manual refresh uses with trigger
+    # 'monitoring'. Every outcome is recorded honestly on the subscription.
+    # Diff + email are wired in PR6c; quota + the manual-vs-scheduled subtleties
+    # get their dedicated tests in PR6d. This never fabricates a run.
+    def _monitoring_tick(self):
+        expected = os.environ.get("MONITORING_TICK_TOKEN", "").strip()
+        if not expected:
+            # the feature is not enabled on this deployment — do not disclose it
+            return self._error(404, "not found")
+        import hmac
+        provided = self.headers.get("X-Monitoring-Token", "") or ""
+        if not hmac.compare_digest(provided, expected):
+            return self._error(401, "invalid monitoring token")
+        ws = get_workspace_store()
+        store = get_user_store()
+        try:
+            max_chats = max(1, int(os.environ.get("MONITORING_TICK_MAX_CHATS", "25")))
+        except ValueError:
+            max_chats = 25
+        summary = {"claimed": 0, "built": 0, "skipped_in_progress": 0,
+                   "failed": 0, "chats": []}
+        for cand in ws.due_subscriptions(limit=max_chats):
+            opp_id = cand["opportunity_id"]
+            claimed = ws.claim_due(opp_id)
+            if claimed is None:
+                continue  # a concurrent / double-fired tick already took it
+            summary["claimed"] += 1
+            outcome = self._run_scheduled_build(ws, store, claimed)
+            summary[outcome] = summary.get(outcome, 0) + 1
+            summary["chats"].append({"opportunity_id": opp_id, "outcome": outcome})
+        return self._json(summary)
+
+    def _run_scheduled_build(self, ws, store, claimed):
+        """Run one claimed subscription's chain; return the recorded outcome.
+        Concurrency: skip (never queue) when a build is already running for
+        this chat — reusing R5's running/complete distinction."""
+        opp_id = claimed["opportunity_id"]
+        if ws.latest(opp_id, status="running") is not None:
+            ws.record_run_result(opp_id, "skipped_in_progress")
+            return "skipped_in_progress"
+        try:
+            opp = store.get(opp_id)
+        except user_store.StoreError:
+            ws.record_run_result(opp_id, "failed: opportunity no longer exists")
+            return "failed"
+        try:
+            search_provider, llm, llm_cfg = self._resolve_build_providers()
+            version = workspace_pkg.build_workspace(
+                ws, get_research_store(), opp, trigger="monitoring",
+                search_provider=search_provider, llm_provider=llm,
+                llm_config=llm_cfg, document_store=get_document_store(),
+                viewer_user_id=claimed.get("owner_user_id"))
+            ws.record_run_result(opp_id, "built", ran_at=version.get("completed_at"))
+            return "built"
+        except Exception as exc:  # honest failure, never a fabricated success
+            ws.record_run_result(opp_id, f"failed: {type(exc).__name__}")
+            return "failed"
 
     # -- Phase 5: mode-aware read models ------------------------------------ #
     def _mode_overview(self, root, mode):
