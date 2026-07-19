@@ -1,9 +1,11 @@
 """Phase R6 (PR6a) — scheduled-monitoring subscription routes over HTTP.
 
-Opt-in is gated on an authenticated account (recipients must be verified
-accounts — never a free-text address), owner-scoped like the rest of the
-user-opportunity API, and the tokened unsubscribe link works without a
-session. Offline; BOTIM_AUTH_MODE toggled per test."""
+Opt-in is gated on a signed-in account (recipients are the account's own
+registered email — never a free-text address), owner-scoped like the rest of
+the user-opportunity API, and the tokened unsubscribe link works without a
+session. When auth enforcement is off, opt-in is an honest "unavailable on
+this deployment" (403), not a confusing sign-in error. Offline;
+BOTIM_AUTH_MODE toggled per test."""
 
 import json
 import os
@@ -68,12 +70,27 @@ class WorkspaceMonitoringRoutes(unittest.TestCase):
                              {"title": title, "status": "saved"}, cookie=cookie)
         return opp
 
-    def test_opt_in_requires_a_signed_in_account(self):
+    def test_opt_in_when_auth_off_is_an_honest_unavailable(self):
         os.environ["BOTIM_AUTH_MODE"] = "off"
-        # with auth off there is no session/identity — opt-in must refuse,
-        # because a recipient MUST be a verified account (no unverified email)
+        # with enforcement off there is no account system in use — opt-in must
+        # refuse HONESTLY ("requires sign-in enabled"), not with a confusing
+        # auth error for a sign-in system that isn't switched on
         _, opp, _ = self._req("POST", "/api/user-opportunities",
                              {"title": "No-auth opp", "status": "saved"})
+        base = f"/api/user-opportunities/{opp['id']}/workspace/monitoring"
+        for method in ("GET", "POST", "DELETE"):
+            with self.assertRaises(urllib.error.HTTPError, msg=method) as cm:
+                self._req(method, base,
+                          {"cadence_hours": 6} if method == "POST" else None)
+            self.assertEqual(cm.exception.code, 403, method)
+            body = cm.exception.read().decode()
+            self.assertIn("requires sign-in to be", body)
+
+    def test_opt_in_without_a_session_under_required_auth_is_401(self):
+        os.environ["BOTIM_AUTH_MODE"] = "required"
+        # create an opportunity as a real user, then hit opt-in with NO cookie
+        _, alice = self._register("r6-nosession@example.com")
+        opp = self._make_opp(alice)
         with self.assertRaises(urllib.error.HTTPError) as cm:
             self._req("POST",
                       f"/api/user-opportunities/{opp['id']}/workspace/monitoring",

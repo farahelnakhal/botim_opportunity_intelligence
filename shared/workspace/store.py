@@ -187,9 +187,10 @@ class WorkspaceStore:
                 # Phase R6 — scheduled-monitoring subscriptions. One parent row
                 # per chat holds the cadence + scheduling state; a child table
                 # holds N recipients so teammates can be added later with NO
-                # schema migration. Every recipient is a verified account
+                # schema migration. Every recipient is a signed-in account
                 # (recipient_user_id = USER- id); the recipient email is a
-                # snapshot of that account's address at opt-in time. Only the
+                # snapshot of that account's registered address at opt-in time
+                # (R8a stores it at sign-up but does not confirm it). Only the
                 # SHA-256 hash of each unsubscribe token is stored (never the
                 # token), matching the auth store's session-token discipline.
                 conn.execute("""CREATE TABLE IF NOT EXISTS workspace_subscriptions (
@@ -408,7 +409,7 @@ class WorkspaceStore:
 
     def subscribe(self, opportunity_id, owner_user_id, recipient_user_id,
                   recipient_email, cadence_hours=None):
-        """Opt one verified account in as a recipient for this chat, creating
+        """Opt one signed-in account in as a recipient for this chat, creating
         the subscription if needed. Idempotent per (opportunity, recipient):
         re-opting-in re-enables the recipient and issues a FRESH unsubscribe
         token. Returns {'recipient_id', 'unsubscribe_token'} — the raw token is

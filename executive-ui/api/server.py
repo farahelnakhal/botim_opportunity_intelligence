@@ -819,17 +819,27 @@ class Handler(BaseHTTPRequestHandler):
     # -- Phase R6: scheduled-monitoring subscription (consent/recipients) ---- #
     # GET    .../workspace/monitoring -> this chat's subscription + recipients
     # POST   .../workspace/monitoring -> the signed-in user opts THEMSELVES in
-    #                                    (verified account email; no free text)
-    #                                    and sets/updates the per-chat cadence
+    #                                    (their own registered account email;
+    #                                    no free text) and sets the cadence
     # DELETE .../workspace/monitoring -> the signed-in user opts themselves out
-    # A recipient is always a verified account acting through its own session,
-    # so no unverified address can ever be added. Scheduling (the tick), diff,
-    # and email are wired in later R6 PRs; this is the consent model they need.
+    # A recipient is always a signed-in account acting through its own session
+    # (its registered email — note R8a does not confirm that address; see the
+    # decision log), so an address is never typed in for someone else.
+    # Scheduling (the tick), diff, and email are wired in later R6 PRs; this is
+    # the consent model they need.
     def _workspace_monitoring(self, method, opp_id, ws, opp):
+        # Monitoring email is meaningless without an identity to scope it to.
+        # When auth enforcement is off on this deployment, say so honestly
+        # rather than returning a confusing "sign in" error for a sign-in
+        # system that isn't switched on.
+        if not auth_required():
+            return self._error(403, "scheduled monitoring email is unavailable on "
+                                    "this deployment — it requires sign-in to be "
+                                    "enabled (BOTIM_AUTH_MODE=required) so recipients "
+                                    "are tied to a signed-in account")
         user = self._current_user()
         if user is None:
-            return self._error(401, "sign in to manage monitoring email — "
-                                    "recipients must be verified accounts")
+            return self._error(401, "sign in to manage monitoring email")
         if method == "GET":
             return self._json({"subscription": ws.get_subscription(opp_id)})
         if method == "POST":

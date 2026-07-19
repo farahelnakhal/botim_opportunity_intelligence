@@ -74,8 +74,8 @@
   provider SDK would be a separate logged deviation, same bar as the PDF library.
 - **Consequences:** Deliverability, SPF/DKIM, and a verified sending domain are
   the **operator's** responsibility (documented in `deploy/` env docs), not the
-  app's. Recipients are restricted to verified account emails (see the recipient
-  decision); we do not do bulk/marketing sending. Send failures are caught and
+  app's. Recipients are restricted to session-authenticated account emails (see
+  the recipient decision); we do not do bulk/marketing sending. Send failures are caught and
   recorded as an honest failed-notification state on the subscription; a failed
   send is never logged as a delivered update.
 
@@ -93,12 +93,16 @@
   hashed `unsubscribe_token`, `enabled`, `opted_in_at`; unique on
   `(opportunity_id, recipient_user_id)`). The **schema supports N recipients per
   chat from day one** so adding teammates later needs no migration. Every
-  recipient is a **verified account email**, added only through a
-  **per-recipient, session-scoped opt-in** (a signed-in user opts *themselves*
-  in for a chat they can see — reusing the existing ownership/visibility guard);
-  there is **no free-text recipient entry** and **no unverified address ever**.
-  Unsubscribe is a tokened `GET /api/monitoring/unsubscribe?...` per recipient
-  (and a UI toggle) that flips that recipient's `enabled` off without a login.
+  recipient is a **session-authenticated account's own registered email**, added
+  only through a **per-recipient, session-scoped opt-in** (a signed-in user opts
+  *themselves* in for a chat they can see — reusing the existing
+  ownership/visibility guard); there is **no free-text recipient entry** — an
+  address is never typed for someone else. Note the honest limitation: R8a
+  stores the registered email at sign-up but does **not** confirm the account
+  controls it (there is no email-confirmation flow yet), so "registered" is not
+  "confirmed" — see the open decision in consequences. Unsubscribe is a tokened
+  `GET /api/monitoring/unsubscribe?...` per recipient (and a UI toggle) that
+  flips that recipient's `enabled` off without a login.
 - **Reasoning:** The roadmap's explicit exclusions forbid changing how `MCFG-`
   works "outside the scheduled-workspace-re-run path — that's R4, already done."
   `MCFG-` drives the R4a runner that mints `MEVT-` events; R6 drives *workspace
@@ -106,17 +110,18 @@
   two runners, so R6 gets dedicated per-chat tables next to the versions they
   govern. A separate recipients child table (rather than owner-only) means
   teammates can be added with **zero schema churn** — the stated requirement —
-  while the per-recipient session-scoped opt-in keeps the "verified account
-  email, no unverified addresses, tied to identity" constraint intact: consent
-  is proven by the recipient's own session, never by the owner typing an
+  while the per-recipient session-scoped opt-in keeps the "recipients tied to a
+  signed-in account, never a free-text address" constraint intact: consent is
+  proven by the recipient's own session, never by the owner typing an
   address. Per-chat cadence (not global, not per-user) matches the R5 per-chat
   workspace model; a global default + bounds keeps it configurable without a
   hardcoded interval.
 - **Alternatives rejected:** (a) reuse `MCFG-` cadence — violates the R4
   exclusion, couples two runners; (b) owner-email-only column (no child table) —
   rejected per the explicit ask: would force a migration to add teammates
-  later; (c) free-text recipient list on the parent row — would email
-  unverified third parties, breaking the R8 identity-scoping constraint;
+  later; (c) free-text recipient list on the parent row — would email arbitrary
+  third-party addresses with no account behind them, breaking the R8
+  identity-scoping constraint;
   (d) global-only cadence — the task explicitly rules out a hardcoded global
   interval; (e) storing recipients in the auth DB — the subscription is per-chat
   workspace state, so it belongs with the workspace store; identity is
@@ -128,6 +133,16 @@
   same flow with no data-model change. If an account's email changes, the
   recipient snapshot refreshes on the next opt-in touch. Bulk/external
   recipients remain out of scope (each needs a controlling account + session).
+- **Open decision (flagged, not silently resolved):** R8a never confirms that
+  an account controls its registered email. Because R6 sends real outbound mail,
+  an account registered with someone else's address (typo or otherwise) would
+  receive unsolicited monitoring email. **Recommendation:** add a lightweight
+  double-opt-in email-confirmation step (a one-time confirm link; only a
+  confirmed recipient row is eligible to receive mail) as its own decision
+  before real sends go out in PR6c — R6 is exactly where the email
+  infrastructure to do this first exists. This is deliberately NOT bundled into
+  PR6a's language: the current model is honestly "registered email + session
+  opt-in," and calling it "verified" would overclaim until such a step exists.
 
 ## 2026-07-19 — R6 throttling: reuse the R8b `quota_events` mechanism, scaled by active subscriptions
 
