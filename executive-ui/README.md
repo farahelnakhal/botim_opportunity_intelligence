@@ -167,9 +167,8 @@ to run comfortably on any free tier). AI analysis of new opportunities is
 delegated to a **free, hosted, OpenAI-compatible LLM API** at runtime instead
 of self-hosting a model — self-hosting an actual model (e.g. Ollama) for free
 turns out to be impractical: every free Docker-capable host either requires a
-card on file for verification (Hugging Face Docker Spaces, Fly.io, GCP,
-Oracle) or gives too little RAM to run it reliably. Using a hosted API
-sidesteps that entirely.
+card on file for verification (Fly.io, GCP, Oracle) or gives too little RAM to
+run it reliably. Using a hosted API sidesteps that entirely.
 
 **Recommended stack — both steps are genuinely free, no card, ~10 minutes:**
 
@@ -201,12 +200,9 @@ in `render.yaml` (or the Render dashboard) for any other OpenAI-compatible
 endpoint — a self-hosted Ollama if you later get access to a Docker-capable
 host, or a different free/paid provider.
 
-**If you *do* get Docker-Space access on Hugging Face later** (e.g. after
-card verification), `executive-ui/deploy/space_readme.md` and
-`.github/workflows/deploy-huggingface.yml` still work unchanged — same
-Dockerfile, same environment variables, auto-mirrored from this repo on push
-to `main` (needs repo secret `HF_TOKEN` + variable `HF_SPACE`; see that
-workflow file for details).
+**Any other Docker host.** The same `executive-ui/deploy/Dockerfile` and
+environment variables run unchanged on any Docker-capable platform (Fly.io,
+Railway, a VPS, ...) — Render is just the recommended free path.
 
 ## Plain-language UI (no codes)
 

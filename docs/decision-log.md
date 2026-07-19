@@ -7,8 +7,8 @@
 ## 2026-07-19 — R6 scheduler: external cron against a protected endpoint, not an in-process timer
 
 - **Decision:** Scheduled workspace re-runs are driven by an **external cron
-  trigger** (a GitHub Actions scheduled workflow, mirroring
-  `deploy-huggingface.yml`) that issues an authenticated
+  trigger** (a GitHub Actions scheduled workflow,
+  `.github/workflows/monitoring-tick.yml`) that issues an authenticated
   `POST /api/monitoring/tick` to the deployed executive API. The endpoint is a
   *dispatcher*: it finds subscriptions whose `next_run_at <= now`, atomically
   claims each (advancing `next_run_at` inside the same transaction), then runs
@@ -17,9 +17,9 @@
   caps work per call (`MONITORING_TICK_MAX_CHATS`), and does **no** work beyond
   what is due. There is **no in-process scheduler thread**. The workflow runs
   **hourly** (`cron: '0 * * * *'`) plus `workflow_dispatch`.
-- **Reasoning:** The deploy targets (HuggingFace Spaces free tier, Render free
-  tier) **sleep on idle** — an in-process timer would silently stop firing
-  exactly when no user is active, fabricating a reliability we don't have. An
+- **Reasoning:** The deploy target (Render free tier) **sleeps on idle** — an
+  in-process timer would silently stop firing exactly when no user is active,
+  fabricating a reliability we don't have. An
   external cron is the pattern the repo already uses for deploys, needs no
   always-on plan, and is idempotent by design (claim-and-advance makes a
   double-fired cron a no-op). GitHub's scheduler is itself best-effort — runs

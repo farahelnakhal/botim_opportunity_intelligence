@@ -1233,8 +1233,8 @@ def make_server(port=8000, root=".", host="127.0.0.1"):
 
 
 def main():
-    # PORT is the convention most PaaS/container platforms (Hugging Face Spaces,
-    # Render, Railway, ...) use to tell the app which port to bind.
+    # PORT is the convention most PaaS/container platforms (Render, Railway,
+    # ...) use to tell the app which port to bind.
     ap = argparse.ArgumentParser(description="Read-only Opportunity Intelligence API")
     ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)))
     ap.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"),

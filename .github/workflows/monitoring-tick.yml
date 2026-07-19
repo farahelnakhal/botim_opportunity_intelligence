@@ -1,14 +1,14 @@
 name: Scheduled monitoring tick
 
 # Phase R6 — drives scheduled analysis-workspace re-runs on the deployed app.
-# The deploy target (HF Space / Render free tier) SLEEPS on idle, so an
-# in-process scheduler would silently stop firing; instead this external cron
+# The deploy target (Render free tier) SLEEPS on idle, so an in-process
+# scheduler would silently stop firing; instead this external cron
 # POSTs a shared-secret-protected endpoint that runs only the subscriptions
 # whose per-chat cadence is due (see docs/decision-log.md, 2026-07-19 "R6
 # scheduler"). Requires two one-time repo settings (skipped harmlessly if
 # absent, so this never breaks CI for anyone who hasn't set it up):
 #   - Variable MONITORING_TICK_URL   : base URL of the deployed app
-#                                       (e.g. https://your-space.hf.space)
+#                                       (e.g. https://botim-opportunity-intelligence.onrender.com)
 #   - Secret   MONITORING_TICK_TOKEN : the same value set as MONITORING_TICK_TOKEN
 #                                       in the app's environment
 #

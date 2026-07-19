@@ -28,8 +28,8 @@ Modes:
 No mode ever falls back silently to another: an invalid BOTIM_APP_MODE value
 resolves to "normal" (the safe default) — never to demo data.
 
-Deployment notes: the bundled demo deployments (Render / Hugging Face Space)
-set BOTIM_APP_MODE=demo explicitly in executive-ui/deploy/Dockerfile; local
+Deployment notes: a bundled demo deployment (Render) sets BOTIM_APP_MODE=demo
+explicitly via executive-ui/deploy/Dockerfile's build arg; local
 development of the showcase uses BOTIM_APP_MODE=demo too. Anything left
 unset is normal.
 """
