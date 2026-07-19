@@ -24,20 +24,25 @@ workspace per saved chat"):
   research store.
 """
 
+import hashlib
 import json
 import os
 import re
+import secrets
 import sqlite3
 import uuid
 import datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_DB_PATH = REPO / "runtime" / "workspace.db"
 
 AWV_RE = re.compile(r"^AWV-[0-9a-f]{12}$")
+# recipient rows in the R6 monitoring subscription (see below)
+WSUB_RE = re.compile(r"^WSUB-[0-9a-f]{12}$")
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 # a workspace belongs to a user opportunity (UOPP-) or, in principle, a
 # committed one (OPP-nnn) — nothing else
 OPP_REF_RE = re.compile(r"^(OPP-\d{3}|UOPP-[0-9a-f]{12})$")
@@ -50,11 +55,44 @@ TRIGGERS = ("first_analysis", "manual_refresh", "meaningful_change",
 
 QUESTION_MAX = 4000
 ERROR_MAX = 1000
+EMAIL_MAX = 254
 DEFAULT_KEEP = 10
 DEFAULT_STALE_HOURS = 24
 
+# R6 scheduled-monitoring cadence (per chat). The floor is configurable so an
+# operator can loosen/tighten the minimum re-run interval; the ceiling is a
+# fixed 30 days. Default 6h sits in the roadmap's 4–6h target band.
+DEFAULT_CADENCE_HOURS = 6
+MAX_CADENCE_HOURS = 720
+OUTCOME_MAX = 200
+
 _JSON_LIST_FIELDS = ("kb_evidence", "claim_ids", "gaps", "document_evidence")
 _JSON_DICT_FIELDS = ("preliminary_score", "provenance")
+
+
+def _min_cadence_hours():
+    try:
+        return max(1, int(os.environ.get("MONITORING_MIN_CADENCE_HOURS", 4)))
+    except ValueError:
+        return 4
+
+
+def _default_cadence_hours():
+    try:
+        return int(os.environ.get("MONITORING_DEFAULT_CADENCE_HOURS",
+                                  DEFAULT_CADENCE_HOURS))
+    except ValueError:
+        return DEFAULT_CADENCE_HOURS
+
+
+def _hash_token(token):
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _shift_hours(iso, hours):
+    dt = datetime.datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ") \
+        .replace(tzinfo=datetime.timezone.utc)
+    return (dt + datetime.timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class WorkspaceStoreError(Exception):
@@ -145,6 +183,41 @@ class WorkspaceStore:
                 if "document_evidence" not in existing:
                     conn.execute("ALTER TABLE workspace_versions "
                                  "ADD COLUMN document_evidence TEXT NOT NULL DEFAULT '[]'")
+            if version < 3:
+                # Phase R6 — scheduled-monitoring subscriptions. One parent row
+                # per chat holds the cadence + scheduling state; a child table
+                # holds N recipients so teammates can be added later with NO
+                # schema migration. Every recipient is a verified account
+                # (recipient_user_id = USER- id); the recipient email is a
+                # snapshot of that account's address at opt-in time. Only the
+                # SHA-256 hash of each unsubscribe token is stored (never the
+                # token), matching the auth store's session-token discipline.
+                conn.execute("""CREATE TABLE IF NOT EXISTS workspace_subscriptions (
+                    opportunity_id TEXT PRIMARY KEY,
+                    owner_user_id TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    cadence_hours INTEGER NOT NULL DEFAULT 6,
+                    last_run_at TEXT,
+                    next_run_at TEXT,
+                    last_notified_version INTEGER,
+                    last_outcome TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL)""")
+                conn.execute("""CREATE TABLE IF NOT EXISTS workspace_subscription_recipients (
+                    id TEXT PRIMARY KEY,
+                    opportunity_id TEXT NOT NULL
+                        REFERENCES workspace_subscriptions(opportunity_id) ON DELETE CASCADE,
+                    recipient_user_id TEXT NOT NULL,
+                    recipient_email TEXT NOT NULL,
+                    unsubscribe_token_hash TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    opted_in_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE (opportunity_id, recipient_user_id))""")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_wsub_recip_opp "
+                             "ON workspace_subscription_recipients(opportunity_id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_wsub_recip_token "
+                             "ON workspace_subscription_recipients(unsubscribe_token_hash)")
             conn.execute("INSERT OR REPLACE INTO meta (key, value) "
                          "VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
 
@@ -319,6 +392,160 @@ class WorkspaceStore:
                     ORDER BY version DESC LIMIT ?)""",
                 (opportunity_id, opportunity_id, keep))
         return cur.rowcount
+
+    # -- R6 scheduled-monitoring subscriptions -------------------------------- #
+
+    def _validate_cadence(self, cadence_hours):
+        if cadence_hours is None:
+            return _default_cadence_hours()
+        if isinstance(cadence_hours, bool) or not isinstance(cadence_hours, int):
+            raise WorkspaceStoreError("cadence_hours must be an integer number of hours")
+        lo, hi = _min_cadence_hours(), MAX_CADENCE_HOURS
+        if cadence_hours < lo or cadence_hours > hi:
+            raise WorkspaceStoreError(
+                f"cadence_hours must be between {lo} and {hi}")
+        return cadence_hours
+
+    def subscribe(self, opportunity_id, owner_user_id, recipient_user_id,
+                  recipient_email, cadence_hours=None):
+        """Opt one verified account in as a recipient for this chat, creating
+        the subscription if needed. Idempotent per (opportunity, recipient):
+        re-opting-in re-enables the recipient and issues a FRESH unsubscribe
+        token. Returns {'recipient_id', 'unsubscribe_token'} — the raw token is
+        returned exactly once (only its hash is stored)."""
+        _validate_opp_ref(opportunity_id)
+        if not (isinstance(owner_user_id, str) and owner_user_id):
+            raise WorkspaceStoreError("a monitoring subscription requires an owner user id")
+        if not (isinstance(recipient_user_id, str) and recipient_user_id):
+            raise WorkspaceStoreError("a recipient user id is required")
+        email = (recipient_email or "").strip() if isinstance(recipient_email, str) else ""
+        if not email or len(email) > EMAIL_MAX or not EMAIL_RE.match(email):
+            raise WorkspaceStoreError("a valid recipient account email is required")
+        cadence = self._validate_cadence(cadence_hours)
+        now = _now()
+        token = secrets.token_urlsafe(32)
+        rec_id = _new_wsub_id()
+        with self._connect() as conn:
+            existing_sub = conn.execute(
+                "SELECT opportunity_id FROM workspace_subscriptions WHERE opportunity_id=?",
+                (opportunity_id,)).fetchone()
+            if existing_sub is None:
+                conn.execute(
+                    """INSERT INTO workspace_subscriptions
+                       (opportunity_id, owner_user_id, enabled, cadence_hours,
+                        next_run_at, created_at, updated_at)
+                       VALUES (?,?,1,?,?,?,?)""",
+                    (opportunity_id, owner_user_id, cadence,
+                     _shift_hours(now, cadence), now, now))
+            else:
+                # re-enable the subscription and update the cadence; leave an
+                # already-scheduled next_run_at in place, otherwise seed it
+                conn.execute(
+                    """UPDATE workspace_subscriptions
+                       SET enabled=1, cadence_hours=?,
+                           next_run_at=COALESCE(next_run_at, ?), updated_at=?
+                       WHERE opportunity_id=?""",
+                    (cadence, _shift_hours(now, cadence), now, opportunity_id))
+            existing_rec = conn.execute(
+                "SELECT id FROM workspace_subscription_recipients "
+                "WHERE opportunity_id=? AND recipient_user_id=?",
+                (opportunity_id, recipient_user_id)).fetchone()
+            if existing_rec:
+                rec_id = existing_rec["id"]
+                conn.execute(
+                    """UPDATE workspace_subscription_recipients
+                       SET recipient_email=?, unsubscribe_token_hash=?, enabled=1,
+                           updated_at=? WHERE id=?""",
+                    (email, _hash_token(token), now, rec_id))
+            else:
+                conn.execute(
+                    """INSERT INTO workspace_subscription_recipients
+                       (id, opportunity_id, recipient_user_id, recipient_email,
+                        unsubscribe_token_hash, enabled, opted_in_at, updated_at)
+                       VALUES (?,?,?,?,?,1,?,?)""",
+                    (rec_id, opportunity_id, recipient_user_id, email,
+                     _hash_token(token), now, now))
+        return {"recipient_id": rec_id, "unsubscribe_token": token}
+
+    def get_subscription(self, opportunity_id):
+        """The subscription with its recipient list, or None. The stored
+        unsubscribe-token hashes are NEVER included."""
+        _validate_opp_ref(opportunity_id)
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM workspace_subscriptions WHERE opportunity_id=?",
+                (opportunity_id,)).fetchone()
+            if row is None:
+                return None
+            recs = conn.execute(
+                """SELECT recipient_user_id, recipient_email, enabled, opted_in_at
+                   FROM workspace_subscription_recipients WHERE opportunity_id=?
+                   ORDER BY opted_in_at, id""", (opportunity_id,)).fetchall()
+        sub = dict(row)
+        sub["enabled"] = bool(sub["enabled"])
+        sub["recipients"] = [{"recipient_user_id": r["recipient_user_id"],
+                              "recipient_email": r["recipient_email"],
+                              "enabled": bool(r["enabled"]),
+                              "opted_in_at": r["opted_in_at"]} for r in recs]
+        return sub
+
+    def _disable_if_no_recipients(self, conn, opportunity_id, now):
+        remaining = conn.execute(
+            "SELECT COUNT(*) AS n FROM workspace_subscription_recipients "
+            "WHERE opportunity_id=? AND enabled=1", (opportunity_id,)).fetchone()["n"]
+        if remaining == 0:
+            conn.execute("UPDATE workspace_subscriptions SET enabled=0, updated_at=? "
+                         "WHERE opportunity_id=?", (now, opportunity_id))
+        return remaining
+
+    def unsubscribe_recipient(self, opportunity_id, recipient_user_id):
+        """Opt a signed-in recipient out of their own subscription. When the
+        last enabled recipient leaves, the subscription itself is disabled."""
+        _validate_opp_ref(opportunity_id)
+        now = _now()
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE workspace_subscription_recipients SET enabled=0, updated_at=? "
+                "WHERE opportunity_id=? AND recipient_user_id=? AND enabled=1",
+                (now, opportunity_id, recipient_user_id))
+            changed = cur.rowcount
+            remaining = self._disable_if_no_recipients(conn, opportunity_id, now)
+        return {"opportunity_id": opportunity_id, "recipient_user_id": recipient_user_id,
+                "unsubscribed": bool(changed), "active_recipients": remaining}
+
+    def unsubscribe_by_token(self, token):
+        """Tokened, login-free unsubscribe (the link in a monitoring email).
+        Disables exactly the one recipient the token belongs to."""
+        if not isinstance(token, str) or not token:
+            raise WorkspaceStoreError("an unsubscribe token is required", status=400)
+        now = _now()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id, opportunity_id, recipient_email "
+                "FROM workspace_subscription_recipients WHERE unsubscribe_token_hash=?",
+                (_hash_token(token),)).fetchone()
+            if row is None:
+                raise WorkspaceStoreError("unknown or expired unsubscribe link", status=404)
+            conn.execute("UPDATE workspace_subscription_recipients SET enabled=0, "
+                         "updated_at=? WHERE id=?", (now, row["id"]))
+            self._disable_if_no_recipients(conn, row["opportunity_id"], now)
+        return {"opportunity_id": row["opportunity_id"],
+                "recipient_email": row["recipient_email"], "unsubscribed": True}
+
+    def count_enabled_subscriptions(self, owner_user_id):
+        """How many enabled subscriptions this user owns — the multiplier the
+        R6 quota uses so a multi-chat user is not silently capped mid-day."""
+        if not (isinstance(owner_user_id, str) and owner_user_id):
+            return 0
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM workspace_subscriptions "
+                "WHERE owner_user_id=? AND enabled=1", (owner_user_id,)).fetchone()
+        return row["n"]
+
+
+def _new_wsub_id():
+    return f"WSUB-{uuid.uuid4().hex[:12]}"
 
 
 def compare_versions(older, newer):

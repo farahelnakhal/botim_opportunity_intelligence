@@ -572,7 +572,7 @@ class Handler(BaseHTTPRequestHandler):
         m = re.match(r"^/user-opportunities"
                      r"(?:/(UOPP-[0-9a-f]{12})"
                      r"(?:/(archive|restore|monitoring|workspace|documents)"
-                     r"(?:/(pause|resume|run|events|refresh|versions|diff))?)?)?/?$", sub)
+                     r"(?:/(pause|resume|run|events|refresh|versions|diff|monitoring))?)?)?/?$", sub)
         if not m:
             # a syntactically different id shape (e.g. OPP-010) is a client
             # error, not a missing record — never resolves to committed data
@@ -735,6 +735,8 @@ class Handler(BaseHTTPRequestHandler):
         ws = get_workspace_store()
         try:
             opp = store.get(opp_id)  # 404 for unknown opportunity
+            if sub_action == "monitoring":
+                return self._workspace_monitoring(method, opp_id, ws, opp)
             if sub_action == "refresh" and method == "POST":
                 if not self._quota_guard("workspace_refresh"):
                     return
@@ -813,6 +815,64 @@ class Handler(BaseHTTPRequestHandler):
                 pass  # claims stay listable by id even if the run vanished
         view["claims"] = claims
         return view
+
+    # -- Phase R6: scheduled-monitoring subscription (consent/recipients) ---- #
+    # GET    .../workspace/monitoring -> this chat's subscription + recipients
+    # POST   .../workspace/monitoring -> the signed-in user opts THEMSELVES in
+    #                                    (verified account email; no free text)
+    #                                    and sets/updates the per-chat cadence
+    # DELETE .../workspace/monitoring -> the signed-in user opts themselves out
+    # A recipient is always a verified account acting through its own session,
+    # so no unverified address can ever be added. Scheduling (the tick), diff,
+    # and email are wired in later R6 PRs; this is the consent model they need.
+    def _workspace_monitoring(self, method, opp_id, ws, opp):
+        user = self._current_user()
+        if user is None:
+            return self._error(401, "sign in to manage monitoring email — "
+                                    "recipients must be verified accounts")
+        if method == "GET":
+            return self._json({"subscription": ws.get_subscription(opp_id)})
+        if method == "POST":
+            body = self._read_json_body()
+            cadence = body.get("cadence_hours")
+            # the subscription is owned by the opportunity's owner; a legacy
+            # shared record (NULL owner) is anchored to the first subscriber so
+            # quota and scheduling always tie to a real account (never NULL).
+            owner_id = opp.get("owner_user_id") or user["id"]
+            result = ws.subscribe(opp_id, owner_user_id=owner_id,
+                                  recipient_user_id=user["id"],
+                                  recipient_email=user["email"],
+                                  cadence_hours=cadence)
+            return self._json({"subscription": ws.get_subscription(opp_id),
+                               "unsubscribe_token": result["unsubscribe_token"]},
+                              status=201)
+        if method == "DELETE":
+            return self._json(ws.unsubscribe_recipient(opp_id, user["id"]))
+        return self._error(405, "method not allowed")
+
+    def _monitoring_unsubscribe(self, query):
+        """Tokened, login-free unsubscribe (the link in a monitoring email).
+        Reachable without a session even under required-auth mode."""
+        token = (query.get("token") or [None])[0]
+        ws = get_workspace_store()
+        try:
+            ws.unsubscribe_by_token(token)
+        except workspace_pkg.WorkspaceStoreError as exc:
+            return self._error(exc.status, str(exc))
+        page = ("<!doctype html><html lang=en><meta charset=utf-8>"
+                "<title>Unsubscribed</title>"
+                "<body style=\"font-family:system-ui,sans-serif;max-width:34rem;"
+                "margin:3rem auto;padding:0 1rem;line-height:1.5\">"
+                "<h1>Unsubscribed</h1><p>You will no longer receive scheduled "
+                "analysis-monitoring emails for this opportunity. You can opt "
+                "back in any time from its Analysis tab.</p></body></html>")
+        body = page.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     # -- Phase 5: mode-aware read models ------------------------------------ #
     def _mode_overview(self, root, mode):
@@ -946,6 +1006,10 @@ class Handler(BaseHTTPRequestHandler):
         # is on (the read models include user data and grounded evidence).
         if path.startswith("/auth/"):
             return self._auth_api("GET", path)
+        # Phase R6 — a tokened unsubscribe link must work from an email client
+        # with no session, even under required-auth mode (like /auth/*).
+        if path == "/monitoring/unsubscribe":
+            return self._monitoring_unsubscribe(query)
         if auth_required() and self._require_session() is None:
             return
         try:
