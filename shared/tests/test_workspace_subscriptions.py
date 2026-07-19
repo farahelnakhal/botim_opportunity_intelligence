@@ -190,6 +190,29 @@ class SubscriptionStore(unittest.TestCase):
         s.confirm_recipient(s.subscribe(OTHER, OWNER, ALICE, "alice@example.com")["confirm_token"])
         self.assertEqual(s.count_enabled_subscriptions(OWNER), 1)
 
+    def test_dormancy_reason_is_recorded_and_distinct(self):
+        s = make_store()
+        r = s.subscribe(OPP, OWNER, ALICE, "alice@example.com")
+        # pending confirmation is a distinct, honest dormancy reason
+        self.assertEqual(s.get_subscription(OPP)["last_outcome"],
+                         "dormant_pending_confirmation")
+        # becoming eligible clears the dormancy marker (no run has happened yet)
+        s.confirm_recipient(r["confirm_token"])
+        self.assertIsNone(s.get_subscription(OPP)["last_outcome"])
+        # everyone unsubscribing is a DIFFERENT reason from never-confirmed
+        s.unsubscribe_recipient(OPP, ALICE)
+        self.assertEqual(s.get_subscription(OPP)["last_outcome"],
+                         "dormant_all_unsubscribed")
+
+    def test_real_run_outcome_is_not_clobbered_while_still_eligible(self):
+        s = make_store()
+        s.confirm_recipient(s.subscribe(OPP, OWNER, ALICE, "a@example.com")["confirm_token"])
+        s.record_run_result(OPP, "built", ran_at="2026-07-19T10:00:00Z")
+        # a second recipient opting in recomputes eligibility but must NOT wipe
+        # the real run outcome (still eligible, so no dormancy marker applies)
+        s.subscribe(OPP, OWNER, BOB, "b@example.com")
+        self.assertEqual(s.get_subscription(OPP)["last_outcome"], "built")
+
     def test_get_subscription_none_when_absent(self):
         self.assertIsNone(make_store().get_subscription(OPP))
 

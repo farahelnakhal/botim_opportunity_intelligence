@@ -70,6 +70,12 @@ OUTCOME_MAX = 200
 # the sane default, overridable). An expired link is refused; resend issues
 # a fresh one.
 DEFAULT_CONFIRM_TTL_HOURS = 48
+# distinct honest reasons a subscription is dormant (not eligible to run/email),
+# stored in `last_outcome` so support can tell them apart from run outcomes and
+# from each other. Kept separate from the tick's run outcomes (built/failed/
+# skipped_*) so the two never collide.
+DORMANCY_REASONS = ("dormant_no_recipients", "dormant_pending_confirmation",
+                    "dormant_all_unsubscribed")
 
 _JSON_LIST_FIELDS = ("kb_evidence", "claim_ids", "gaps", "document_evidence")
 _JSON_DICT_FIELDS = ("preliminary_score", "provenance")
@@ -577,13 +583,40 @@ class WorkspaceStore:
         """Parent.enabled reflects whether ANY recipient is ELIGIBLE for mail —
         enabled AND confirmed. An unconfirmed recipient counts as disabled, so a
         chat with only unconfirmed recipients is not scheduled and sends nothing
-        (the double-opt-in guarantee, enforced at the persistence layer)."""
-        eligible = conn.execute(
-            "SELECT COUNT(*) AS n FROM workspace_subscription_recipients "
-            "WHERE opportunity_id=? AND enabled=1 AND confirmed=1",
-            (opportunity_id,)).fetchone()["n"]
-        conn.execute("UPDATE workspace_subscriptions SET enabled=?, updated_at=? "
-                     "WHERE opportunity_id=?", (1 if eligible else 0, now, opportunity_id))
+        (the double-opt-in guarantee, enforced at the persistence layer).
+
+        When the subscription becomes INELIGIBLE, record a distinct honest
+        dormancy reason in `last_outcome` so 'why did nobody get an update?' is
+        answerable at a glance (pending confirmation vs everyone unsubscribed vs
+        no recipients at all) rather than an ambiguous blank. When it becomes
+        eligible, clear a stale dormancy marker but never clobber a real run
+        outcome."""
+        counts = conn.execute(
+            """SELECT
+                 COUNT(*) AS total,
+                 SUM(CASE WHEN enabled=1 AND confirmed=1 THEN 1 ELSE 0 END) AS eligible,
+                 SUM(CASE WHEN enabled=1 AND confirmed=0 THEN 1 ELSE 0 END) AS pending
+               FROM workspace_subscription_recipients WHERE opportunity_id=?""",
+            (opportunity_id,)).fetchone()
+        eligible = counts["eligible"] or 0
+        if eligible:
+            # eligible again: drop a lingering dormancy marker, keep run outcomes
+            conn.execute(
+                "UPDATE workspace_subscriptions SET enabled=1, "
+                "last_outcome=CASE WHEN last_outcome IN "
+                f"({','.join('?' * len(DORMANCY_REASONS))}) THEN NULL ELSE last_outcome END, "
+                "updated_at=? WHERE opportunity_id=?",
+                (*DORMANCY_REASONS, now, opportunity_id))
+        else:
+            if not counts["total"]:
+                reason = "dormant_no_recipients"
+            elif counts["pending"]:
+                reason = "dormant_pending_confirmation"
+            else:
+                reason = "dormant_all_unsubscribed"
+            conn.execute("UPDATE workspace_subscriptions SET enabled=0, "
+                         "last_outcome=?, updated_at=? WHERE opportunity_id=?",
+                         (reason, now, opportunity_id))
         return eligible
 
     def unsubscribe_recipient(self, opportunity_id, recipient_user_id):
@@ -633,18 +666,30 @@ class WorkspaceStore:
 
     # -- R6 scheduled-monitoring tick (scheduler-facing) ---------------------- #
 
+    # A subscription is only schedulable if it has a live CONFIRMED recipient.
+    # We check that with an EXISTS on the recipient table directly (not just the
+    # denormalized parent.enabled flag) so the double-opt-in gate is enforced by
+    # the query itself and can't drift if some future path forgets to recompute.
+    _HAS_CONFIRMED_RECIPIENT = (
+        "EXISTS (SELECT 1 FROM workspace_subscription_recipients r "
+        "WHERE r.opportunity_id = workspace_subscriptions.opportunity_id "
+        "AND r.enabled=1 AND r.confirmed=1)")
+
     def due_subscriptions(self, limit=25):
-        """Enabled subscriptions whose next_run_at has arrived (or is unset),
-        oldest-due first. Read-only: the tick must still claim_due() each one
-        before running it — the claim is the idempotency lock, not this read."""
+        """Enabled subscriptions with a confirmed recipient whose next_run_at
+        has arrived (or is unset), oldest-due first. Read-only: the tick must
+        still claim_due() each one before running it — the claim is the
+        idempotency lock, not this read. A chat with zero confirmed recipients
+        is never even selected here (query-level double-opt-in enforcement)."""
         now = _now()
         limit = max(1, min(int(limit), 500))
         with self._connect() as conn:
             rows = conn.execute(
-                """SELECT opportunity_id, owner_user_id, cadence_hours, next_run_at,
-                          last_notified_version
+                f"""SELECT opportunity_id, owner_user_id, cadence_hours, next_run_at,
+                           last_notified_version
                    FROM workspace_subscriptions
                    WHERE enabled=1 AND (next_run_at IS NULL OR next_run_at <= ?)
+                         AND {self._HAS_CONFIRMED_RECIPIENT}
                    ORDER BY (next_run_at IS NULL) DESC, next_run_at ASC LIMIT ?""",
                 (now, limit)).fetchall()
         return [dict(r) for r in rows]
@@ -660,17 +705,19 @@ class WorkspaceStore:
         now = _now()
         with self._connect() as conn:
             row = conn.execute(
-                """SELECT owner_user_id, cadence_hours, last_notified_version
+                f"""SELECT owner_user_id, cadence_hours, last_notified_version
                    FROM workspace_subscriptions
                    WHERE opportunity_id=? AND enabled=1
-                         AND (next_run_at IS NULL OR next_run_at <= ?)""",
+                         AND (next_run_at IS NULL OR next_run_at <= ?)
+                         AND {self._HAS_CONFIRMED_RECIPIENT}""",
                 (opportunity_id, now)).fetchone()
             if row is None:
                 return None
             cur = conn.execute(
-                """UPDATE workspace_subscriptions SET next_run_at=?, updated_at=?
+                f"""UPDATE workspace_subscriptions SET next_run_at=?, updated_at=?
                    WHERE opportunity_id=? AND enabled=1
-                         AND (next_run_at IS NULL OR next_run_at <= ?)""",
+                         AND (next_run_at IS NULL OR next_run_at <= ?)
+                         AND {self._HAS_CONFIRMED_RECIPIENT}""",
                 (_shift_hours(now, row["cadence_hours"]), now, opportunity_id, now))
             if cur.rowcount != 1:
                 return None
