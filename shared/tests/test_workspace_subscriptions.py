@@ -15,9 +15,11 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from shared.workspace import WorkspaceStore, WorkspaceStoreError  # noqa: E402
+from shared.workspace import (WorkspaceStore, WorkspaceStoreError,  # noqa: E402
+                              sign_unsubscribe_token)
 from shared.workspace import store as ws_store  # noqa: E402
 
+KEY = "test-unsubscribe-signing-key"
 OPP = "UOPP-aaaaaaaaaaa1"
 OTHER = "UOPP-bbbbbbbbbbb2"
 OWNER = "USER-000000000001"
@@ -43,8 +45,8 @@ class SubscriptionStore(unittest.TestCase):
         s = make_store()
         result = s.subscribe(OPP, owner_user_id=OWNER, recipient_user_id=ALICE,
                              recipient_email="alice@example.com")
-        self.assertTrue(result["unsubscribe_token"])          # raw tokens, once
-        self.assertTrue(result["confirm_token"])
+        self.assertTrue(result["confirm_token"])              # raw token, once
+        self.assertNotIn("unsubscribe_token", result)         # minted at send time now
         self.assertFalse(result["confirmed"])
         self.assertTrue(result["recipient_id"].startswith("WSUB-"))
         sub = s.get_subscription(OPP)
@@ -120,16 +122,16 @@ class SubscriptionStore(unittest.TestCase):
         emails = sorted(r["recipient_email"] for r in s.get_subscription(OPP)["recipients"])
         self.assertEqual(emails, ["alice@example.com", "bob@example.com"])
 
-    def test_reopt_in_rotates_the_unsubscribe_token(self):
+    def test_signed_unsubscribe_token_is_stable_and_works(self):
         s = make_store()
         first = s.subscribe(OPP, OWNER, ALICE, "alice@example.com")
         second = s.subscribe(OPP, OWNER, ALICE, "alice@example.com")
         self.assertEqual(first["recipient_id"], second["recipient_id"])  # same row
-        self.assertNotEqual(first["unsubscribe_token"], second["unsubscribe_token"])
         self.assertEqual(len(s.get_subscription(OPP)["recipients"]), 1)  # not duplicated
-        with self.assertRaises(WorkspaceStoreError):
-            s.unsubscribe_by_token(first["unsubscribe_token"])           # old token dead
-        self.assertTrue(s.unsubscribe_by_token(second["unsubscribe_token"])["unsubscribed"])
+        # the deterministic token is stable across every email (no rotation)
+        tok = sign_unsubscribe_token(first["recipient_id"], KEY)
+        self.assertEqual(tok, sign_unsubscribe_token(second["recipient_id"], KEY))
+        self.assertTrue(s.unsubscribe_by_token(tok, KEY)["unsubscribed"])
 
     def test_self_serve_unsubscribe_disables_only_that_recipient(self):
         s = make_store()
@@ -153,16 +155,28 @@ class SubscriptionStore(unittest.TestCase):
         s = make_store()
         a = sub_confirmed(s, OPP, OWNER, ALICE, "alice@example.com")
         sub_confirmed(s, OPP, OWNER, BOB, "bob@example.com")
-        out = s.unsubscribe_by_token(a["unsubscribe_token"])
+        out = s.unsubscribe_by_token(sign_unsubscribe_token(a["recipient_id"], KEY), KEY)
         self.assertEqual(out["recipient_email"], "alice@example.com")
         by_user = {r["recipient_user_id"]: r["enabled"]
                    for r in s.get_subscription(OPP)["recipients"]}
         self.assertEqual(by_user, {ALICE: False, BOB: True})
 
-    def test_unknown_unsubscribe_token_is_a_404(self):
-        with self.assertRaises(WorkspaceStoreError) as cm:
-            make_store().unsubscribe_by_token("nope-not-a-real-token")
-        self.assertEqual(cm.exception.status, 404)
+    def test_unknown_or_tampered_unsubscribe_token_is_a_404(self):
+        s = make_store()
+        r = s.subscribe(OPP, OWNER, ALICE, "alice@example.com")
+        for bad in ("nope-not-a-real-token", "WSUB-000000000000.badsig",
+                    sign_unsubscribe_token(r["recipient_id"], KEY) + "x"):
+            with self.assertRaises(WorkspaceStoreError) as cm:
+                s.unsubscribe_by_token(bad, KEY)
+            self.assertEqual(cm.exception.status, 404)
+
+    def test_unsubscribe_token_from_a_rotated_key_is_rejected(self):
+        # rotating the signing key silently invalidates old links (documented)
+        s = make_store()
+        r = s.subscribe(OPP, OWNER, ALICE, "alice@example.com")
+        good = sign_unsubscribe_token(r["recipient_id"], KEY)
+        with self.assertRaises(WorkspaceStoreError):
+            s.unsubscribe_by_token(good, "a-different-rotated-key")
 
     def test_cadence_is_bounded_and_defaulted(self):
         s = make_store()

@@ -58,8 +58,9 @@ class WorkspaceMonitoringRoutes(unittest.TestCase):
 
     def tearDown(self):
         os.environ["BOTIM_AUTH_MODE"] = "off"
-        os.environ.pop("MONITORING_TICK_TOKEN", None)
-        os.environ.pop("MONITORING_TICK_MAX_CHATS", None)
+        for var in ("MONITORING_TICK_TOKEN", "MONITORING_TICK_MAX_CHATS",
+                    "MONITORING_UNSUBSCRIBE_SIGNING_KEY", "MONITORING_PUBLIC_BASE_URL"):
+            os.environ.pop(var, None)
 
     def _req(self, method, path, payload=None, cookie=None):
         headers = {"content-type": "application/json"}
@@ -200,14 +201,16 @@ class WorkspaceMonitoringRoutes(unittest.TestCase):
     # -- tokened link endpoints (login-free) -------------------------------- #
 
     def test_unsubscribe_endpoint_works_without_a_session(self):
-        # mint a token via the store, then open the link with no cookie even
-        # under required-auth mode (the endpoint under test is the link itself)
+        # mint a signed token via the store, then open the link with no cookie
+        # even under required-auth mode (the endpoint under test is the link)
+        from shared.workspace import sign_unsubscribe_token
         os.environ["BOTIM_AUTH_MODE"] = "required"
+        os.environ["MONITORING_UNSUBSCRIBE_SIGNING_KEY"] = "unsub-key"
         ws = server.get_workspace_store()
         r = ws.subscribe("UOPP-ccccccccccc3", "USER-00000000c001",
                          "USER-00000000c001", "unsub@example.com")
-        s, html, headers = self._get(
-            f"/api/monitoring/unsubscribe?token={r['unsubscribe_token']}")
+        token = sign_unsubscribe_token(r["recipient_id"], "unsub-key")
+        s, html, headers = self._get(f"/api/monitoring/unsubscribe?token={token}")
         self.assertEqual(s, 200)
         self.assertIn("text/html", headers.get("Content-Type"))
         self.assertIn("Unsubscribed", html)
@@ -255,11 +258,15 @@ class WorkspaceMonitoringRoutes(unittest.TestCase):
         os.environ["BOTIM_AUTH_MODE"] = "required"
         os.environ["MONITORING_TICK_TOKEN"] = "tick-secret"
         opp, _ = self._opt_in_confirmed("r6-tick@example.com")
+        self.mail.sent.clear()
         self._force_due(opp["id"])
         status, summary = self._tick()
         self.assertEqual(status, 200)
         self.assertEqual(summary["claimed"], 1)
-        self.assertEqual(summary["built"], 1)
+        # no search provider -> no claims -> first version just establishes the
+        # baseline: outcome no_change and NO email fired
+        self.assertEqual(summary.get("no_change"), 1)
+        self.assertEqual(self.mail.sent, [])
         ws = server.get_workspace_store()
         self.assertEqual(ws.latest(opp["id"])["trigger"], "monitoring")
         _, again = self._tick()          # refire finds nothing due
@@ -286,8 +293,92 @@ class WorkspaceMonitoringRoutes(unittest.TestCase):
         ws.create_version(opp["id"], "manual_refresh")   # a manual run in flight
         _, summary = self._tick()
         self.assertEqual(summary["skipped_in_progress"], 1)
-        self.assertEqual(summary["built"], 0)
         self.assertIsNone(ws.latest(opp["id"], status="complete"))
+
+    def test_tick_emails_only_on_a_material_change_end_to_end(self):
+        # the full pipeline with injected providers: first build establishes the
+        # baseline (no email); a build with a NEW claim emails; a repeat of the
+        # SAME claim (fresh RCAND- id) is deduped by text and does NOT re-email
+        os.environ["BOTIM_AUTH_MODE"] = "required"
+        os.environ["MONITORING_TICK_TOKEN"] = "tick-secret"
+        os.environ["MONITORING_UNSUBSCRIBE_SIGNING_KEY"] = "unsub-key"
+        from shared.research.providers import SearchResult
+        from shared.llm.provider import ConversationModel, ModelResponse
+
+        opp, _ = self._opt_in_confirmed("r6-material@example.com")
+        self.mail.sent.clear()
+        rs = server.get_research_store()
+        facts = ["The market grew 12% in 2024.", "A new competitor launched in 2025."]
+        pick = {"n": 0}
+
+        class Search:
+            name = "mock"
+            def search(self, query, max_results=8):
+                return [SearchResult.build("mock", url="https://example.com/r",
+                                           title="Report")]
+
+        class Stub(ConversationModel):
+            model = "stub"
+            def generate(self, messages, tools, system_prompt, configuration):
+                # pull the source id from THIS run's extraction prompt (robust
+                # once several runs exist — never guess via list_runs()[0])
+                blob = (system_prompt or "") + " " + " ".join(
+                    (m.get("content", "") if isinstance(m, dict) else str(m))
+                    for m in (messages or []))
+                sid = re.search(r"RSRC-[0-9a-f]{12}", blob).group(0)
+                fact = facts[pick["n"]]
+                return ModelResponse(content=json.dumps({"claims": [{
+                    "claim": fact,
+                    "sources": [{"source_id": sid, "supporting_quote": fact}]}]}))
+
+        class Cfg:
+            provider = "openai_compatible"; api_key = "x"; model = "stub"
+            base_url = "u"; timeout_s = 30
+
+        page = (b"<html><title>Report</title><body>The market grew 12% in 2024. "
+                b"A new competitor launched in 2025.</body></html>")
+        orig = (server.research_providers.from_env, server.research_runner.execute_run,
+                server._ExtractionLLMConfig, server.llm_provider.make_provider)
+        server.research_providers.from_env = lambda *a, **k: Search()
+        server.research_runner.execute_run = (
+            lambda store, run_id, prov, **kw: orig[1](
+                store, run_id, prov,
+                fetch_fn=lambda url, t: (200, "text/html", page),
+                sleep_fn=lambda s: None))
+        server._ExtractionLLMConfig = lambda: Cfg()
+        server.llm_provider.make_provider = lambda cfg: Stub()
+        try:
+            # build 1 -> first complete version, baseline established, NO email
+            pick["n"] = 0
+            self._force_due(opp["id"])
+            _, s1 = self._tick()
+            self.assertEqual(s1.get("no_change"), 1)
+            self.assertEqual(self.mail.sent, [])
+            # build 2 -> a genuinely new claim -> material -> emailed
+            pick["n"] = 1
+            self._force_due(opp["id"])
+            _, s2 = self._tick()
+            self.assertEqual(s2.get("emailed"), 1)
+            self.assertEqual(len(self.mail.sent), 1)
+            msg = self.mail.sent[-1]
+            self.assertEqual(msg["to"], "r6-material@example.com")
+            self.assertIn("A new competitor launched in 2025.", msg["text_body"])
+            self.assertIn("PRELIMINARY", msg["text_body"])
+            self.assertIn("[pending review — not confirmed]", msg["text_body"])
+            # build 3 -> the SAME claim, new id -> deduped -> no re-email
+            pick["n"] = 1
+            self._force_due(opp["id"])
+            _, s3 = self._tick()
+            self.assertEqual(s3.get("no_change"), 1)
+            self.assertEqual(len(self.mail.sent), 1)   # still exactly one email
+            # the emailed unsubscribe link actually works (no session)
+            m = re.search(r"/api/monitoring/unsubscribe\?token=(\S+)", msg["text_body"])
+            st, html, _ = self._get(f"/api/monitoring/unsubscribe?token={m.group(1)}")
+            self.assertEqual(st, 200)
+            self.assertIn("Unsubscribed", html)
+        finally:
+            (server.research_providers.from_env, server.research_runner.execute_run,
+             server._ExtractionLLMConfig, server.llm_provider.make_provider) = orig
 
 
 if __name__ == "__main__":

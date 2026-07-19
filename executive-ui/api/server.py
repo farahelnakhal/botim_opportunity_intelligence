@@ -52,6 +52,7 @@ try:
     from shared import workspace as workspace_pkg
     from shared import documents as documents_pkg
     from shared import email as email_pkg
+    from shared.email import monitoring_digest
 except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -66,6 +67,7 @@ except ImportError:
     from shared import workspace as workspace_pkg
     from shared import documents as documents_pkg
     from shared import email as email_pkg
+    from shared.email import monitoring_digest
 
 
 class _ExtractionLLMConfig:
@@ -932,7 +934,8 @@ class Handler(BaseHTTPRequestHandler):
         Reachable without a session even under required-auth mode."""
         token = (query.get("token") or [None])[0]
         try:
-            get_workspace_store().unsubscribe_by_token(token)
+            get_workspace_store().unsubscribe_by_token(
+                token, os.environ.get("MONITORING_UNSUBSCRIBE_SIGNING_KEY", ""))
         except workspace_pkg.WorkspaceStoreError as exc:
             return self._error(exc.status, str(exc))
         return self._html_page(
@@ -982,9 +985,9 @@ class Handler(BaseHTTPRequestHandler):
     # For each due subscription: atomically claim-and-advance (idempotent
     # against an at-least-once cron), skip if a build is already running, else
     # run the SAME orchestrator the manual refresh uses with trigger
-    # 'monitoring'. Every outcome is recorded honestly on the subscription.
-    # Diff + email are wired in PR6c; quota + the manual-vs-scheduled subtleties
-    # get their dedicated tests in PR6d. This never fabricates a run.
+    # 'monitoring', then (PR6c) diff the result and email opted-in+confirmed
+    # recipients ONLY on a material change. Every outcome is recorded honestly
+    # on the subscription — a no-change / partial / failed run never emails.
     def _monitoring_tick(self):
         expected = os.environ.get("MONITORING_TICK_TOKEN", "").strip()
         if not expected:
@@ -1000,8 +1003,7 @@ class Handler(BaseHTTPRequestHandler):
             max_chats = max(1, int(os.environ.get("MONITORING_TICK_MAX_CHATS", "25")))
         except ValueError:
             max_chats = 25
-        summary = {"claimed": 0, "built": 0, "skipped_in_progress": 0,
-                   "failed": 0, "chats": []}
+        summary = {"claimed": 0, "chats": []}
         for cand in ws.due_subscriptions(limit=max_chats):
             opp_id = cand["opportunity_id"]
             claimed = ws.claim_due(opp_id)
@@ -1014,9 +1016,11 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(summary)
 
     def _run_scheduled_build(self, ws, store, claimed):
-        """Run one claimed subscription's chain; return the recorded outcome.
-        Concurrency: skip (never queue) when a build is already running for
-        this chat — reusing R5's running/complete distinction."""
+        """Run one claimed subscription's chain, then decide whether to email.
+        Concurrency: skip (never queue) when a build is already running for this
+        chat — reusing R5's running/complete distinction. Returns the recorded
+        outcome (emailed / no_change / partial_no_email / email_unavailable /
+        skipped_in_progress / failed)."""
         opp_id = claimed["opportunity_id"]
         if ws.latest(opp_id, status="running") is not None:
             ws.record_run_result(opp_id, "skipped_in_progress")
@@ -1033,11 +1037,85 @@ class Handler(BaseHTTPRequestHandler):
                 search_provider=search_provider, llm_provider=llm,
                 llm_config=llm_cfg, document_store=get_document_store(),
                 viewer_user_id=claimed.get("owner_user_id"))
-            ws.record_run_result(opp_id, "built", ran_at=version.get("completed_at"))
-            return "built"
         except Exception as exc:  # honest failure, never a fabricated success
             ws.record_run_result(opp_id, f"failed: {type(exc).__name__}")
             return "failed"
+        return self._email_on_material_change(ws, claimed, opp, version)
+
+    def _resolve_claims(self, version):
+        """Resolve a version's claim ids to {id, claim, status} using the
+        CURRENT review status from the research store (approvals live on
+        claims). Empty when the run is gone — never fabricated."""
+        rid, cids = version.get("research_run_id"), version.get("claim_ids") or []
+        if not (rid and cids):
+            return []
+        try:
+            detail = get_research_store().get_run(rid, include_children=True)
+        except research_store.ResearchStoreError:
+            return []
+        by_id = {c["id"]: c for c in detail.get("candidate_evidence", [])}
+        return [{"id": c["id"], "claim": c["claim"], "status": c["status"]}
+                for cid in cids if (c := by_id.get(cid))]
+
+    def _email_on_material_change(self, ws, claimed, opp, version):
+        """Diff the new version against the baseline and email only on a real
+        material change. No-change / degraded / send-unavailable all record an
+        honest outcome and send nothing. Advances last_notified_version only
+        when the delta has been dealt with (emailed, or baseline established)."""
+        opp_id = opp["id"]
+        completed = version.get("completed_at")
+        # baseline: the version we last notified about; fall back to the prior
+        # complete version. The first-ever complete version just seeds it.
+        baseline = None
+        lnv = claimed.get("last_notified_version")
+        if lnv is not None:
+            baseline = ws.version_by_number(opp_id, lnv)
+        if baseline is None:
+            prior = [v for v in ws.list_versions(opp_id)
+                     if v["status"] == "complete" and v["version"] < version["version"]]
+            baseline = ws.get_version(prior[0]["id"]) if prior else None
+        if baseline is None:
+            ws.record_run_result(opp_id, "no_change", ran_at=completed,
+                                 last_notified_version=version["version"])
+            return "no_change"
+
+        ev = monitoring_digest.evaluate(
+            baseline, version, self._resolve_claims(baseline), self._resolve_claims(version))
+        if ev["degraded"]:
+            ws.record_run_result(opp_id, "partial_no_email", ran_at=completed)
+            return "partial_no_email"
+        if not ev["material"]:
+            ws.record_run_result(opp_id, "no_change", ran_at=completed,
+                                 last_notified_version=version["version"])
+            return "no_change"
+
+        # material — email every eligible (confirmed) recipient, if we can.
+        sender = get_email_sender()
+        signing_key = os.environ.get("MONITORING_UNSUBSCRIBE_SIGNING_KEY", "").strip()
+        base = self._public_base()
+        workspace_url = f"{base}/report/{opp_id}"
+        recipients = ws.eligible_recipients(opp_id)
+        sent = 0
+        for r in recipients:
+            unsub = workspace_pkg.sign_unsubscribe_token(r["id"], signing_key)
+            if not unsub:   # no signing key -> cannot offer a working opt-out
+                break
+            try:
+                digest = monitoring_digest.render(opp, baseline, version, ev,
+                                                  workspace_url,
+                                                  f"{base}/api/monitoring/unsubscribe?token={unsub}")
+                sender.send(r["recipient_email"], digest["subject"], digest["text_body"])
+                sent += 1
+            except (email_pkg.EmailError, monitoring_digest.DigestError):
+                continue  # honest per-recipient failure; try the rest
+        if sent:
+            ws.record_run_result(opp_id, "emailed", ran_at=completed,
+                                 last_notified_version=version["version"])
+            return "emailed"
+        # a real change we could not deliver (no SMTP / no signing key / all
+        # sends failed): do NOT advance the baseline, so it retries once fixed.
+        ws.record_run_result(opp_id, "email_unavailable", ran_at=completed)
+        return "email_unavailable"
 
     # -- Phase 5: mode-aware read models ------------------------------------ #
     def _mode_overview(self, root, mode):

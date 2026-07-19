@@ -4,6 +4,69 @@
 > decision would surprise a future maintainer or constrains future work.
 > Format: date · decision · reasoning · alternatives · consequences.
 
+## 2026-07-19 — R6 diff-to-email: materiality gate, claim-text diffing, and a signed unsubscribe token
+
+- **Decision:** After a scheduled `monitoring` build completes, the tick decides
+  whether to email by comparing the new version to a **baseline** (the version
+  in `last_notified_version`; fallback: the previous complete version). The
+  first-ever complete version establishes the baseline and sends nothing. It
+  **reuses `compare_versions`** for the composite/gap diff, then layers a
+  **claim-TEXT diff** on top: because every build mints fresh `RCAND-` ids,
+  `compare_versions.new_claim_ids` is always the whole new set, so materiality
+  is decided on *normalized claim text* resolved through the research store
+  (with each claim's current review status), not on raw ids. **Material** iff
+  there is ≥1 genuinely new claim text OR the preliminary composite moved by
+  **≥ 0.01** (the smallest meaningful unit at the engine's current 2-decimal
+  composite precision — anything smaller is rounding noise). Gap-set changes
+  alone (e.g. a search provider flapping in and out) are **never** material. A
+  **degraded run** — any `external research failed/was partial/skipped` marker
+  in the new version's gaps — never emails (`partial_no_email`). Non-material
+  runs record `no_change` and advance the baseline; only a material run emails
+  eligible (enabled+confirmed) recipients, records `emailed`, and advances
+  `last_notified_version`. The rendered body passes through an **overclaim
+  guard reusing `impact/email.py`'s discipline**; a tripped guard aborts the
+  send (fail-safe) rather than emailing an overclaim.
+  **Unsubscribe links are deterministic signed tokens** (RFC 8058-style):
+  `token = "<recipient_id>.<base64url(HMAC-SHA256(MONITORING_UNSUBSCRIBE_SIGNING_KEY,
+  recipient_id))>"`, verified by recomputation. Stateless, stable across every
+  email, and **nothing secret is stored per row** — the `unsubscribe_token_hash`
+  column from the first cut is dropped (schema v5). Sending requires both a
+  configured SMTP relay AND the signing key; absent either, the run records an
+  honest "found a change but could not email" outcome and does not advance the
+  baseline (so it retries once configured).
+- **Reasoning:** The id-churn trap would otherwise mark every run material and
+  spam recipients forever. Claim-text diffing is the minimal honest fix that
+  still builds on the single `compare_versions` implementation. The signed
+  token is the only unsubscribe mechanism that needs zero per-row secret
+  storage (keeping the hash-only discipline used since R8a session tokens),
+  gives links that stay valid across every past email (a rotated random token
+  would 404 an old digest's unsubscribe link — unacceptable on a
+  compliance-adjacent feature), and matches the one-click-unsubscribe
+  convention if `List-Unsubscribe` headers are wanted later. The 0.01 gate ties
+  materiality to real scoring precision rather than a magic number.
+- **`MONITORING_UNSUBSCRIBE_SIGNING_KEY` is a real secret**, handled exactly
+  like `MONITORING_TICK_TOKEN`: never committed, set per environment (distinct
+  per deployment), documented in the env table, `sync: false` in `render.yaml`.
+- **Alternatives rejected:** (a) diff on raw `RCAND-` ids — always "all new",
+  guaranteed spam; (b) store the raw unsubscribe token in plaintext — breaks
+  the hash-only discipline for a "it's low-stakes" reason, the kind of quiet
+  erosion that compounds; (c) rotate a fresh random unsubscribe token per email
+  — a six-week-old digest's unsubscribe link would 404, a real user-facing
+  regression; (d) emailing on gap changes / removed claims alone — provider
+  flapping and source staleness are not new findings; (e) a fixed magic
+  threshold with no rationale — replaced with the precision-based 0.01.
+- **Consequences:** A new `shared/email/monitoring_digest.py` (pure, offline-
+  testable: `evaluate` + `render`). Workspace-store schema **v5** drops
+  `unsubscribe_token_hash` and its index; `subscribe` no longer returns a raw
+  unsubscribe token (links are minted at send time from `recipient_id` + key);
+  `unsubscribe_by_token` now verifies a signed token. **Key-rotation caveat
+  (logged like the 48h confirm-TTL tradeoff):** rotating
+  `MONITORING_UNSUBSCRIBE_SIGNING_KEY` **silently invalidates every
+  already-emailed unsubscribe link** — acceptable because rotation should be
+  rare, but recipients holding old emails would then have to use the in-app
+  toggle instead. The digest links back to the opportunity's report for full,
+  labelled review; nothing in the email is presented as validated.
+
 ## 2026-07-19 — R6 double opt-in: recipients confirm control of their address before any mail
 
 - **Decision:** Before a recipient can receive ANY monitoring mail it must

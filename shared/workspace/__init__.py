@@ -12,5 +12,6 @@ store), never on a version.
 """
 
 from .store import (WorkspaceStore, WorkspaceStoreError, TRIGGERS,  # noqa: F401
-                    compare_versions)
+                    compare_versions, sign_unsubscribe_token,
+                    verify_unsubscribe_token)
 from .builder import build_workspace, build_queries  # noqa: F401
