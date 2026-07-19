@@ -34,7 +34,7 @@ import uuid
 import datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_DB_PATH = REPO / "runtime" / "workspace.db"
@@ -65,6 +65,11 @@ DEFAULT_STALE_HOURS = 24
 DEFAULT_CADENCE_HOURS = 6
 MAX_CADENCE_HOURS = 720
 OUTCOME_MAX = 200
+# R6 double-opt-in: a recipient's confirmation link expires after this many
+# hours (R8a's 30-day session TTL is far too long for a confirm link; 48h is
+# the sane default, overridable). An expired link is refused; resend issues
+# a fresh one.
+DEFAULT_CONFIRM_TTL_HOURS = 48
 
 _JSON_LIST_FIELDS = ("kb_evidence", "claim_ids", "gaps", "document_evidence")
 _JSON_DICT_FIELDS = ("preliminary_score", "provenance")
@@ -83,6 +88,14 @@ def _default_cadence_hours():
                                   DEFAULT_CADENCE_HOURS))
     except ValueError:
         return DEFAULT_CADENCE_HOURS
+
+
+def _confirm_ttl_hours():
+    try:
+        return max(1, int(os.environ.get("MONITORING_CONFIRM_TTL_HOURS",
+                                         DEFAULT_CONFIRM_TTL_HOURS)))
+    except ValueError:
+        return DEFAULT_CONFIRM_TTL_HOURS
 
 
 def _hash_token(token):
@@ -219,6 +232,26 @@ class WorkspaceStore:
                              "ON workspace_subscription_recipients(opportunity_id)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_wsub_recip_token "
                              "ON workspace_subscription_recipients(unsubscribe_token_hash)")
+            if version < 4:
+                # Phase R6 double-opt-in: a recipient is not eligible to receive
+                # mail until it CONFIRMS control of the address via a tokened
+                # link. New/re-opted rows start confirmed=0; the tick and the
+                # send path treat unconfirmed exactly like disabled. Only the
+                # SHA-256 hash of the confirm token is stored (same discipline
+                # as session + unsubscribe tokens). Idempotent PRAGMA guard.
+                existing = {row["name"] for row in conn.execute(
+                    "PRAGMA table_info(workspace_subscription_recipients)")}
+                if "confirmed" not in existing:
+                    conn.execute("ALTER TABLE workspace_subscription_recipients "
+                                 "ADD COLUMN confirmed INTEGER NOT NULL DEFAULT 0")
+                if "confirm_token_hash" not in existing:
+                    conn.execute("ALTER TABLE workspace_subscription_recipients "
+                                 "ADD COLUMN confirm_token_hash TEXT")
+                if "confirm_expires_at" not in existing:
+                    conn.execute("ALTER TABLE workspace_subscription_recipients "
+                                 "ADD COLUMN confirm_expires_at TEXT")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_wsub_recip_confirm "
+                             "ON workspace_subscription_recipients(confirm_token_hash)")
             conn.execute("INSERT OR REPLACE INTO meta (key, value) "
                          "VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
 
@@ -410,10 +443,15 @@ class WorkspaceStore:
     def subscribe(self, opportunity_id, owner_user_id, recipient_user_id,
                   recipient_email, cadence_hours=None):
         """Opt one signed-in account in as a recipient for this chat, creating
-        the subscription if needed. Idempotent per (opportunity, recipient):
-        re-opting-in re-enables the recipient and issues a FRESH unsubscribe
-        token. Returns {'recipient_id', 'unsubscribe_token'} — the raw token is
-        returned exactly once (only its hash is stored)."""
+        the subscription if needed. DOUBLE OPT-IN: a new recipient — or one
+        whose email changed, or one not yet confirmed — is stored UNCONFIRMED
+        with a fresh, hashed, expiring confirmation token, and is NOT eligible
+        for mail until it confirms. An already-confirmed recipient re-opting in
+        with the same address stays confirmed (no re-confirmation). A fresh
+        unsubscribe token is always (re)issued. Idempotent per (opportunity,
+        recipient). Returns {'recipient_id', 'unsubscribe_token', 'confirm_token'
+        (None when already confirmed — nothing to send), 'confirmed',
+        'confirm_expires_at'} — raw tokens are returned once; only hashes stored."""
         _validate_opp_ref(opportunity_id)
         if not (isinstance(owner_user_id, str) and owner_user_id):
             raise WorkspaceStoreError("a monitoring subscription requires an owner user id")
@@ -424,53 +462,95 @@ class WorkspaceStore:
             raise WorkspaceStoreError("a valid recipient account email is required")
         cadence = self._validate_cadence(cadence_hours)
         now = _now()
-        token = secrets.token_urlsafe(32)
-        rec_id = _new_wsub_id()
+        unsub_token = secrets.token_urlsafe(32)
         with self._connect() as conn:
             existing_sub = conn.execute(
                 "SELECT opportunity_id FROM workspace_subscriptions WHERE opportunity_id=?",
                 (opportunity_id,)).fetchone()
             if existing_sub is None:
+                # parent starts DISABLED — it only becomes eligible once a
+                # recipient confirms (recompute below). next_run_at is seeded so
+                # scheduling begins once eligibility is reached.
                 conn.execute(
                     """INSERT INTO workspace_subscriptions
                        (opportunity_id, owner_user_id, enabled, cadence_hours,
                         next_run_at, created_at, updated_at)
-                       VALUES (?,?,1,?,?,?,?)""",
+                       VALUES (?,?,0,?,?,?,?)""",
                     (opportunity_id, owner_user_id, cadence,
                      _shift_hours(now, cadence), now, now))
             else:
-                # re-enable the subscription and update the cadence; leave an
-                # already-scheduled next_run_at in place, otherwise seed it
                 conn.execute(
                     """UPDATE workspace_subscriptions
-                       SET enabled=1, cadence_hours=?,
-                           next_run_at=COALESCE(next_run_at, ?), updated_at=?
-                       WHERE opportunity_id=?""",
+                       SET cadence_hours=?, next_run_at=COALESCE(next_run_at, ?),
+                           updated_at=? WHERE opportunity_id=?""",
                     (cadence, _shift_hours(now, cadence), now, opportunity_id))
             existing_rec = conn.execute(
-                "SELECT id FROM workspace_subscription_recipients "
+                "SELECT id, recipient_email, confirmed FROM workspace_subscription_recipients "
                 "WHERE opportunity_id=? AND recipient_user_id=?",
                 (opportunity_id, recipient_user_id)).fetchone()
+            already_confirmed = bool(existing_rec and existing_rec["confirmed"]
+                                     and existing_rec["recipient_email"] == email)
+            confirm_token = confirm_hash = confirm_expires = None
+            if not already_confirmed:
+                confirm_token = secrets.token_urlsafe(32)
+                confirm_hash = _hash_token(confirm_token)
+                confirm_expires = _shift_hours(now, _confirm_ttl_hours())
+            confirmed_val = 1 if already_confirmed else 0
             if existing_rec:
                 rec_id = existing_rec["id"]
                 conn.execute(
                     """UPDATE workspace_subscription_recipients
                        SET recipient_email=?, unsubscribe_token_hash=?, enabled=1,
+                           confirmed=?, confirm_token_hash=?, confirm_expires_at=?,
                            updated_at=? WHERE id=?""",
-                    (email, _hash_token(token), now, rec_id))
+                    (email, _hash_token(unsub_token), confirmed_val, confirm_hash,
+                     confirm_expires, now, rec_id))
             else:
+                rec_id = _new_wsub_id()
                 conn.execute(
                     """INSERT INTO workspace_subscription_recipients
                        (id, opportunity_id, recipient_user_id, recipient_email,
-                        unsubscribe_token_hash, enabled, opted_in_at, updated_at)
-                       VALUES (?,?,?,?,?,1,?,?)""",
+                        unsubscribe_token_hash, enabled, confirmed, confirm_token_hash,
+                        confirm_expires_at, opted_in_at, updated_at)
+                       VALUES (?,?,?,?,?,1,?,?,?,?,?)""",
                     (rec_id, opportunity_id, recipient_user_id, email,
-                     _hash_token(token), now, now))
-        return {"recipient_id": rec_id, "unsubscribe_token": token}
+                     _hash_token(unsub_token), confirmed_val, confirm_hash,
+                     confirm_expires, now, now))
+            self._recompute_subscription_enabled(conn, opportunity_id, now)
+        return {"recipient_id": rec_id, "unsubscribe_token": unsub_token,
+                "confirm_token": confirm_token, "confirmed": bool(confirmed_val),
+                "confirm_expires_at": confirm_expires}
+
+    def confirm_recipient(self, token):
+        """Confirm a recipient via its tokened, login-free link. Validates the
+        token and its expiry, marks the recipient confirmed, and clears the
+        token (single-use). An expired link is a 410; an unknown/used one a 404
+        — never a silent success. Recomputes the parent's eligibility."""
+        if not isinstance(token, str) or not token:
+            raise WorkspaceStoreError("a confirmation token is required", status=400)
+        now = _now()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id, opportunity_id, recipient_email, confirm_expires_at "
+                "FROM workspace_subscription_recipients WHERE confirm_token_hash=?",
+                (_hash_token(token),)).fetchone()
+            if row is None:
+                raise WorkspaceStoreError("unknown or already-used confirmation link",
+                                          status=404)
+            if row["confirm_expires_at"] and row["confirm_expires_at"] < now:
+                raise WorkspaceStoreError("this confirmation link has expired — opt in "
+                                          "again to get a fresh one", status=410)
+            conn.execute(
+                """UPDATE workspace_subscription_recipients
+                   SET confirmed=1, confirm_token_hash=NULL, confirm_expires_at=NULL,
+                       enabled=1, updated_at=? WHERE id=?""", (now, row["id"]))
+            self._recompute_subscription_enabled(conn, row["opportunity_id"], now)
+        return {"opportunity_id": row["opportunity_id"],
+                "recipient_email": row["recipient_email"], "confirmed": True}
 
     def get_subscription(self, opportunity_id):
-        """The subscription with its recipient list, or None. The stored
-        unsubscribe-token hashes are NEVER included."""
+        """The subscription with its recipient list, or None. Token hashes are
+        NEVER included; each recipient reports confirmed / pending_confirmation."""
         _validate_opp_ref(opportunity_id)
         with self._connect() as conn:
             row = conn.execute(
@@ -479,7 +559,8 @@ class WorkspaceStore:
             if row is None:
                 return None
             recs = conn.execute(
-                """SELECT recipient_user_id, recipient_email, enabled, opted_in_at
+                """SELECT recipient_user_id, recipient_email, enabled, confirmed,
+                          opted_in_at
                    FROM workspace_subscription_recipients WHERE opportunity_id=?
                    ORDER BY opted_in_at, id""", (opportunity_id,)).fetchall()
         sub = dict(row)
@@ -487,21 +568,27 @@ class WorkspaceStore:
         sub["recipients"] = [{"recipient_user_id": r["recipient_user_id"],
                               "recipient_email": r["recipient_email"],
                               "enabled": bool(r["enabled"]),
+                              "confirmed": bool(r["confirmed"]),
+                              "pending_confirmation": bool(r["enabled"] and not r["confirmed"]),
                               "opted_in_at": r["opted_in_at"]} for r in recs]
         return sub
 
-    def _disable_if_no_recipients(self, conn, opportunity_id, now):
-        remaining = conn.execute(
+    def _recompute_subscription_enabled(self, conn, opportunity_id, now):
+        """Parent.enabled reflects whether ANY recipient is ELIGIBLE for mail —
+        enabled AND confirmed. An unconfirmed recipient counts as disabled, so a
+        chat with only unconfirmed recipients is not scheduled and sends nothing
+        (the double-opt-in guarantee, enforced at the persistence layer)."""
+        eligible = conn.execute(
             "SELECT COUNT(*) AS n FROM workspace_subscription_recipients "
-            "WHERE opportunity_id=? AND enabled=1", (opportunity_id,)).fetchone()["n"]
-        if remaining == 0:
-            conn.execute("UPDATE workspace_subscriptions SET enabled=0, updated_at=? "
-                         "WHERE opportunity_id=?", (now, opportunity_id))
-        return remaining
+            "WHERE opportunity_id=? AND enabled=1 AND confirmed=1",
+            (opportunity_id,)).fetchone()["n"]
+        conn.execute("UPDATE workspace_subscriptions SET enabled=?, updated_at=? "
+                     "WHERE opportunity_id=?", (1 if eligible else 0, now, opportunity_id))
+        return eligible
 
     def unsubscribe_recipient(self, opportunity_id, recipient_user_id):
-        """Opt a signed-in recipient out of their own subscription. When the
-        last enabled recipient leaves, the subscription itself is disabled."""
+        """Opt a signed-in recipient out of their own subscription. When no
+        eligible recipient remains, the subscription is disabled (unscheduled)."""
         _validate_opp_ref(opportunity_id)
         now = _now()
         with self._connect() as conn:
@@ -510,9 +597,9 @@ class WorkspaceStore:
                 "WHERE opportunity_id=? AND recipient_user_id=? AND enabled=1",
                 (now, opportunity_id, recipient_user_id))
             changed = cur.rowcount
-            remaining = self._disable_if_no_recipients(conn, opportunity_id, now)
+            eligible = self._recompute_subscription_enabled(conn, opportunity_id, now)
         return {"opportunity_id": opportunity_id, "recipient_user_id": recipient_user_id,
-                "unsubscribed": bool(changed), "active_recipients": remaining}
+                "unsubscribed": bool(changed), "active_recipients": eligible}
 
     def unsubscribe_by_token(self, token):
         """Tokened, login-free unsubscribe (the link in a monitoring email).
@@ -529,7 +616,7 @@ class WorkspaceStore:
                 raise WorkspaceStoreError("unknown or expired unsubscribe link", status=404)
             conn.execute("UPDATE workspace_subscription_recipients SET enabled=0, "
                          "updated_at=? WHERE id=?", (now, row["id"]))
-            self._disable_if_no_recipients(conn, row["opportunity_id"], now)
+            self._recompute_subscription_enabled(conn, row["opportunity_id"], now)
         return {"opportunity_id": row["opportunity_id"],
                 "recipient_email": row["recipient_email"], "unsubscribed": True}
 

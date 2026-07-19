@@ -1,6 +1,7 @@
-"""Phase R6 (PR6a) — scheduled-monitoring subscription store: opt-in,
-multi-recipient support, tokened + self-serve unsubscribe, cadence bounds,
-owner requirement, and the enabled-subscription count used by the R6 quota.
+"""Phase R6 — scheduled-monitoring subscription store: opt-in, DOUBLE OPT-IN
+confirmation, multi-recipient support, tokened + self-serve unsubscribe,
+cadence bounds, the enabled-subscription count used by the R6 quota, and the
+scheduler-facing due/claim surface.
 
 Offline, no network. The subscription/recipient model is the consent layer
 every later R6 PR (scheduler, diff-to-email, quota) depends on."""
@@ -28,80 +29,139 @@ def make_store():
     return WorkspaceStore(Path(tempfile.mkdtemp()) / "workspace.db")
 
 
+def sub_confirmed(s, opp, owner, user, email, cadence_hours=None):
+    """Subscribe and immediately confirm — the common 'eligible recipient'
+    setup. Returns the subscribe result (carries the unsubscribe token)."""
+    r = s.subscribe(opp, owner, user, email, cadence_hours=cadence_hours)
+    if r["confirm_token"]:
+        s.confirm_recipient(r["confirm_token"])
+    return r
+
+
 class SubscriptionStore(unittest.TestCase):
-    def test_opt_in_creates_subscription_and_returns_a_token_once(self):
+    def test_opt_in_is_pending_until_confirmed(self):
         s = make_store()
         result = s.subscribe(OPP, owner_user_id=OWNER, recipient_user_id=ALICE,
                              recipient_email="alice@example.com")
-        self.assertTrue(result["unsubscribe_token"])          # raw token, once
+        self.assertTrue(result["unsubscribe_token"])          # raw tokens, once
+        self.assertTrue(result["confirm_token"])
+        self.assertFalse(result["confirmed"])
         self.assertTrue(result["recipient_id"].startswith("WSUB-"))
         sub = s.get_subscription(OPP)
-        self.assertTrue(sub["enabled"])
-        self.assertEqual(sub["owner_user_id"], OWNER)
-        self.assertEqual(sub["cadence_hours"], 6)             # default band
-        self.assertIsNotNone(sub["next_run_at"])              # scheduled forward
-        self.assertEqual(len(sub["recipients"]), 1)
-        self.assertEqual(sub["recipients"][0]["recipient_email"], "alice@example.com")
-        # the token HASH is never exposed through the read model
-        self.assertNotIn("unsubscribe_token_hash", sub)
-        self.assertNotIn("unsubscribe_token_hash", sub["recipients"][0])
+        # NOT eligible yet: the parent stays disabled until a recipient confirms
+        self.assertFalse(sub["enabled"])
+        self.assertEqual(sub["cadence_hours"], 6)
+        rec = sub["recipients"][0]
+        self.assertFalse(rec["confirmed"])
+        self.assertTrue(rec["pending_confirmation"])
+        # no token hashes ever leak through the read model
+        self.assertNotIn("unsubscribe_token_hash", str(sub))
+        self.assertNotIn("confirm_token_hash", str(sub))
+
+    def test_confirmation_makes_the_recipient_eligible(self):
+        s = make_store()
+        r = s.subscribe(OPP, OWNER, ALICE, "alice@example.com")
+        out = s.confirm_recipient(r["confirm_token"])
+        self.assertTrue(out["confirmed"])
+        self.assertEqual(out["recipient_email"], "alice@example.com")
+        sub = s.get_subscription(OPP)
+        self.assertTrue(sub["enabled"])                       # now eligible
+        self.assertTrue(sub["recipients"][0]["confirmed"])
+        self.assertFalse(sub["recipients"][0]["pending_confirmation"])
+
+    def test_confirm_token_is_single_use_and_unknown_is_404(self):
+        s = make_store()
+        r = s.subscribe(OPP, OWNER, ALICE, "alice@example.com")
+        s.confirm_recipient(r["confirm_token"])
+        # the token was cleared on use -> a second confirm is a 404
+        with self.assertRaises(WorkspaceStoreError) as cm:
+            s.confirm_recipient(r["confirm_token"])
+        self.assertEqual(cm.exception.status, 404)
+        with self.assertRaises(WorkspaceStoreError):
+            s.confirm_recipient("never-issued")
+
+    def test_expired_confirmation_link_is_refused(self):
+        s = make_store()
+        r = s.subscribe(OPP, OWNER, ALICE, "alice@example.com")
+        # force the stored expiry into the past
+        import sqlite3
+        conn = sqlite3.connect(s.db_path)
+        conn.execute("UPDATE workspace_subscription_recipients "
+                     "SET confirm_expires_at='2000-01-01T00:00:00Z'")
+        conn.commit()
+        conn.close()
+        with self.assertRaises(WorkspaceStoreError) as cm:
+            s.confirm_recipient(r["confirm_token"])
+        self.assertEqual(cm.exception.status, 410)
+        self.assertFalse(s.get_subscription(OPP)["enabled"])
+
+    def test_already_confirmed_reopt_in_needs_no_new_confirmation(self):
+        s = make_store()
+        sub_confirmed(s, OPP, OWNER, ALICE, "alice@example.com")
+        again = s.subscribe(OPP, OWNER, ALICE, "alice@example.com", cadence_hours=12)
+        self.assertIsNone(again["confirm_token"])             # nothing to confirm
+        self.assertTrue(again["confirmed"])
+        sub = s.get_subscription(OPP)
+        self.assertTrue(sub["enabled"])                       # stays eligible
+        self.assertEqual(sub["cadence_hours"], 12)            # cadence still updates
+
+    def test_changing_email_forces_reconfirmation(self):
+        s = make_store()
+        sub_confirmed(s, OPP, OWNER, ALICE, "alice@example.com")
+        changed = s.subscribe(OPP, OWNER, ALICE, "alice@new.example.com")
+        self.assertTrue(changed["confirm_token"])             # must re-confirm
+        self.assertFalse(changed["confirmed"])
+        self.assertFalse(s.get_subscription(OPP)["enabled"])  # ineligible until re-confirmed
 
     def test_multiple_recipients_per_chat_are_supported_now(self):
         s = make_store()
-        s.subscribe(OPP, OWNER, ALICE, "alice@example.com")
-        s.subscribe(OPP, OWNER, BOB, "bob@example.com")
-        sub = s.get_subscription(OPP)
-        emails = sorted(r["recipient_email"] for r in sub["recipients"])
+        sub_confirmed(s, OPP, OWNER, ALICE, "alice@example.com")
+        sub_confirmed(s, OPP, OWNER, BOB, "bob@example.com")
+        emails = sorted(r["recipient_email"] for r in s.get_subscription(OPP)["recipients"])
         self.assertEqual(emails, ["alice@example.com", "bob@example.com"])
 
-    def test_reopt_in_is_idempotent_and_rotates_the_token(self):
+    def test_reopt_in_rotates_the_unsubscribe_token(self):
         s = make_store()
         first = s.subscribe(OPP, OWNER, ALICE, "alice@example.com")
-        second = s.subscribe(OPP, OWNER, ALICE, "alice@new.example.com")
+        second = s.subscribe(OPP, OWNER, ALICE, "alice@example.com")
         self.assertEqual(first["recipient_id"], second["recipient_id"])  # same row
         self.assertNotEqual(first["unsubscribe_token"], second["unsubscribe_token"])
-        sub = s.get_subscription(OPP)
-        self.assertEqual(len(sub["recipients"]), 1)                      # not duplicated
-        self.assertEqual(sub["recipients"][0]["recipient_email"], "alice@new.example.com")
-        # the old token no longer resolves; the new one does
+        self.assertEqual(len(s.get_subscription(OPP)["recipients"]), 1)  # not duplicated
         with self.assertRaises(WorkspaceStoreError):
-            s.unsubscribe_by_token(first["unsubscribe_token"])
-        out = s.unsubscribe_by_token(second["unsubscribe_token"])
-        self.assertTrue(out["unsubscribed"])
+            s.unsubscribe_by_token(first["unsubscribe_token"])           # old token dead
+        self.assertTrue(s.unsubscribe_by_token(second["unsubscribe_token"])["unsubscribed"])
 
     def test_self_serve_unsubscribe_disables_only_that_recipient(self):
         s = make_store()
-        s.subscribe(OPP, OWNER, ALICE, "alice@example.com")
-        s.subscribe(OPP, OWNER, BOB, "bob@example.com")
+        sub_confirmed(s, OPP, OWNER, ALICE, "alice@example.com")
+        sub_confirmed(s, OPP, OWNER, BOB, "bob@example.com")
         out = s.unsubscribe_recipient(OPP, ALICE)
         self.assertTrue(out["unsubscribed"])
-        self.assertEqual(out["active_recipients"], 1)
+        self.assertEqual(out["active_recipients"], 1)         # Bob still eligible
         sub = s.get_subscription(OPP)
-        self.assertTrue(sub["enabled"])                        # Bob remains
+        self.assertTrue(sub["enabled"])
         by_user = {r["recipient_user_id"]: r["enabled"] for r in sub["recipients"]}
         self.assertEqual(by_user, {ALICE: False, BOB: True})
 
-    def test_last_recipient_leaving_disables_the_subscription(self):
+    def test_last_eligible_recipient_leaving_disables_the_subscription(self):
         s = make_store()
-        s.subscribe(OPP, OWNER, ALICE, "alice@example.com")
-        out = s.unsubscribe_recipient(OPP, ALICE)
-        self.assertEqual(out["active_recipients"], 0)
+        sub_confirmed(s, OPP, OWNER, ALICE, "alice@example.com")
+        self.assertEqual(s.unsubscribe_recipient(OPP, ALICE)["active_recipients"], 0)
         self.assertFalse(s.get_subscription(OPP)["enabled"])
 
     def test_tokened_unsubscribe_targets_exactly_one_recipient(self):
         s = make_store()
-        a = s.subscribe(OPP, OWNER, ALICE, "alice@example.com")
-        s.subscribe(OPP, OWNER, BOB, "bob@example.com")
+        a = sub_confirmed(s, OPP, OWNER, ALICE, "alice@example.com")
+        sub_confirmed(s, OPP, OWNER, BOB, "bob@example.com")
         out = s.unsubscribe_by_token(a["unsubscribe_token"])
         self.assertEqual(out["recipient_email"], "alice@example.com")
         by_user = {r["recipient_user_id"]: r["enabled"]
                    for r in s.get_subscription(OPP)["recipients"]}
         self.assertEqual(by_user, {ALICE: False, BOB: True})
 
-    def test_unknown_token_is_a_404_not_a_silent_noop(self):
-        s = make_store()
+    def test_unknown_unsubscribe_token_is_a_404(self):
         with self.assertRaises(WorkspaceStoreError) as cm:
-            s.unsubscribe_by_token("nope-not-a-real-token")
+            make_store().unsubscribe_by_token("nope-not-a-real-token")
         self.assertEqual(cm.exception.status, 404)
 
     def test_cadence_is_bounded_and_defaulted(self):
@@ -122,21 +182,18 @@ class SubscriptionStore(unittest.TestCase):
         with self.assertRaises(WorkspaceStoreError):
             s.subscribe(OPP, OWNER, ALICE, "")
 
-    def test_count_enabled_subscriptions_powers_quota_scaling(self):
+    def test_count_enabled_subscriptions_counts_only_eligible(self):
         s = make_store()
         self.assertEqual(s.count_enabled_subscriptions(OWNER), 0)
-        s.subscribe(OPP, OWNER, ALICE, "alice@example.com")
-        s.subscribe(OTHER, OWNER, ALICE, "alice@example.com")
-        self.assertEqual(s.count_enabled_subscriptions(OWNER), 2)
-        s.unsubscribe_recipient(OTHER, ALICE)                  # disables OTHER
+        s.subscribe(OPP, OWNER, ALICE, "alice@example.com")   # pending -> not counted
+        self.assertEqual(s.count_enabled_subscriptions(OWNER), 0)
+        s.confirm_recipient(s.subscribe(OTHER, OWNER, ALICE, "alice@example.com")["confirm_token"])
         self.assertEqual(s.count_enabled_subscriptions(OWNER), 1)
 
     def test_get_subscription_none_when_absent(self):
         self.assertIsNone(make_store().get_subscription(OPP))
 
     def test_subscription_survives_store_reopen(self):
-        # re-instantiating the store re-runs the idempotent PRAGMA-guarded
-        # schema init; the subscription must persist across a restart
         tmp = Path(tempfile.mkdtemp()) / "workspace.db"
         WorkspaceStore(tmp).subscribe(OPP, OWNER, ALICE, "alice@example.com")
         reopened = WorkspaceStore(tmp)
@@ -145,12 +202,12 @@ class SubscriptionStore(unittest.TestCase):
 
 class TickScheduling(unittest.TestCase):
     """The scheduler-facing store surface: due-selection and the atomic
-    claim-and-advance that makes an at-least-once cron idempotent."""
+    claim-and-advance that makes an at-least-once cron idempotent. A chat is
+    only schedulable once it has a CONFIRMED recipient."""
 
     def _due_store(self):
         s = make_store()
-        s.subscribe(OPP, OWNER, ALICE, "alice@example.com", cadence_hours=6)
-        # force the subscription due (opt-in schedules it one cadence forward)
+        sub_confirmed(s, OPP, OWNER, ALICE, "alice@example.com", cadence_hours=6)
         import sqlite3
         conn = sqlite3.connect(s.db_path)
         conn.execute("UPDATE workspace_subscriptions SET next_run_at=? "
@@ -159,12 +216,24 @@ class TickScheduling(unittest.TestCase):
         conn.close()
         return s
 
-    def test_freshly_subscribed_is_not_immediately_due(self):
+    def test_unconfirmed_subscription_is_never_due(self):
         s = make_store()
-        s.subscribe(OPP, OWNER, ALICE, "alice@example.com", cadence_hours=6)
+        s.subscribe(OPP, OWNER, ALICE, "alice@example.com")   # pending confirmation
+        import sqlite3
+        conn = sqlite3.connect(s.db_path)
+        conn.execute("UPDATE workspace_subscriptions SET next_run_at='2000-01-01T00:00:00Z'")
+        conn.commit()
+        conn.close()
+        # past-due on the clock, but ineligible (unconfirmed) -> not scheduled
+        self.assertEqual(s.due_subscriptions(), [])
+        self.assertIsNone(s.claim_due(OPP))
+
+    def test_freshly_confirmed_is_not_immediately_due(self):
+        s = make_store()
+        sub_confirmed(s, OPP, OWNER, ALICE, "alice@example.com", cadence_hours=6)
         self.assertEqual(s.due_subscriptions(), [])
 
-    def test_due_subscriptions_lists_a_past_due_row(self):
+    def test_due_subscriptions_lists_a_past_due_confirmed_row(self):
         s = self._due_store()
         due = s.due_subscriptions()
         self.assertEqual([d["opportunity_id"] for d in due], [OPP])
@@ -175,27 +244,16 @@ class TickScheduling(unittest.TestCase):
         claimed = s.claim_due(OPP)
         self.assertIsNotNone(claimed)
         self.assertEqual(claimed["owner_user_id"], OWNER)
-        # the advance moved next_run_at into the future -> no longer due
-        self.assertIsNone(s.claim_due(OPP))
+        self.assertIsNone(s.claim_due(OPP))                   # advanced -> not due
         self.assertEqual(s.due_subscriptions(), [])
-
-    def test_claim_due_none_when_not_due_or_disabled(self):
-        s = make_store()
-        s.subscribe(OPP, OWNER, ALICE, "alice@example.com")   # scheduled forward
-        self.assertIsNone(s.claim_due(OPP))                   # not due yet
-        s2 = self._due_store()
-        s2.unsubscribe_recipient(OPP, ALICE)                  # disables the sub
-        self.assertIsNone(s2.claim_due(OPP))                  # due but disabled
 
     def test_record_run_result_advances_last_run_only_when_a_build_ran(self):
         s = self._due_store()
         s.claim_due(OPP)
-        # a skip records the outcome but NEVER advances last_run_at
         s.record_run_result(OPP, "skipped_in_progress")
         sub = s.get_subscription(OPP)
         self.assertEqual(sub["last_outcome"], "skipped_in_progress")
         self.assertIsNone(sub["last_run_at"])
-        # a real build advances last_run_at and can set last_notified_version
         s.record_run_result(OPP, "built", ran_at="2026-07-19T10:00:00Z",
                             last_notified_version=4)
         sub = s.get_subscription(OPP)

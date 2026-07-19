@@ -51,6 +51,7 @@ try:
     from shared.llm import provider as llm_provider
     from shared import workspace as workspace_pkg
     from shared import documents as documents_pkg
+    from shared import email as email_pkg
 except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -64,6 +65,7 @@ except ImportError:
     from shared.llm import provider as llm_provider
     from shared import workspace as workspace_pkg
     from shared import documents as documents_pkg
+    from shared import email as email_pkg
 
 
 class _ExtractionLLMConfig:
@@ -173,6 +175,14 @@ def get_document_store():
     if _DOCUMENT_STORE is None:
         _DOCUMENT_STORE = documents_pkg.DocumentStore()
     return _DOCUMENT_STORE
+
+
+# Phase R6 — outbound email sender, resolved fresh each call from the SMTP_*
+# environment (so a deploy can configure it without a restart quirk). Returns
+# a real SMTP sender when configured, else an honest unconfigured sender that
+# fails loudly. Tests inject a MockEmailSender by monkeypatching this.
+def get_email_sender():
+    return email_pkg.make_sender()
 
 
 SESSION_COOKIE = "botim_session"
@@ -819,13 +829,15 @@ class Handler(BaseHTTPRequestHandler):
     # GET    .../workspace/monitoring -> this chat's subscription + recipients
     # POST   .../workspace/monitoring -> the signed-in user opts THEMSELVES in
     #                                    (their own registered account email;
-    #                                    no free text) and sets the cadence
+    #                                    no free text), sets the cadence, and is
+    #                                    emailed a DOUBLE-OPT-IN confirmation
+    #                                    link. Re-POSTing while unconfirmed
+    #                                    resends it. No mail (incl. monitoring
+    #                                    mail) goes out until confirmed.
     # DELETE .../workspace/monitoring -> the signed-in user opts themselves out
     # A recipient is always a signed-in account acting through its own session
-    # (its registered email — note R8a does not confirm that address; see the
-    # decision log), so an address is never typed in for someone else.
-    # Scheduling (the tick), diff, and email are wired in later R6 PRs; this is
-    # the consent model they need.
+    # (its registered email), and must confirm control of that address via the
+    # tokened link before becoming eligible — see the decision log.
     def _workspace_monitoring(self, method, opp_id, ws, opp):
         # Monitoring email is meaningless without an identity to scope it to.
         # When auth enforcement is off on this deployment, say so honestly
@@ -852,29 +864,92 @@ class Handler(BaseHTTPRequestHandler):
                                   recipient_user_id=user["id"],
                                   recipient_email=user["email"],
                                   cadence_hours=cadence)
+            confirmation = self._maybe_send_confirmation(user["email"], opp, result)
             return self._json({"subscription": ws.get_subscription(opp_id),
-                               "unsubscribe_token": result["unsubscribe_token"]},
-                              status=201)
+                               "confirmation": confirmation}, status=201)
         if method == "DELETE":
             return self._json(ws.unsubscribe_recipient(opp_id, user["id"]))
         return self._error(405, "method not allowed")
+
+    def _public_base(self):
+        """Absolute base URL for links emailed to users. Prefer an explicit
+        MONITORING_PUBLIC_BASE_URL; otherwise derive from the Host header
+        (https unless the host is clearly a plain-HTTP local/test address)."""
+        base = os.environ.get("MONITORING_PUBLIC_BASE_URL")
+        if base:
+            return base.rstrip("/")
+        host = self.headers.get("Host") or "localhost"
+        scheme = "http" if host.startswith(("127.0.0.1", "localhost")) else "https"
+        return f"{scheme}://{host}"
+
+    def _maybe_send_confirmation(self, to_email, opp, subscribe_result):
+        """Send the double-opt-in confirmation email if this opt-in produced a
+        confirm token. Honest states: already-confirmed -> nothing to send;
+        send failure / unconfigured SMTP -> reported truthfully (the recipient
+        simply stays unconfirmed and receives no mail), never a fake success."""
+        token = subscribe_result.get("confirm_token")
+        if not token:  # already confirmed — no confirmation needed
+            return {"required": False, "email_sent": False,
+                    "note": "this address is already confirmed"}
+        title = opp.get("title") or opp.get("id") or "this opportunity"
+        ttl = int(os.environ.get("MONITORING_CONFIRM_TTL_HOURS", 48))
+        link = f"{self._public_base()}/api/monitoring/confirm?token={token}"
+        subject = f"Confirm monitoring email for {title}"
+        text = (
+            "You asked to receive scheduled analysis-monitoring updates for the "
+            f"opportunity \"{title}\".\n\n"
+            f"Confirm this address to start receiving them:\n{link}\n\n"
+            f"This link expires in {ttl} hours. Until it is confirmed, no email "
+            "is sent — if you didn't request this, simply ignore this message.")
+        try:
+            get_email_sender().send(to_email, subject, text)
+            return {"required": True, "email_sent": True, "sent_to": to_email,
+                    "note": f"confirmation email sent to {to_email}; "
+                            "monitoring starts once you confirm"}
+        except email_pkg.EmailError as exc:
+            # unconfigured SMTP or a delivery failure — honest, not fabricated
+            return {"required": True, "email_sent": False, "sent_to": to_email,
+                    "note": f"could not send the confirmation email ({exc}) — "
+                            "no monitoring mail will go out until confirmed"}
+
+    def _monitoring_confirm(self, query):
+        """Tokened, login-free confirmation (the link in the opt-in email).
+        Reachable without a session even under required-auth mode."""
+        token = (query.get("token") or [None])[0]
+        try:
+            get_workspace_store().confirm_recipient(token)
+        except workspace_pkg.WorkspaceStoreError as exc:
+            return self._error(exc.status, str(exc))
+        return self._html_page(
+            "Monitoring confirmed",
+            "<h1>Monitoring confirmed</h1><p>This address is now confirmed. "
+            "You'll receive an email only when a scheduled re-run finds a "
+            "material change — never for an unchanged or failed run. Every "
+            "message includes a one-click unsubscribe link.</p>")
 
     def _monitoring_unsubscribe(self, query):
         """Tokened, login-free unsubscribe (the link in a monitoring email).
         Reachable without a session even under required-auth mode."""
         token = (query.get("token") or [None])[0]
-        ws = get_workspace_store()
         try:
-            ws.unsubscribe_by_token(token)
+            get_workspace_store().unsubscribe_by_token(token)
         except workspace_pkg.WorkspaceStoreError as exc:
             return self._error(exc.status, str(exc))
-        page = ("<!doctype html><html lang=en><meta charset=utf-8>"
-                "<title>Unsubscribed</title>"
+        return self._html_page(
+            "Unsubscribed",
+            "<h1>Unsubscribed</h1><p>You will no longer receive scheduled "
+            "analysis-monitoring emails for this opportunity. You can opt back "
+            "in any time from its Analysis tab.</p>")
+
+    def _html_page(self, title, body_html):
+        """A tiny self-contained confirmation page for a link opened from an
+        email client (unsubscribe / confirm) — no session, no app shell."""
+        from html import escape
+        page = (f"<!doctype html><html lang=en><meta charset=utf-8>"
+                f"<title>{escape(title)}</title>"
                 "<body style=\"font-family:system-ui,sans-serif;max-width:34rem;"
                 "margin:3rem auto;padding:0 1rem;line-height:1.5\">"
-                "<h1>Unsubscribed</h1><p>You will no longer receive scheduled "
-                "analysis-monitoring emails for this opportunity. You can opt "
-                "back in any time from its Analysis tab.</p></body></html>")
+                f"{body_html}</body></html>")
         body = page.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -1093,10 +1168,12 @@ class Handler(BaseHTTPRequestHandler):
         # is on (the read models include user data and grounded evidence).
         if path.startswith("/auth/"):
             return self._auth_api("GET", path)
-        # Phase R6 — a tokened unsubscribe link must work from an email client
-        # with no session, even under required-auth mode (like /auth/*).
+        # Phase R6 — tokened unsubscribe/confirm links must work from an email
+        # client with no session, even under required-auth mode (like /auth/*).
         if path == "/monitoring/unsubscribe":
             return self._monitoring_unsubscribe(query)
+        if path == "/monitoring/confirm":
+            return self._monitoring_confirm(query)
         if auth_required() and self._require_session() is None:
             return
         try:

@@ -4,6 +4,53 @@
 > decision would surprise a future maintainer or constrains future work.
 > Format: date · decision · reasoning · alternatives · consequences.
 
+## 2026-07-19 — R6 double opt-in: recipients confirm control of their address before any mail
+
+- **Decision:** Before a recipient can receive ANY monitoring mail it must
+  **confirm control of its address** via a tokened link. On opt-in, the store
+  marks the recipient row unconfirmed, mints an **opaque single-use
+  confirmation token stored only as a SHA-256 hash** (identical discipline to
+  R8a session tokens and the R6 unsubscribe token), and the opt-in route emails
+  a confirm link through the existing `shared/email/` seam. The confirmation
+  token **expires after 48h** (`MONITORING_CONFIRM_TTL_HOURS`; R8a's 30-day
+  session TTL is far too long for a confirm link, so 48h is the sane default,
+  not the session convention). The **tick and the PR6c send path treat an
+  unconfirmed recipient exactly like a disabled one** — enforced at the
+  persistence layer: a subscription's parent `enabled` flag is recomputed to
+  true only when it has ≥1 recipient that is both enabled AND confirmed, so a
+  chat with only unconfirmed recipients is never scheduled and never emailed.
+  **Re-opting-in while unconfirmed resends** a fresh token (a natural "resend
+  confirmation"); an expired link is refused (410) and re-opting-in issues a new
+  one. A confirm/unsubscribe link works with no session, even under
+  required-auth mode. Workspace-store **schema v4** adds
+  `confirmed`/`confirm_token_hash`/`confirm_expires_at` to the recipient table
+  (additive, PRAGMA-guarded).
+- **Reasoning:** R8a stores an account's email at sign-up but never confirms the
+  account controls it — so "registered" is not "confirmed" (the open decision
+  flagged in the recipient entry). Because R6 sends real outbound mail, an
+  account registered with someone else's address (typo or otherwise) would
+  receive unsolicited email. R6 is exactly where the email infrastructure to
+  close that gap first exists, so the confirmation step is built here, reusing
+  patterns already in the repo (hashed opaque tokens, the `shared/email/` seam,
+  tokened login-free link endpoints) rather than inventing anything. Enforcing
+  eligibility at the `enabled` recompute means "no mail until confirmed" is a
+  data-model invariant, not a check a future send path could forget.
+- **Alternatives rejected:** (a) send to the registered address without
+  confirmation — rejected: unsolicited mail to an unproven address, the exact
+  honesty gap; (b) conflate unconfirmed with the `enabled` unsubscribe flag —
+  rejected: loses the pending-vs-unsubscribed distinction a resend needs;
+  (c) a long/session-length TTL — rejected: a confirm link is a bearer
+  capability and should be short-lived; (d) verifying the email at R8a sign-up
+  instead — rejected: out of R8a's scope and it had no email sender; doing it
+  here is the minimal place it becomes possible.
+- **Consequences:** Opt-in no longer returns a token in the API response; it
+  reports an honest confirmation status (`required`/`email_sent`/`sent_to`).
+  When SMTP is unconfigured the recipient simply stays unconfirmed and the
+  response says the confirmation email could not be sent — no mail, no fake
+  success. A new `GET /api/monitoring/confirm?token=` endpoint (login-free) and
+  `MONITORING_PUBLIC_BASE_URL` (absolute link base for emails) are added. This
+  **resolves the open decision** recorded in the recipient entry below.
+
 ## 2026-07-19 — R6 scheduler: external cron against a protected endpoint, not an in-process timer
 
 - **Decision:** Scheduled workspace re-runs are driven by an **external cron
@@ -133,16 +180,13 @@
   same flow with no data-model change. If an account's email changes, the
   recipient snapshot refreshes on the next opt-in touch. Bulk/external
   recipients remain out of scope (each needs a controlling account + session).
-- **Open decision (flagged, not silently resolved):** R8a never confirms that
-  an account controls its registered email. Because R6 sends real outbound mail,
-  an account registered with someone else's address (typo or otherwise) would
-  receive unsolicited monitoring email. **Recommendation:** add a lightweight
-  double-opt-in email-confirmation step (a one-time confirm link; only a
-  confirmed recipient row is eligible to receive mail) as its own decision
-  before real sends go out in PR6c — R6 is exactly where the email
-  infrastructure to do this first exists. This is deliberately NOT bundled into
-  PR6a's language: the current model is honestly "registered email + session
-  opt-in," and calling it "verified" would overclaim until such a step exists.
+- **Resolved (see the 2026-07-19 "R6 double opt-in" entry above):** R8a never
+  confirms that an account controls its registered email, so R6 adds a
+  lightweight double-opt-in email-confirmation step — a one-time, hashed,
+  48h-expiring confirm link; only a confirmed recipient is eligible for mail,
+  enforced at the persistence layer. Until a recipient confirms, the current
+  model is honestly "registered email + session opt-in, pending confirmation"
+  — never described as "verified."
 
 ## 2026-07-19 — R6 throttling: reuse the R8b `quota_events` mechanism, scaled by active subscriptions
 
