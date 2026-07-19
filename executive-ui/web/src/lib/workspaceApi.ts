@@ -4,7 +4,10 @@
 // researchApi: {ok:false, error} — the UI shows unavailable/empty states,
 // never a fabricated analysis.
 
-import type { WorkspaceDiff, WorkspaceVersion, WorkspaceVersionSummary } from "../types";
+import type {
+  MonitoringConfirmation, MonitoringQuota, WorkspaceDiff, WorkspaceSubscription,
+  WorkspaceVersion, WorkspaceVersionSummary,
+} from "../types";
 
 const BASE = import.meta.env.VITE_EXECUTIVE_API_BASE_URL || "/executive-api";
 
@@ -60,6 +63,31 @@ export const workspaceApi = {
   diff(oppId: string) {
     return request<{ diff: WorkspaceDiff | null; note?: string }>(
       `/user-opportunities/${encodeURIComponent(oppId)}/workspace/diff`,
+    );
+  },
+
+  // Phase R6 — scheduled-monitoring subscription. GET reports the current
+  // opt-in state + recipients + the scaled daily quota (for a remaining
+  // indicator). POST opts the signed-in user in (their own account email) at
+  // the given cadence and triggers a double-opt-in confirmation email. DELETE
+  // opts the current user back out. No mail goes out until confirmed.
+  getMonitoring(oppId: string) {
+    return request<{ subscription: WorkspaceSubscription | null; quota: MonitoringQuota | null }>(
+      `/user-opportunities/${encodeURIComponent(oppId)}/workspace/monitoring`,
+    );
+  },
+
+  subscribeMonitoring(oppId: string, cadenceHours: number) {
+    return request<{ subscription: WorkspaceSubscription; confirmation: MonitoringConfirmation }>(
+      `/user-opportunities/${encodeURIComponent(oppId)}/workspace/monitoring`,
+      { method: "POST", body: JSON.stringify({ cadence_hours: cadenceHours }) },
+    );
+  },
+
+  unsubscribeMonitoring(oppId: string) {
+    return request<{ unsubscribed: boolean; active_recipients: number }>(
+      `/user-opportunities/${encodeURIComponent(oppId)}/workspace/monitoring`,
+      { method: "DELETE" },
     );
   },
 };

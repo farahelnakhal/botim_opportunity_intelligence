@@ -13,7 +13,8 @@
 import { useEffect, useState } from "react";
 import { workspaceApi } from "../lib/workspaceApi";
 import type {
-  WorkspaceDiff, WorkspaceVersion, WorkspaceVersionSummary,
+  MonitoringQuota, WorkspaceDiff, WorkspaceSubscription, WorkspaceVersion,
+  WorkspaceVersionSummary,
 } from "../types";
 import Icon from "./Icon";
 
@@ -37,6 +38,115 @@ const CHAIN_STEPS = [
 
 function PreliminaryBadge() {
   return <span className="ws-prelim-badge" data-testid="preliminary-badge">PRELIMINARY</span>;
+}
+
+// Phase R6 — minimal opt-in / cadence control for scheduled monitoring email.
+// The signed-in user opts THEMSELVES in (their own account address); a
+// double-opt-in confirmation email must be clicked before any mail is sent.
+// The scaled daily quota is shown so a user is never silently cut off.
+function MonitoringSection({ oppId }: { oppId: string }) {
+  const [sub, setSub] = useState<WorkspaceSubscription | null>(null);
+  const [quota, setQuota] = useState<MonitoringQuota | null>(null);
+  const [cadence, setCadence] = useState(6);
+  const [note, setNote] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => {
+    const res = await workspaceApi.getMonitoring(oppId);
+    if (!res.ok) { setUnavailable(true); return; }
+    setUnavailable(false);
+    setSub(res.data.subscription);
+    setQuota(res.data.quota);
+    if (res.data.subscription) setCadence(res.data.subscription.cadence_hours);
+  };
+  useEffect(() => {
+    setNote(null); setErr(null); setSub(null); setUnavailable(false);
+    load();
+  }, [oppId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const optIn = async () => {
+    setBusy(true); setErr(null); setNote(null);
+    const res = await workspaceApi.subscribeMonitoring(oppId, cadence);
+    setBusy(false);
+    if (!res.ok) { setErr(res.error); return; }
+    setNote(res.data.confirmation.note);
+    await load();
+  };
+  const optOut = async () => {
+    setBusy(true); setErr(null); setNote(null);
+    const res = await workspaceApi.unsubscribeMonitoring(oppId);
+    setBusy(false);
+    if (!res.ok) { setErr(res.error); return; }
+    await load();
+  };
+
+  if (unavailable) {
+    return (
+      <div className="ws-section" data-testid="monitoring-section">
+        <h4>Scheduled monitoring</h4>
+        <p className="empty-note" data-testid="monitoring-unavailable">
+          Scheduled monitoring email requires sign-in to be enabled on this deployment.
+        </p>
+      </div>
+    );
+  }
+
+  const me = sub?.recipients?.find((r) => r.enabled);
+  const on = !!sub?.enabled;
+  const pending = !!me?.pending_confirmation;
+
+  return (
+    <div className="ws-section" data-testid="monitoring-section">
+      <h4>Scheduled monitoring</h4>
+      <p className="empty-note">
+        Re-runs this analysis on a schedule and emails you <strong>only</strong> when
+        something materially changes — never for an unchanged, partial, or failed run.
+        Changed items stay preliminary until you review them.
+      </p>
+      {err && <div className="error-banner" style={{ marginBottom: 8 }}>{err}</div>}
+
+      <div className="uop-form" style={{ marginBottom: 10 }}>
+        <label>Re-run every (hours)</label>
+        <input type="number" min={4} max={720} value={cadence} data-testid="monitoring-cadence"
+          onChange={(e) => setCadence(Number(e.target.value))} disabled={busy} />
+      </div>
+
+      {on && !pending && (
+        <p data-testid="monitoring-on">
+          On — every {sub!.cadence_hours}h, emailing your account address on a material change.
+        </p>
+      )}
+      {pending && (
+        <div className="banner-note" data-testid="monitoring-pending" style={{ marginBottom: 8 }}>
+          <Icon name="alert" />
+          <span>Check your email to confirm — no monitoring email is sent until you
+            click the confirmation link.</span>
+        </div>
+      )}
+      {note && <p className="empty-note" data-testid="monitoring-note">{note}</p>}
+      {quota && (
+        <p className="empty-note" data-testid="monitoring-quota">
+          Scheduled runs today: {quota.used}/{quota.limit} used · {quota.remaining} remaining.
+        </p>
+      )}
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <button type="button" className="btn btn-primary" disabled={busy}
+          data-testid="monitoring-optin" onClick={optIn}>
+          {busy ? "Saving…" : pending ? "Resend confirmation"
+            : on ? "Update cadence" : "Turn on monitoring"}
+        </button>
+        {(on || pending) && (
+          <button type="button" className="btn" disabled={busy}
+            data-testid="monitoring-optout" onClick={optOut}>
+            Turn off
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export default function WorkspacePanel({ oppId }: { oppId: string }) {
@@ -126,6 +236,8 @@ export default function WorkspacePanel({ oppId }: { oppId: string }) {
         authoritative evidence. Claims stay pending until a human reviews them (Research
         workspace); the preliminary score is computed and capped by the real scoring engine.
       </div>
+
+      <MonitoringSection oppId={oppId} />
 
       {error && <div className="error-banner" style={{ marginBottom: 12 }}>{error}</div>}
 

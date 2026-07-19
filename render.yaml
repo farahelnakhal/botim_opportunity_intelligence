@@ -62,3 +62,52 @@ services:
         value: brave
       - key: BRAVE_SEARCH_API_KEY
         sync: false
+
+      # ---- Scheduled monitoring + email (Phase R6) --------------------- #
+      # Scheduled re-runs are driven by an EXTERNAL cron (GitHub Actions —
+      # see .github/workflows/monitoring-tick.yml) hitting POST
+      # /api/monitoring/tick, because the free tier sleeps on idle. Two
+      # secrets are prompted for (never committed); the GitHub side needs the
+      # SAME token as a repo secret plus a MONITORING_TICK_URL repo variable —
+      # that is a SEPARATE, also-required setup step (see executive-ui/README).
+      # MONITORING_TICK_TOKEN must equal the GitHub repo secret of the same name
+      - key: MONITORING_TICK_TOKEN
+        sync: false
+      # HMAC key for signing unsubscribe links (rotating it dead-links old ones)
+      - key: MONITORING_UNSUBSCRIBE_SIGNING_KEY
+        sync: false
+      - key: MONITORING_TICK_MAX_CHATS
+        value: "25"
+      - key: MONITORING_MIN_CADENCE_HOURS
+        value: "4"
+      - key: MONITORING_DEFAULT_CADENCE_HOURS
+        value: "6"
+      - key: MONITORING_CONFIRM_TTL_HOURS
+        value: "48"
+      # per-day cap PER ACTIVE SUBSCRIPTION (scaled by the owner's sub count)
+      - key: QUOTA_MONITORING_WORKSPACE_RUN_PER_DAY
+        value: "6"
+      # Absolute base for links in emails; falls back to the request Host
+      # header if unset. Set to the real service URL for correct links.
+      - key: MONITORING_PUBLIC_BASE_URL
+        value: https://botim-opportunity-intelligence.onrender.com
+
+      # ---- Outbound email relay (SMTP; pure stdlib, no SDK) ------------- #
+      # Provider-neutral: point at any SMTP relay (SES/Postmark/Resend/...).
+      # With SMTP_HOST/SMTP_FROM unset, monitoring + confirmation email is an
+      # honest "not sent (no SMTP configured)" no-op — the rest of the app is
+      # unaffected. Host/From/credentials are deployment-specific -> prompted.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_STARTTLS
+        value: "true"
+      - key: SMTP_SSL
+        value: "false"

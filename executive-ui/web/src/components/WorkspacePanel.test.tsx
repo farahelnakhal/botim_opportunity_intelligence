@@ -162,4 +162,62 @@ describe("WorkspacePanel (Phase R5 PR4-UI)", () => {
     await waitFor(() =>
       expect(screen.getByText(/workspace API is unreachable/)).toBeInTheDocument());
   });
+
+  // Phase R6 — the scheduled-monitoring opt-in section
+  it("shows quota remaining and moves to the confirmation-pending state on opt-in", async () => {
+    let subscribed = false;
+    const pendingSub = {
+      opportunity_id: OPP, owner_user_id: "USER-1", enabled: false, cadence_hours: 6,
+      last_run_at: null, next_run_at: null, last_notified_version: null,
+      last_outcome: "dormant_pending_confirmation",
+      recipients: [{ recipient_user_id: "USER-1", recipient_email: "me@example.com",
+        enabled: true, confirmed: false, pending_confirmation: true, opted_in_at: "t" }],
+    };
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/workspace/monitoring")) {
+        if (init?.method === "POST") {
+          subscribed = true;
+          return { ok: true, json: async () => ({
+            subscription: pendingSub,
+            confirmation: { required: true, email_sent: true, sent_to: "me@example.com",
+              note: "confirmation email sent to me@example.com; monitoring starts once you confirm" },
+          }) } as Response;
+        }
+        return { ok: true, json: async () => ({
+          subscription: subscribed ? pendingSub : null,
+          quota: { action: "monitoring_workspace_run", used: 0, limit: 6, remaining: 6 },
+        }) } as Response;
+      }
+      if (url.includes("/workspace/versions")) return { ok: true, json: async () => ({ versions: [] }) } as Response;
+      if (url.includes("/workspace/diff")) return { ok: true, json: async () => ({ diff: null }) } as Response;
+      return { ok: true, json: async () => ({ workspace: null, note: "none yet" }) } as Response;
+    }) as unknown as typeof fetch;
+
+    render(<WorkspacePanel oppId={OPP} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("monitoring-quota")).toHaveTextContent("6 remaining"));
+    expect(screen.getByTestId("monitoring-optin")).toHaveTextContent("Turn on monitoring");
+    await userEvent.click(screen.getByTestId("monitoring-optin"));
+    await waitFor(() =>
+      expect(screen.getByTestId("monitoring-pending")).toBeInTheDocument());
+    expect(screen.getByTestId("monitoring-note")).toHaveTextContent("confirmation email sent");
+    expect(screen.getByTestId("monitoring-optin")).toHaveTextContent("Resend confirmation");
+  });
+
+  it("shows an honest unavailable note when monitoring needs sign-in on this deploy", async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/workspace/monitoring")) {
+        return { ok: false, status: 403,
+                 json: async () => ({ error: "requires sign-in to be enabled" }) } as Response;
+      }
+      if (url.includes("/workspace/versions")) return { ok: true, json: async () => ({ versions: [] }) } as Response;
+      if (url.includes("/workspace/diff")) return { ok: true, json: async () => ({ diff: null }) } as Response;
+      return { ok: true, json: async () => ({ workspace: null, note: "none yet" }) } as Response;
+    }) as unknown as typeof fetch;
+    render(<WorkspacePanel oppId={OPP} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("monitoring-unavailable")).toBeInTheDocument());
+  });
 });

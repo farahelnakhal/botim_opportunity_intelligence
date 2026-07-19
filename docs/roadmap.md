@@ -148,17 +148,32 @@ Ships as a sequence of focused PRs:
   backed analysis distinguishing confirmed / preliminary / assumed / unknown,
   with a recommendation and next steps; follow-ups don't re-run the chain.
 
-## Phase R6 — Scheduled monitoring re-run + email-on-change
+## Phase R6 — Scheduled monitoring re-run + email-on-change — ✅ DONE (this branch)
 
 **Depends on:** R5 (re-run the chain), R8 (recipients need identity), an
 always-on scheduler, and email infrastructure.
 - Per-saved-chat re-run on a configurable cadence; snapshot + diff the
   workspace; email the delta of changed numbers/predictions to opted-in
   recipients; changed items stay preliminary until reviewed.
-- **Gotchas (decide before building):** the free-tier container sleeps — needs
-  an always-on plan or external cron trigger; no email sender exists yet
-  (provider + verified sender + opt-in/unsubscribe); throttling/budget per
-  user; concurrency with live edits.
+- **Delivered (PR6a–d, decision-log 2026-07-19):** per-chat
+  `workspace_subscriptions` + multi-recipient child table (workspace-store
+  schema v5) with **double-opt-in** confirmation and **deterministic signed
+  unsubscribe** links; external-cron tick `POST /api/monitoring/tick`
+  (`.github/workflows/monitoring-tick.yml`, hourly, shared-secret, idempotent
+  claim-and-advance, skip-if-running) calling the same `build_workspace`
+  orchestrator with `trigger='monitoring'`; `shared/email/` pure-stdlib SMTP
+  seam + `monitoring_digest.py` emailing confirmed recipients **only on a
+  material change** (normalized-claim-text diff over `compare_versions`,
+  composite ≥0.01; degraded/no-change/failed send nothing; overclaim guard);
+  per-user quota scaled by active subscriptions; Analysis-tab opt-in/cadence/
+  quota UI; all env declared in `render.yaml`. Nothing writes `knowledge-base/`.
+- **Gotchas (decided, per decision-log):** the free tier sleeps → **external
+  GitHub Actions cron** (not an in-process scheduler); email is **stdlib
+  `smtplib`** against an operator SMTP relay (no SDK); throttling via the R8b
+  quota mechanism; concurrency handled by claim-and-advance + skip-if-running.
+- **Deferred to backlog (not R6):** chat-sharing/multi-recipient teammate flow
+  (schema already supports N recipients), `List-Unsubscribe` one-click headers,
+  HTML email bodies, and password reset (now unblocked by the email seam).
 
 ## Phase R7 — Attachments + internal-document ingestion
 

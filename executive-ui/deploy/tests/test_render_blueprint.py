@@ -57,6 +57,27 @@ class RenderBlueprint(unittest.TestCase):
         block = _block("BOTIM_LLM_MODEL")
         self.assertNotRegex(block, r"value:.*8b-instant")
 
+    def test_r6_monitoring_secrets_are_on_request_never_committed(self):
+        # the tick token, the unsubscribe signing key, and the SMTP password
+        # are real secrets — declared for the deploy but prompted, never a value
+        for key in ("MONITORING_TICK_TOKEN", "MONITORING_UNSUBSCRIBE_SIGNING_KEY",
+                    "SMTP_HOST", "SMTP_FROM", "SMTP_USERNAME", "SMTP_PASSWORD"):
+            block = _block(key)
+            self.assertIsNotNone(block, f"{key} should be declared in the blueprint")
+            self.assertIn("sync: false", block, key)
+            self.assertNotRegex(block, r"\n\s*value:", key)
+
+    def test_r6_safe_defaults_are_committed_values(self):
+        # non-secret tunables ship with a committed default so the feature is
+        # not inert on deploy (cadence bounds, caps, quota, SMTP transport)
+        for key in ("MONITORING_TICK_MAX_CHATS", "MONITORING_MIN_CADENCE_HOURS",
+                    "MONITORING_DEFAULT_CADENCE_HOURS", "MONITORING_CONFIRM_TTL_HOURS",
+                    "QUOTA_MONITORING_WORKSPACE_RUN_PER_DAY", "SMTP_PORT"):
+            block = _block(key)
+            self.assertIsNotNone(block, f"{key} should be declared in the blueprint")
+            self.assertRegex(block, r"value:\s*\S", key)
+            self.assertNotIn("sync: false", block, key)
+
 
 if __name__ == "__main__":
     unittest.main()

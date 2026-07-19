@@ -211,7 +211,16 @@ def registration_open():
 # QUOTA_CHAT_PER_DAY, QUOTA_RESEARCH_EXECUTE_PER_DAY, ...
 QUOTA_DEFAULTS = {"chat": 200, "research_execute": 25, "research_extract": 25,
                   "workspace_refresh": 25, "monitoring_run": 25,
-                  "document_upload": 25}
+                  "document_upload": 25, "monitoring_workspace_run": 6}
+
+
+def monitoring_run_quota_limit(ws, owner_user_id):
+    """R6 scheduled-run quota, SCALED by the owner's active subscriptions so a
+    multi-chat user is not silently cut off at a flat cap: base-per-subscription
+    (QUOTA_MONITORING_WORKSPACE_RUN_PER_DAY, default 6) × active subscriptions."""
+    base = quota_limit("monitoring_workspace_run")
+    active = ws.count_enabled_subscriptions(owner_user_id) if owner_user_id else 0
+    return base * max(1, active)
 
 
 def quota_limit(action):
@@ -854,7 +863,16 @@ class Handler(BaseHTTPRequestHandler):
         if user is None:
             return self._error(401, "sign in to manage monitoring email")
         if method == "GET":
-            return self._json({"subscription": ws.get_subscription(opp_id)})
+            sub = ws.get_subscription(opp_id)
+            owner_id = (sub or {}).get("owner_user_id") or opp.get("owner_user_id") or user["id"]
+            quota = None
+            try:
+                quota = get_auth_store().quota_status(
+                    owner_id, "monitoring_workspace_run",
+                    monitoring_run_quota_limit(ws, owner_id))
+            except auth_store.AuthError:
+                pass  # honest: no quota view rather than a crash
+            return self._json({"subscription": sub, "quota": quota})
         if method == "POST":
             body = self._read_json_body()
             cadence = body.get("cadence_hours")
@@ -1030,6 +1048,17 @@ class Handler(BaseHTTPRequestHandler):
         except user_store.StoreError:
             ws.record_run_result(opp_id, "failed: opportunity no longer exists")
             return "failed"
+        # R6 quota — count against the owner's per-user daily cap (scaled by
+        # active subscriptions) BEFORE the expensive chain. Over quota -> skip
+        # honestly, no build, no email. check_quota both counts and enforces.
+        owner = claimed.get("owner_user_id")
+        if owner:
+            try:
+                get_auth_store().check_quota(owner, "monitoring_workspace_run",
+                                             monitoring_run_quota_limit(ws, owner))
+            except auth_store.AuthError:
+                ws.record_run_result(opp_id, "skipped_quota")
+                return "skipped_quota"
         try:
             search_provider, llm, llm_cfg = self._resolve_build_providers()
             version = workspace_pkg.build_workspace(

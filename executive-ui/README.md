@@ -204,6 +204,37 @@ host, or a different free/paid provider.
 environment variables run unchanged on any Docker-capable platform (Fly.io,
 Railway, a VPS, ...) — Render is just the recommended free path.
 
+## Enable scheduled monitoring email (Phase R6) — TWO separate setup steps
+
+Scheduled analysis re-runs + email-on-change need configuration in **two
+distinct places**. It's easy to do one and assume you're done — you need both,
+or the feature stays inert (fails safe: no crash, just no scheduled email).
+
+**Step 1 — the app (Render env), so the app can send and verify links.**
+`render.yaml` already declares these; fill in the prompted secrets in the Render
+dashboard:
+- `MONITORING_TICK_TOKEN` (secret) — the shared secret the tick endpoint checks.
+- `MONITORING_UNSUBSCRIBE_SIGNING_KEY` (secret) — HMAC key for unsubscribe links.
+- `SMTP_HOST` / `SMTP_FROM` / `SMTP_USERNAME` / `SMTP_PASSWORD` (secrets) — any
+  SMTP relay (SES/Postmark/Resend/…). Without these, email is an honest no-op.
+- `MONITORING_PUBLIC_BASE_URL` — your real service URL (for correct email links).
+- Sane defaults (`MONITORING_TICK_MAX_CHATS`, cadence bounds,
+  `MONITORING_CONFIRM_TTL_HOURS`, `QUOTA_MONITORING_WORKSPACE_RUN_PER_DAY`, SMTP
+  transport) ship committed — override only if needed.
+- Note: scheduled monitoring requires `BOTIM_AUTH_MODE=required` (recipients are
+  tied to signed-in accounts).
+
+**Step 2 — the trigger (GitHub repo settings), so something actually fires the
+tick.** The container sleeps on the free tier, so an external cron drives it
+(`.github/workflows/monitoring-tick.yml`, hourly). In the GitHub repo:
+- Repo **variable** `MONITORING_TICK_URL` = your deployed base URL
+  (e.g. `https://botim-opportunity-intelligence.onrender.com`).
+- Repo **secret** `MONITORING_TICK_TOKEN` = **the same value** as the Render
+  secret in Step 1 (they must match, or the tick is rejected with 401).
+
+If either step is skipped the workflow logs "skipping" (or the app 404s the
+tick) and no scheduled email is ever sent — never a silent partial state.
+
 ## Plain-language UI (no codes)
 
 The interface is written for a non-technical audience: internal identifiers (opportunity, evidence, experiment, segment, and prediction codes) never appear on screen. Opportunities are shown by name, evidence by its title, experiments by their title, and monitoring "affected" items are mapped back to opportunity names (`web/src/lib/labels.ts`). The identifiers still exist in the engines and API — they're just not surfaced in the UI.

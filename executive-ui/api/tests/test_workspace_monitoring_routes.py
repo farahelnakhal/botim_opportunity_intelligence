@@ -59,7 +59,8 @@ class WorkspaceMonitoringRoutes(unittest.TestCase):
     def tearDown(self):
         os.environ["BOTIM_AUTH_MODE"] = "off"
         for var in ("MONITORING_TICK_TOKEN", "MONITORING_TICK_MAX_CHATS",
-                    "MONITORING_UNSUBSCRIBE_SIGNING_KEY", "MONITORING_PUBLIC_BASE_URL"):
+                    "MONITORING_UNSUBSCRIBE_SIGNING_KEY", "MONITORING_PUBLIC_BASE_URL",
+                    "QUOTA_MONITORING_WORKSPACE_RUN_PER_DAY"):
             os.environ.pop(var, None)
 
     def _req(self, method, path, payload=None, cookie=None):
@@ -197,6 +198,65 @@ class WorkspaceMonitoringRoutes(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as cm:
             self._req("POST", base, {"cadence_hours": 1}, cookie=alice)
         self.assertEqual(cm.exception.code, 400)
+
+    # -- adversarial: recipient-list tampering ------------------------------ #
+
+    def test_opt_in_ignores_injected_recipient_fields(self):
+        # a caller cannot add a victim address or reassign ownership by
+        # smuggling fields into the body — the recipient is ALWAYS the session
+        # account's own registered email (no free-text recipients ever)
+        os.environ["BOTIM_AUTH_MODE"] = "required"
+        alice_user, alice = self._register("r6-tamper@example.com")
+        opp = self._make_opp(alice)
+        base = f"/api/user-opportunities/{opp['id']}/workspace/monitoring"
+        _, data, _ = self._req("POST", base, {
+            "cadence_hours": 6,
+            "recipient_email": "victim@evil.example.com",
+            "recipient_user_id": "USER-999999999999",
+            "owner_user_id": "USER-999999999999",
+            "recipients": [{"recipient_email": "victim2@evil.example.com"}],
+        }, cookie=alice)
+        sub = data["subscription"]
+        self.assertEqual([r["recipient_email"] for r in sub["recipients"]],
+                         ["r6-tamper@example.com"])
+        self.assertEqual(sub["owner_user_id"], alice_user["id"])
+        self.assertEqual(data["confirmation"]["sent_to"], "r6-tamper@example.com")
+
+    # -- adversarial: double-fire on retry ---------------------------------- #
+
+    def test_double_fire_on_retry_builds_exactly_one_version(self):
+        os.environ["BOTIM_AUTH_MODE"] = "required"
+        os.environ["MONITORING_TICK_TOKEN"] = "tick-secret"
+        opp, _ = self._opt_in_confirmed("r6-doublefire@example.com")
+        self._force_due(opp["id"])
+        # two ticks racing the same due window (an at-least-once cron retry):
+        # only the first claims it; the second finds nothing due
+        _, s1 = self._tick()
+        _, s2 = self._tick()
+        self.assertEqual(s1["claimed"] + s2["claimed"], 1)
+        ws = server.get_workspace_store()
+        complete = [v for v in ws.list_versions(opp["id"]) if v["status"] == "complete"]
+        self.assertEqual(len(complete), 1)          # exactly one build, never two
+
+    # -- quota (scaled by active subscriptions, surfaced for the UI) -------- #
+
+    def test_tick_enforces_the_scaled_daily_quota(self):
+        os.environ["BOTIM_AUTH_MODE"] = "required"
+        os.environ["MONITORING_TICK_TOKEN"] = "tick-secret"
+        os.environ["QUOTA_MONITORING_WORKSPACE_RUN_PER_DAY"] = "1"   # x1 active sub
+        opp, cookie = self._opt_in_confirmed("r6-quota@example.com")
+        base = f"/api/user-opportunities/{opp['id']}/workspace/monitoring"
+        self._force_due(opp["id"])
+        _, s1 = self._tick()
+        self.assertEqual(s1.get("no_change"), 1)      # first run consumes the 1 allowed
+        self._force_due(opp["id"])
+        _, s2 = self._tick()
+        self.assertEqual(s2.get("skipped_quota"), 1)  # second is capped, no build
+        # the GET surfaces the quota so the UI can show remaining
+        _, got, _ = self._req("GET", base, cookie=cookie)
+        self.assertEqual(got["quota"]["limit"], 1)
+        self.assertEqual(got["quota"]["used"], 1)
+        self.assertEqual(got["quota"]["remaining"], 0)
 
     # -- tokened link endpoints (login-free) -------------------------------- #
 
