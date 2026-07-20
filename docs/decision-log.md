@@ -4,6 +4,102 @@
 > decision would surprise a future maintainer or constrains future work.
 > Format: date · decision · reasoning · alternatives · consequences.
 
+## 2026-07-20 — capability-vs-claim build-out: scope + the #4 non-goal
+
+- **Decision:** The four gaps in `docs/capability-vs-claim.md` become a
+  roadmap-scale build-out (`docs/roadmap.md`, "Capability-vs-claim build-out"),
+  approved one phase at a time starting with **R9a**. **Claim #4
+  ("auto-update models/data") gets NO build phase** — it was a mis-wording of
+  behavior that already ships (monitoring/R6 produce candidate evidence +
+  preliminary workspace versions + notifications, and stop pending human
+  review). The read-only-KB + human-approval invariant is **not relaxed**; the
+  claim wording was corrected in `capability-vs-claim.md` instead.
+- **Reasoning:** Auto-updating authoritative data would require removing a
+  founding invariant, not adding a feature; the honest fix is to reword the
+  claim, not to build against it.
+- **Consequences:** #1→R9(a/b/c), #2→C1→C2, #3→R10, #5→P1; #4 closed as
+  documentation. The R9a-specific decisions follow.
+
+## 2026-07-20 — R9a: two source adapters behind the existing seam, everything else out
+
+- **Decision:** Social listening ships as **new provider adapters behind
+  `shared/research/providers.py`** — **Apple App Store customer-reviews RSS**
+  (public, per-app/per-country, no auth) and **Reddit** (official API, OAuth
+  key, rate-limited) — plus the shared source-tier layer. **Explicitly out of
+  scope:** Google Play reviews (no official arbitrary-app API), X / Instagram /
+  TikTok / Facebook (no clean API, ToS-hostile to scraping), and
+  WhatsApp/Telegram (private, consent-gated). No scraping aggregator is
+  purchased at this stage.
+- **Reasoning:** "Social scraping" is not one uniform capability — each source
+  has a different access model, ToS, rate limit, and cost. Only Apple RSS and
+  Reddit are cleanly + lawfully buildable within the existing bounded-adapter
+  seam; the rest need a paid aggregator or a fundamentally different
+  architecture, which is not justified now.
+- **Alternatives rejected:** a generic "social scraper" (misrepresents the
+  access reality, invites ToS breaches); a paid aggregator (cost/architecture
+  change — a future *new* phase, never a retrofit into R9); scraping
+  WhatsApp/Telegram (private data — belongs to consented Merchant Voice, not
+  scraping).
+- **Consequences:** Adding a source later = a new adapter (or, for a paid
+  aggregator, a new phase), never a rewrite. Adapters are network-injectable
+  and offline-tested like the Brave adapter and `adapter_regulator.py`; live
+  Reddit use needs a key + explicit ops opt-in.
+
+## 2026-07-20 — R9a: human-curated source-tier/provenance layer (shared with C2)
+
+- **Decision:** The research store gains a **source-tier** tag — **T1**
+  (government/regulator/official statistics) · **T2** (industry/analyst
+  reports) · **T3** (reputable press) · **T4** (general web/forums/social) —
+  assigned from a **human-curated registry** (domain/publisher → tier). The tier
+  is **never inferred by the LLM**. This is a shared research-platform
+  capability: R9a uses it for source quality; C2 uses it as the executable
+  meaning of "verified sources".
+- **Reasoning:** "Verified sources" was vague in the product docs; a curated
+  tier registry makes it concrete, auditable, and deterministic, and keeps the
+  no-fabrication discipline (a machine never decides a source is authoritative).
+- **Alternatives rejected:** LLM-scored source trust (non-deterministic, spoofable
+  by page content — violates data-never-instructions); no tiering (leaves
+  "verified" undefined, the original problem).
+- **Consequences:** A registry must be curated and maintained (a real ongoing
+  cost, logged as a risk). Tier travels on every candidate source and gates
+  C2's corroboration rule.
+
+## 2026-07-20 — R9: multi-language querying first; non-English content deferred to R9c
+
+- **Decision:** R9's first cut (R9a/R9b) does **multi-language querying only** —
+  issue/localize search terms per language and tag results with the query
+  language. **Translating and grounding non-English source *content*** through
+  the evidence/wordguard/grounding pipeline is its **own later sub-phase
+  (R9c)**, scoped separately once R9a/b prove out. Language priority: **Arabic +
+  English first-class, Hindi + Urdu second, Malayalam + Tagalog deferred**
+  (the guides name five; four was an under-count).
+- **Reasoning:** Querying vs source-content are very different scopes; bundling
+  them would balloon R9 and drag in translation-fidelity + non-English grounding
+  risk before the adapters are even proven. Sequencing de-risks.
+- **Alternatives rejected:** bundle content translation into R9a (scope blowout,
+  risk); English-only (fails the UAE/GCC validation case's real language mix).
+- **Consequences:** R9a/b emit non-English *queries* but store source text as
+  retrieved; any non-English body handling waits for R9c (which must preserve
+  originals and mark translations as derived, never fabricated).
+
+## 2026-07-20 — R9: real external content inherits the Merchant-Voice privacy/security gate
+
+- **Decision:** Because R9 ingests **real, PII-bearing public content** (reviews,
+  forum posts), it inherits the **same privacy/security-review gate** the
+  roadmap already imposes on non-synthetic Merchant Voice data. R9a builds and
+  tests the adapters **offline (injected network)**; **live ingestion of real
+  content is not enabled until that review passes**, enforced the same way as
+  the Merchant Voice synthetic-only guard (fail-closed, explicit opt-in).
+- **Reasoning:** "Public" is not "consent-free" or PII-free; shipping live
+  ingestion without the review would breach the repo's own data-handling
+  posture. Offline-first lets the code land and be reviewed without that risk.
+- **Alternatives rejected:** ship live ingestion with R9a (bypasses the gate the
+  repo applies elsewhere — inconsistent and risky); skip real data entirely
+  (defeats the feature). 
+- **Consequences:** R9a is fully testable and mergeable offline; a documented
+  privacy/security review + explicit enablement is a prerequisite for any real
+  data flowing in. H2 adds the PII/injection/ToS hardening tests on top.
+
 ## 2026-07-19 — R6 diff-to-email: materiality gate, claim-text diffing, and a signed unsubscribe token
 
 - **Decision:** After a scheduled `monitoring` build completes, the tick decides
