@@ -692,6 +692,36 @@ select.field-input{appearance:none; -webkit-appearance:none; cursor:pointer; bac
 .research-execute{align-self:flex-start;margin:6px 0 14px;}
 .citation-external{border-style:dashed;}
 
+/* --- Phase C1: deterministic calculators --------------------------------- */
+.calc-field{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600;color:var(--text-dim);max-width:520px;margin-bottom:10px;}
+.calc-field span em{font-weight:400;font-style:normal;color:var(--text-dim);}
+.calc-field select,.calc-field input,.calc-input-row input,.calc-input-row select,.calc-save input{
+  padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font:inherit;}
+.calc-desc{font-size:13px;color:var(--text);margin:2px 0 6px;}
+.calc-note-line{font-size:12px;color:var(--text-dim);margin:0 0 2px;}
+.calc-inputs{display:flex;flex-direction:column;gap:8px;max-width:720px;margin:12px 0;}
+.calc-input-row{display:grid;grid-template-columns:1fr 130px 1.2fr;gap:8px;align-items:end;}
+.calc-input-row .calc-field{margin-bottom:0;}
+.calc-actions{margin:10px 0 4px;}
+.calc-result{margin-top:18px;border-top:1px solid var(--border);padding-top:14px;}
+.calc-outputs{display:flex;flex-wrap:wrap;gap:12px;margin:8px 0 14px;}
+.calc-output{display:flex;flex-direction:column;gap:2px;padding:10px 14px;border:1px solid var(--border);border-radius:10px;background:var(--surface);min-width:150px;}
+.calc-output-label{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-dim);}
+.calc-output-value{font-size:18px;font-weight:700;color:var(--text);}
+.calc-output-reason{font-size:11px;color:var(--text-dim);}
+.calc-steps-wrap{overflow-x:auto;}
+.calc-steps{border-collapse:collapse;font-size:12.5px;width:100%;min-width:520px;}
+.calc-steps th,.calc-steps td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);}
+.calc-steps th{color:var(--text-dim);font-weight:600;}
+.calc-input-basis{list-style:none;padding:0;margin:8px 0 12px;font-size:12.5px;display:flex;flex-direction:column;gap:3px;}
+.calc-basis{font-size:11px;padding:1px 6px;border-radius:6px;background:var(--surface);border:1px solid var(--border);color:var(--text-dim);}
+.calc-basis-A{color:var(--warn,#9a6b00);}
+.calc-note{color:var(--text-dim);}
+.calc-disclaimer{font-size:12px;color:var(--text-dim);font-style:italic;border-left:3px solid var(--border);padding-left:10px;margin:6px 0;}
+.calc-save{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px;}
+.calc-saved-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;}
+.calc-saved-title{font-weight:600;}
+
 /* --- Phase R4a: monitoring events (manual runs) --------------------------- */
 .uop-mon-events{margin-top:18px;}
 .uop-mon-events h4{margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-dim);}

@@ -21,6 +21,10 @@ INTENTS = ("portfolio_summary", "opportunity_explanation", "opportunity_comparis
            "new_opportunity_analysis",
            # Phase R3 — human-approved external web-research candidates.
            "external_research_summary",
+           # Phase C1 — a deterministic calculator request (market sizing, unit
+           # economics, break-even, payback, ...). The model never does the
+           # arithmetic; it marshals the user's numbers into a calculator tool.
+           "deterministic_calculation",
            # Phase 3 — deterministic, non-product-analysis fallbacks so a
            # greeting or a methodology question is never mistaken for a new
            # product idea (see classify()).
@@ -85,6 +89,16 @@ _RULES = [
         r"\b(external research|web research|internet research|online research|"
         r"research run|research (findings?|results?|sources?)( |$)|"
         r"what did (the |our )?(external |web )?research (find|say|show))\b", re.I)),
+    # Phase C1 — deterministic calculators. Scoped to explicit calculation
+    # vocabulary so strategic/analytical questions ("analyse the value prop")
+    # keep their existing routing; a bare "size the market" with no numbers
+    # still routes here and the model then asks for the required inputs rather
+    # than inventing them.
+    ("deterministic_calculation", re.compile(
+        r"\b(calculat|compute|work out|"
+        r"\bTAM\b|\bSAM\b|\bSOM\b|market siz(e|ing)|size the market|how (big|large) is the market|"
+        r"break.?even|payback( period)?|\bCAGR\b|growth projection|"
+        r"unit (economics|contribution)|contribution margin|payments? take)\b", re.I)),
     ("opportunity_comparison", re.compile(r"\b(compare|versus|vs\.?|stronger|strongest|which .*opportunit)\b", re.I)),
     ("challenge_hypothesis", re.compile(r"\b(challenge|should (botim|we) build|devil'?s advocate|poke holes|steelman|stress.test|why might .*fail|reject this)\b", re.I)),
     # Merchant Voice (Phase 5) — deliberately scoped to explicit merchant-
@@ -247,6 +261,11 @@ def tool_plan(intent, ids, message):
     elif intent == "external_research_summary":
         plan.append(("get_external_research",
                      {"opportunity_ref": opp} if opp else {}))
+    elif intent == "deterministic_calculation":
+        # Seed the catalog so the model learns which calculator + required
+        # inputs to use, then marshals the USER's numbers into run_calculator
+        # (or asks for them). It must never do the arithmetic itself.
+        plan.append(("list_calculators", {}))
     elif intent == "executive_brief":
         if opp:
             plan.append(("get_executive_brief", {"opp_id": opp}))
@@ -349,6 +368,7 @@ ANSWER_TYPE = {
     "merchant_wtp_signals": "merchant_feedback", "merchant_contradictions": "merchant_feedback",
     "new_opportunity_analysis": "new_opportunity_analysis",
     "external_research_summary": "analysis",
+    "deterministic_calculation": "analysis",
     "clarification_needed": "clarification", "general_explanation": "analysis",
     "unknown_or_unsupported": "analysis",
 }

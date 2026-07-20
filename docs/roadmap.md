@@ -229,7 +229,7 @@ private documents must be scoped to a user).
   claims are human-reviewed external research), password reset once R6
   email exists.
 
-## Phase C1 — Deterministic calculations
+## Phase C1 — Deterministic calculations — ✅ DONE
 
 **Value:** transparent market-sizing / unit-economics math for briefs and the SME
 case's deck. Independent of R-phases; can run in parallel after R1.
@@ -237,6 +237,21 @@ case's deck. Independent of R-phases; can run in parallel after R1.
 - Server-side deterministic calculators (inputs, formula, outputs all shown);
   no LLM arithmetic; results embeddable in reports/chat with full working shown.
 - **Acceptance:** same inputs → same outputs; every number traceable to inputs.
+- **Delivered (decision-log 2026-07-20 "C1 deterministic calculators"):**
+  `shared/calculators/` — a pure typed-step engine (self-consistency check;
+  F/E/A provenance with worst-of label propagation; raw-vs-display rounding
+  split; honest never/undefined) with **9 calculators** (`market_sizing`
+  top-down TAM/SAM/SOM + bottom-up, `growth_projection`, `implied_cagr`,
+  `adoption_forecast`, `unit_contribution`, `breakeven`, `payback_period`,
+  `payments_take` with a not-gross-MDR / not-an-issuer guard) + a `CALC-`
+  owner-scoped store (re-derivable: envelope + `calculator_version` + inputs);
+  executive API `GET /calculators`, `POST /calculators/{name}[/compute]`,
+  `GET/DELETE /calculators/results`; copilot `run_calculator`/`list_calculators`
+  tools + `deterministic_calculation` intent + grounding + a wordguard
+  numeric-fidelity guard (the model narrates the tool's numbers, never
+  computes); Calculators UI panel; contract `calculators.schema.md`. The C2
+  `source_id` seam is reserved. Reports embed a saved calculation's shown
+  working via the same envelope; PDF export of it remains **P1**.
 
 ## Phase P1 — Executive outputs (PDF export, answer orchestration polish)
 
@@ -325,8 +340,10 @@ handle non-English (preserve original, mark translations as derived, never let
 a translation fabricate a claim); Malayalam/Tagalog as stretch. Scoped only
 after R9a/b prove out.
 
-### Phase C1 — Deterministic calculators — (existing phase above; still NOT built)
-Prerequisite for C2. No re-scope; see the C1 section earlier in this file.
+### Phase C1 — Deterministic calculators — ✅ DONE
+Prerequisite for C2, now built (see the C1 section earlier in this file and the
+2026-07-20 decision-log entry). C2 builds on `shared/calculators/` (the
+`market_sizing` calculator + the reserved `source_id` input seam).
 
 ### Phase C2 — Verified-source market sizing (TAM/SAM/SOM) — SKETCH
 **Value:** traceable TAM/SAM/SOM for the SME case. **Depends on:** C1 +

@@ -9,7 +9,8 @@ import type {
 
 export type View =
   | "home" | "updates" | "project" | "monitoring" | "knowledge" | "reports" | "settings" | "report"
-  | "research"; // Phase R3
+  | "research" // Phase R3
+  | "calculators"; // Phase C1
 
 // Phase 4 — the web-report route. The report view is the only URL-addressed
 // view (/report/OPP-nnn) so a brief can be refreshed, bookmarked, and opened
@@ -112,6 +113,7 @@ export interface AppState {
   goKnowledge: () => void;
   goReports: () => void;
   goResearch: () => void;
+  goCalculators: () => void;
   goSettings: () => void;
   openProject: (id: string, tab?: Tab) => void;
   setTab: (tab: Tab) => void;
@@ -275,6 +277,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
   const goResearch = useCallback(() => {
     setView("research");
+    setSidebarOpen(false);
+  }, []);
+  const goCalculators = useCallback(() => {
+    setView("calculators");
     setSidebarOpen(false);
   }, []);
   const goSettings = useCallback(() => {
@@ -528,7 +534,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     userOpps, userProjects, refreshUserOpps, saveOpportunity,
     view, activeProjectId, activeTab, sidebarOpen, reportOppId, openReport,
     conversations, drawerOppId, detailTarget,
-    goHome, goUpdates, goMonitoring, goKnowledge, goReports, goResearch, goSettings,
+    goHome, goUpdates, goMonitoring, goKnowledge, goReports, goResearch, goCalculators, goSettings,
     openProject, setTab, setSidebarOpen, openDrawer, closeDrawer, openDetail, closeDetail,
     send, analyzeNew, clearConversation,
   };

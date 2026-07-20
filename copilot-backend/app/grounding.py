@@ -55,6 +55,7 @@ class Pack:
         self.warnings = []
         self.conf_sources = {}   # label -> level
         self.needs_no_decision = False
+        self.has_calculation = False   # Phase C1 — a deterministic calc was grounded
         self.draft = None
 
     def cite(self, cid, ctype, title, role, metadata=None):
@@ -441,6 +442,53 @@ def build(intent, executed, ids):
                         "threshold) — refresh it before relying on this analysis")
                 pack.conf_sources["analysis workspace (preliminary)"] = "low"
             pack.needs_no_decision = True
+
+        elif name == "list_calculators":
+            # Phase C1 — the catalog of deterministic calculators. Presented so
+            # the model asks the user for the required inputs rather than
+            # inventing numbers or doing the arithmetic itself.
+            calcs = r.get("calculators") or []
+            pack.facts.append(
+                "DETERMINISTIC CALCULATORS available — pass the user's numbers to "
+                "run_calculator; NEVER compute a result yourself. Each needs these inputs:")
+            for c in calcs:
+                req = [i["name"] for i in c["inputs"] if i.get("required")]
+                pack.facts.append(f"- {c['id']} ({c['title']}): {', '.join(req)}")
+            pack.actions.append(
+                "If the user has not supplied the required inputs, ask for them — do not invent values.")
+
+        elif name == "run_calculator":
+            # Phase C1 — a computed calculation with FULLY SHOWN working. The
+            # numbers here are authoritative over anything the model might
+            # compute; a calculation over assumed inputs is illustrative only.
+            env = r.get("calculation") or {}
+            pack.facts.append(
+                f"DETERMINISTIC CALCULATION — {env.get('title') or env.get('calculator_id')} "
+                "(computed exactly; the numbers below are authoritative — do not recompute or round them):")
+            for step in env.get("steps", []):
+                unit = f" {step['unit']}" if step.get("unit") else ""
+                pack.facts.append(
+                    f"- {step['output']} = {step['expression']} = {step['substituted']} "
+                    f"= {step['result_display']}{unit}")
+            for key, out in (env.get("outputs") or {}).items():
+                unit = f" {out['unit']}" if out.get("unit") else ""
+                if out.get("value") is None:
+                    pack.facts.append(f"- OUTPUT {key}: {out['display']} ({out.get('reason', '')})")
+                else:
+                    pack.facts.append(f"- OUTPUT {key} = {out['display']}{unit}")
+            # inputs labelled assumption -> the whole result is illustrative
+            for iname, n in (env.get("normalized_inputs") or {}).items():
+                if n.get("label") == "A":
+                    pack.assumptions.append(f"{iname} = {n['value']} (assumption)")
+            for wmsg in env.get("warnings", []):
+                pack.warnings.append(wmsg)
+            if env.get("result_label") in ("A", "E"):
+                pack.warnings.append(
+                    "This calculation rests on assumed/estimated inputs — it is illustrative "
+                    "and preliminary, NOT a validated figure.")
+            pack.conf_sources["deterministic calculation"] = "low"
+            pack.needs_no_decision = True
+            pack.has_calculation = True
 
         elif name == "search_product_knowledge":
             if r["results"]:

@@ -17,8 +17,9 @@ workspace per saved chat"):
 - Everything here is machine-generated PRELIMINARY analysis: never
   authoritative knowledge, never written to knowledge-base/.
 - Storage: runtime SQLite (gitignored) at WORKSPACE_DB_PATH, default
-  `runtime/workspace.db`. IDs use the AWV- namespace (`AWV-<12 hex>`),
-  which cannot collide with any other namespace in the system.
+  `runtime/workspace.db`. IDs use the AWV-/WSUB- namespaces (`AWV-<12 hex>`),
+  which cannot collide with any other namespace in the system (RRUN-/RSRC-/
+  UOPP-/MCFG-/DOC-/USER-/CALC-/…).
 - Retention: prune keeps the newest N versions per opportunity (default
   10). Approved claims are unaffected by pruning — they live in the
   research store.
