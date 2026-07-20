@@ -244,6 +244,23 @@ class RunnerOutcomes(unittest.TestCase):
         self.assertEqual(s["excerpt"], "still cited")     # snippet as fallback excerpt
         self.assertFalse(s["quality_signals"]["page_fetched"])
 
+    def test_rating_and_synthesized_url_flag_recorded_in_quality_signals(self):
+        # R9a — provider-supplied rating and a constructed-URL flag are recorded
+        # verbatim as quality signals; a plain result carries neither.
+        provider = MockSearchProvider({"q1": [
+            {"url": "https://apps.apple.com/ae/app/id1?reviewId=9",
+             "snippet": "slow payouts", "rating": "2", "url_synthesized": True},
+            {"url": "https://example.com/plain", "snippet": "no rating"}]})
+        finished = self._execute(provider)
+        full = self.store.get_run(finished["id"], include_children=True)
+        by_domain = {s["domain"]: s for s in full["sources"]}
+        synth = by_domain["apps.apple.com"]["quality_signals"]
+        self.assertEqual(synth["rating"], "2")
+        self.assertTrue(synth["url_synthesized"])
+        plain = by_domain["example.com"]["quality_signals"]
+        self.assertNotIn("rating", plain)
+        self.assertNotIn("url_synthesized", plain)
+
     def test_finished_run_cannot_be_executed_again(self):
         provider = MockSearchProvider({"q1": [{"url": "https://example.com/a"}]})
         finished = self._execute(provider)

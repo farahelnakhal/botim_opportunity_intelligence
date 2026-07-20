@@ -91,6 +91,37 @@ describe("ResearchPanel (Phase R3)", () => {
     expect(screen.getByText(/never becomes repository evidence/)).toBeInTheDocument();
   });
 
+  it("marks a synthesized (constructed) source link and shows its recorded rating", async () => {
+    const withSynthesized: ResearchRun = {
+      ...runDetail,
+      sources: [{
+        ...runDetail.sources![0],
+        title: "Payouts are slow",
+        canonical_url: "https://apps.apple.com/ae/app/id12345?reviewId=111",
+        domain: "apps.apple.com",
+        quality_signals: { rating: "2", url_synthesized: true },
+        freshness_status: undefined, freshness_reason: undefined,
+      }],
+    };
+    global.fetch = fetchMockFor({
+      "/research/runs/RRUN-aaaaaaaaaaaa": withSynthesized,
+      "/research/runs": { runs: [withSynthesized] },
+    }) as unknown as typeof fetch;
+    render(<ResearchPanel />);
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByText("UAE SME sizing")).toBeInTheDocument());
+    await user.click(screen.getByText("UAE SME sizing"));
+
+    await waitFor(() => expect(screen.getByText("Payouts are slow")).toBeInTheDocument());
+    // the link is honestly labelled "open linked page" (not "open source")
+    // and carries an explicit "(not a direct link)" note
+    expect(screen.getByRole("link", { name: /open linked page/ })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /^open source$/ })).toBeNull();
+    expect(screen.getByTestId("synthesized-link-note")).toHaveTextContent("not a direct link");
+    // the real feed rating is shown
+    expect(screen.getByTestId("source-rating")).toHaveTextContent("2");
+  });
+
   it("approving a candidate posts the review action", async () => {
     const fetchMock = fetchMockFor({
       "/review": { ...runDetail.candidate_evidence![0], status: "approved" },

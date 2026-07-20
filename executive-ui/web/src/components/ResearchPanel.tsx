@@ -24,6 +24,12 @@ function SourceRow({ s, selectable, selected, onToggle }: {
   s: ResearchSource; selectable: boolean; selected: boolean; onToggle: () => void;
 }) {
   const url = safeExternalUrl(s.canonical_url);
+  // R9a — a source may carry a recorded rating (e.g. an App Store review's
+  // stars) and a url_synthesized flag meaning the adapter CONSTRUCTED the link
+  // (the provider had no real permalink), so it opens the linked page — not
+  // this exact item. Both are surfaced honestly, never implying a direct link.
+  const rating = s.quality_signals?.rating;
+  const synthesizedUrl = s.quality_signals?.url_synthesized === true;
   return (
     <div className={`research-source${s.duplicate_of ? " duplicate" : ""}`}>
       {selectable && (
@@ -33,6 +39,10 @@ function SourceRow({ s, selectable, selected, onToggle }: {
       <div className="research-source-main">
         <div className="research-source-title">
           {s.title || s.domain}
+          {rating != null && rating !== "" && (
+            <span className="research-rating-badge" data-testid="source-rating"
+              title="rating recorded from the source">★ {String(rating)}</span>
+          )}
           {s.freshness_status && s.freshness_status !== "unknown" && (
             <span className={`freshness-badge freshness-${s.freshness_status}`}
               title={s.freshness_reason}>{s.freshness_status}</span>
@@ -58,7 +68,15 @@ function SourceRow({ s, selectable, selected, onToggle }: {
           {url ? (
             <>
               {" · "}
-              <a href={url} target="_blank" rel="noopener noreferrer">open source</a>
+              <a href={url} target="_blank" rel="noopener noreferrer">
+                {synthesizedUrl ? "open linked page" : "open source"}
+              </a>
+              {synthesizedUrl && (
+                <span className="research-synth-note" data-testid="synthesized-link-note"
+                  title="Constructed link: it opens the linked page (e.g. the app's store page), not this exact item — the source publishes no direct permalink.">
+                  {" "}(not a direct link)
+                </span>
+              )}
             </>
           ) : (
             <span> · no safe external link</span>

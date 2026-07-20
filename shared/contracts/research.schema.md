@@ -139,7 +139,11 @@ SQL/paths/keys/fetched content in messages.
   content-hash duplicates are stored with `duplicate_of`, never re-fetched.
 - **Quality signals**: recorded observations only (has_title,
   has_publication_date, page_fetched, excerpt_chars, preferred/excluded
-  domain flags) — no invented scores; interpretation belongs to review (R3).
+  domain flags, and — **R9a** — `rating` (a provider-supplied rating verbatim,
+  e.g. an App Store review's stars) and `url_synthesized: true` (the adapter
+  CONSTRUCTED the source URL rather than receiving a real permalink, so the
+  link opens the linked page, not the exact item — surfaced as "(not a direct
+  link)" in the UI)) — no invented scores; interpretation belongs to review (R3).
 - **Honest outcomes**: all queries executed → `complete`; some queries or
   page fetches failed → `partial` with the counts in `error`; nothing
   succeeded → `failed`. Failed pages keep their search-result metadata

@@ -48,13 +48,25 @@ def _clean_str(value, max_len=500):
 
 class SearchResult(dict):
     """A plain dict with a fixed shape: url, title, snippet, published_at,
-    provider. Only `url` is guaranteed."""
+    provider, rating, url_synthesized. Only `url` is guaranteed.
+
+    - `rating` — a source-provided rating verbatim (e.g. an App Store review's
+      star rating), or None when the provider has none. Recorded, never
+      invented or computed.
+    - `url_synthesized` — True when `url` was CONSTRUCTED by the adapter rather
+      than returned by the provider as a real permalink (e.g. the App Store has
+      no public per-review URL, so we point at the app's page). It signals that
+      the link does NOT dereference to the exact item, so citations/UI can say
+      so instead of implying a direct permalink."""
 
     @classmethod
-    def build(cls, provider, url, title=None, snippet=None, published_at=None):
+    def build(cls, provider, url, title=None, snippet=None, published_at=None,
+              rating=None, url_synthesized=False):
         return cls(provider=provider, url=url, title=_clean_str(title),
                    snippet=_clean_str(snippet, 1000),
-                   published_at=_clean_str(published_at, 120))
+                   published_at=_clean_str(published_at, 120),
+                   rating=_clean_str(rating, 20),
+                   url_synthesized=bool(url_synthesized))
 
 
 class MockSearchProvider:
@@ -211,11 +223,17 @@ class AppStoreReviewsProvider:
             if not content:
                 continue
             review_id = self._label(entry, "id") or ""
+            # Apple publishes no public per-review permalink, so the URL is
+            # CONSTRUCTED: the app's real store page, with a reviewId hint that
+            # Apple's web UI ignores. It dereferences to the app, NOT the exact
+            # review — flagged url_synthesized so citations/UI never imply a
+            # direct review link. The star rating (im:rating) is real feed data.
             review_url = (f"{base}?reviewId={urllib.parse.quote(str(review_id))}"
                           if review_id else base)
             results.append(SearchResult.build(
                 "appstore", url=review_url, title=self._label(entry, "title"),
-                snippet=content, published_at=self._label(entry, "updated")))
+                snippet=content, published_at=self._label(entry, "updated"),
+                rating=self._label(entry, "im:rating"), url_synthesized=True))
             if len(results) >= max_results:
                 break
         return results

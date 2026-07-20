@@ -57,6 +57,13 @@ class AppStoreAdapter(unittest.TestCase):
         # synthesized, unique, honest per-review app-store URL
         self.assertIn("apps.apple.com/ae/app/id12345?reviewId=111", out[0]["url"])
         self.assertNotEqual(out[0]["url"], out[1]["url"])
+        # the star rating is real feed data (im:rating), captured verbatim
+        self.assertEqual(out[0]["rating"], "2")
+        self.assertEqual(out[1]["rating"], "5")
+        # every app-store review URL is CONSTRUCTED (no public per-review
+        # permalink) — flagged so citations/UI never imply a direct link
+        self.assertTrue(out[0]["url_synthesized"])
+        self.assertTrue(out[1]["url_synthesized"])
 
     def test_app_name_is_resolved_then_reviews_fetched(self):
         p = AppStoreReviewsProvider(fetch_fn=make_fetch())
