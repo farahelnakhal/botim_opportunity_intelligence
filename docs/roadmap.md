@@ -291,6 +291,14 @@ also needs.
 `shared/research/providers.py`, `retrieval.py`, `freshness.py`, `source_urls.py`.
 **Blocked on:** the Merchant-Voice-style **privacy/security review** before any
 LIVE ingestion of real (non-synthetic) content (decision log 2026-07-20).
+> ⚠️ **OPEN non-code deliverable — NOT done (as of 2026-07-20):** the human
+> privacy/security review of ingesting real Reddit / App Store content has
+> **not** been performed. The `RESEARCH_ALLOW_LIVE_SOCIAL` env gate (PR9a-3)
+> only *enforces* that decision fail-closed — it is **not** the decision, and
+> its existence must never be read as the review being complete. Flipping the
+> flag before this item is closed (by the product owner) is a policy breach,
+> not just an ops toggle. Close-out belongs with H2 (PII/ToS hardening) or an
+> explicit sign-off, whichever comes first.
 **Ships as (approved 2026-07-20):** PR9a-1 (source-tier registry) → PR9a-2
 (Apple App Store adapter + provider registry) → PR9a-3 (Reddit adapter +
 privacy gate) → PR9a-4 (multi-language querying + docs). Reviewed one PR at a
