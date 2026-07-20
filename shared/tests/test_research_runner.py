@@ -129,30 +129,32 @@ class Profiles(unittest.TestCase):
         pairs = profiles.generate_queries("sme-financial-product",
                                           {"market": "Saudi Arabia"})
         self.assertLessEqual(len(pairs), profiles.PROFILE_MAX_QUERIES)
-        objectives = {o for o, _ in pairs}
+        objectives = {o for o, _q, _l in pairs}
         self.assertIn("regulation and licensing", objectives)
-        self.assertTrue(any("Saudi Arabia" in q for _, q in pairs))
+        self.assertTrue(any("Saudi Arabia" in q for _o, q, _l in pairs))
+        # default is English only, so every query is tagged en
+        self.assertTrue(all(lang == "en" for _o, _q, lang in pairs))
         # reusable mechanism: profile never hardcodes one market
         uae = profiles.generate_queries("sme-financial-product")
-        self.assertTrue(any("UAE" in q for _, q in uae))
+        self.assertTrue(any("UAE" in q for _o, q, _l in uae))
 
     def test_generic_profile_reusable_for_any_product(self):
         pairs = profiles.generate_queries(
             "generic", {"market": "Egypt", "segment": "grocery merchants",
                         "product": "instant settlement", "extra_terms": ["chargebacks"]})
-        self.assertTrue(any("instant settlement" in q for _, q in pairs))
-        self.assertTrue(any("chargebacks" in q for _, q in pairs))
+        self.assertTrue(any("instant settlement" in q for _o, q, _l in pairs))
+        self.assertTrue(any("chargebacks" in q for _o, q, _l in pairs))
 
     def test_generic_profile_defaults_are_not_the_validation_case(self):
         # Fix #4 — an unparameterised generic run must stay genuinely generic:
         # it must never emit the UAE/SME/corporate-card validation case by
         # default, and empty context fields must not leave stray whitespace.
         pairs = profiles.generate_queries("generic")
-        joined = " || ".join(q for _, q in pairs)
+        joined = " || ".join(q for _o, q, _l in pairs)
         self.assertNotIn("UAE", joined)
         self.assertNotIn("SME", joined)
         self.assertNotIn("corporate card", joined)
-        for _, q in pairs:
+        for _o, q, _l in pairs:
             self.assertEqual(q, q.strip())      # no leading/trailing space
             self.assertNotIn("  ", q)           # no gap where a field was empty
             self.assertTrue(q)                  # never an empty query
@@ -160,6 +162,44 @@ class Profiles(unittest.TestCase):
     def test_unknown_profile_raises_for_honest_handling(self):
         with self.assertRaises(KeyError):
             profiles.generate_queries("no-such-profile")
+
+    # -- multi-language querying (R9a / PR9a-4) --------------------------- #
+
+    def test_arabic_querying_localizes_terms_and_tags_language(self):
+        pairs = profiles.generate_queries(
+            "sme-financial-product", {"languages": ["en", "ar"]})
+        langs = {lang for _o, _q, lang in pairs}
+        self.assertEqual(langs, {"en", "ar"})
+        ar = [q for _o, q, lang in pairs if lang == "ar"]
+        self.assertTrue(ar)
+        joined_ar = " || ".join(ar)
+        self.assertIn("الإمارات", joined_ar)                     # UAE localized
+        self.assertIn("الشركات الصغيرة والمتوسطة", joined_ar)     # SME localized
+        # breadth-first sharing under the cap: every objective is represented
+        # in BOTH languages (first template of each objective/language first)
+        objs_en = {o for o, _q, lang in pairs if lang == "en"}
+        objs_ar = {o for o, _q, lang in pairs if lang == "ar"}
+        self.assertEqual(objs_en, objs_ar)
+        self.assertLessEqual(len(pairs), profiles.PROFILE_MAX_QUERIES)
+
+    def test_context_value_without_a_translation_falls_back_never_guessed(self):
+        # a market with no curated Arabic term keeps the English value verbatim
+        pairs = profiles.generate_queries(
+            "sme-financial-product", {"market": "Narnia", "languages": ["ar"]})
+        self.assertTrue(any("Narnia" in q for _o, q, _l in pairs))
+
+    def test_unknown_language_code_raises(self):
+        with self.assertRaises(ValueError):
+            profiles.generate_queries("generic", {"languages": ["xx"]})
+
+    def test_uncurated_language_for_profile_raises_honestly(self):
+        # 'hi' is a recognized code but not yet curated on any profile
+        with self.assertRaises(ValueError) as cm:
+            profiles.generate_queries("sme-financial-product", {"languages": ["hi"]})
+        self.assertIn("curated", str(cm.exception))
+        # generic has no Arabic templates either -> honest refusal
+        with self.assertRaises(ValueError):
+            profiles.generate_queries("generic", {"languages": ["ar"]})
 
 
 class RunnerOutcomes(unittest.TestCase):
@@ -243,6 +283,23 @@ class RunnerOutcomes(unittest.TestCase):
         self.assertEqual(s["title"], "Dead page")        # provider metadata kept
         self.assertEqual(s["excerpt"], "still cited")     # snippet as fallback excerpt
         self.assertFalse(s["quality_signals"]["page_fetched"])
+
+    def test_rating_and_synthesized_url_flag_recorded_in_quality_signals(self):
+        # R9a — provider-supplied rating and a constructed-URL flag are recorded
+        # verbatim as quality signals; a plain result carries neither.
+        provider = MockSearchProvider({"q1": [
+            {"url": "https://apps.apple.com/ae/app/id1?reviewId=9",
+             "snippet": "slow payouts", "rating": "2", "url_synthesized": True},
+            {"url": "https://example.com/plain", "snippet": "no rating"}]})
+        finished = self._execute(provider)
+        full = self.store.get_run(finished["id"], include_children=True)
+        by_domain = {s["domain"]: s for s in full["sources"]}
+        synth = by_domain["apps.apple.com"]["quality_signals"]
+        self.assertEqual(synth["rating"], "2")
+        self.assertTrue(synth["url_synthesized"])
+        plain = by_domain["example.com"]["quality_signals"]
+        self.assertNotIn("rating", plain)
+        self.assertNotIn("url_synthesized", plain)
 
     def test_finished_run_cannot_be_executed_again(self):
         provider = MockSearchProvider({"q1": [{"url": "https://example.com/a"}]})

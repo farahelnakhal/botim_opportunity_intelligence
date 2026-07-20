@@ -109,6 +109,31 @@ class ResearchRoutes(unittest.TestCase):
         self.assertGreater(run["counts"]["queries"], 5)
         self.assertTrue(all(q["status"] == "pending" for q in run["queries"]))
 
+    def test_create_run_with_arabic_querying_tags_queries(self):
+        # R9a multi-language querying over HTTP: queries come back tagged with
+        # the language they were issued in, including localized Arabic terms.
+        status, run = self._post("/executive-api/research/runs",
+                                 {"title": "SME AR/EN run",
+                                  "profile": "sme-financial-product",
+                                  "context": {"languages": ["en", "ar"]}})
+        self.assertEqual(status, 201)
+        langs = {q["language"] for q in run["queries"]}
+        self.assertEqual(langs, {"en", "ar"})
+        self.assertTrue(any("الإمارات" in q["query_text"]
+                            for q in run["queries"] if q["language"] == "ar"))
+
+    def test_create_run_with_uncurated_language_is_a_client_error(self):
+        import urllib.request
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/executive-api/research/runs",
+            data=json.dumps({"title": "x", "profile": "sme-financial-product",
+                             "context": {"languages": ["hi"]}}).encode(),
+            method="POST", headers={"content-type": "application/json"})
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            urllib.request.urlopen(req)
+        self.assertEqual(cm.exception.code, 400)
+        self.assertIn("curated", cm.exception.read().decode())
+
     def test_create_run_with_unknown_profile_is_a_client_error(self):
         import urllib.request
         req = urllib.request.Request(

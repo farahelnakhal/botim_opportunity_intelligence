@@ -4,6 +4,110 @@
 > decision would surprise a future maintainer or constrains future work.
 > Format: date · decision · reasoning · alternatives · consequences.
 
+## 2026-07-20 — R9a-4: multi-language querying is human-curated, not machine-translated
+
+- **Decision:** Multi-language querying issues search terms in more than one
+  language by **human-curated per-language query templates**, exactly the way
+  `profiles.py` already works (deterministic data, no LLM). It is **querying
+  only** — no source-content translation (that stays R9c). English is always
+  on; other languages are **opt-in per run** via `context.languages` (default
+  `["en"]`). Ships with **English + Arabic curated (first-class)** on the
+  `sme-financial-product` validation profile; a small `CONTEXT_L10N` glossary
+  localizes `{market}/{segment}/{product}` values for Arabic, with an
+  **English fall-back for any uncurated value** (never a guessed translation).
+  Each generated query is **tagged with its language** (`research_queries.language`,
+  research-store **schema v6**); `generate_queries` now returns
+  `(objective, query_text, language)` triples. Requesting a language the chosen
+  profile has no curated templates for raises an **honest error** naming what
+  is curated — it never emits empty or machine-translated queries.
+- **Reasoning:** the profile layer's whole point is transparent, testable,
+  free, deterministic query generation; machine-translating queries would break
+  that and risk fabricated terms. Arabic is genuinely first-class for the
+  UAE/GCC validation case and I can author accurate MSA financial/search terms.
+  Query-language ≠ content-language, so it lives on the query row and does NOT
+  reuse `research_sources.language` (which remains for source content, R9c).
+- **Alternatives rejected:** LLM/machine translation of queries
+  (non-deterministic, fabrication risk, violates the no-LLM profile invariant);
+  term-substitution on English phrases via a word glossary (produces
+  mixed-language, unidiomatic queries); reusing `sources.language` for the query
+  language (conflates two different things); **authoring Hindi/Urdu query terms
+  now** (I am not confident enough in idiomatic financial search terms in those
+  languages — guessing them would be the fabrication this repo forbids).
+- **Consequences:** `hi`/`ur` (roadmap "second") and `ml`/`tl` ("deferred") are
+  **recognized language codes but not yet curated for any profile** — selecting
+  one is an honest error, and their curation is a **tracked open follow-up**
+  (see the roadmap R9a note). `generic` stays English-only until someone curates
+  it. The triple return shape is a one-caller change (executive API) plus test
+  updates. This PR also carries the **docs/contract sweep**: research.schema.md
+  bumped v3→v6 and documents the provider registry, the two gated social
+  adapters + the `RESEARCH_ALLOW_LIVE_SOCIAL` fail-closed gate, `source_tier`,
+  `rating`/`url_synthesized`, `languages`, and the query-language field;
+  current-state.md gains the R9a work and carries the open privacy-review item.
+
+## 2026-07-20 — R9a-3: Reddit adapter + the real fail-closed privacy/security gate
+
+- **Decision:** Add a **Reddit** adapter (`RedditProvider`) behind the same
+  search seam, and replace PR9a-2's interim hard-refusal with the **real
+  opt-in gate**. Reddit uses the official API with **app-only
+  client-credentials OAuth** (confidential client; `REDDIT_CLIENT_ID` /
+  `REDDIT_CLIENT_SECRET`, sent only as request headers, never logged/echoed) —
+  no user context, no user data. `query` is adapter-interpreted: an optional
+  `r/<subreddit>` prefix restricts the search to that subreddit, otherwise it
+  is a global keyword search. Each post maps to the fixed `SearchResult` shape;
+  the URL is the **real Reddit permalink** (`https://www.reddit.com` +
+  `permalink`), so `url_synthesized` is **False** (unlike Apple, Reddit
+  publishes a dereferenceable per-item URL). The gate is a single fail-closed
+  flag, **`RESEARCH_ALLOW_LIVE_SOCIAL`** (default off; **only the exact value
+  `1` enables**, any typo/`true`/empty stays off — the Merchant-Voice
+  `MV_SYNTHETIC_ONLY` posture). `from_env` refuses to construct ANY gated
+  provider (`appstore`, `reddit`) unless the flag is on, with an honest error
+  naming the privacy/security review; `build_provider` still does not consult
+  the gate (direct/offline callers and tests own that).
+- **Reasoning:** the flag is the operator's explicit attestation that the
+  Merchant-Voice-style privacy/security review has passed — the code path
+  exists and is testable, but real PII-bearing ingestion is unreachable by
+  default and cannot be enabled by accident. App-only OAuth avoids handling any
+  Reddit user's credentials or personal account data. Reusing the seam keeps
+  the runner/dedup/storage/candidate-review pipeline unchanged.
+- **Alternatives rejected:** Reddit script-app `password` grant (needs a real
+  user's credentials — more PII, worse posture); enabling gated providers via a
+  `_bool`-style "truthy" match (`true`/`yes`/`on` — too easy to trip
+  accidentally; exact-`1` is deliberately narrow); a per-provider flag each
+  (one clearly-named live-social switch is easier to reason about and audit);
+  capturing Reddit post score as `rating` (score is upvotes, not a rating —
+  would misuse the field; left None to stay faithful).
+- **Consequences:** with the flag off (every environment until the review is
+  cleared **with the product owner**), selecting `appstore`/`reddit` fails
+  honestly and no live social fetch happens; all adapter tests stay offline
+  (injected fetch, no key/credentials). Turning the flag on is an ops decision
+  that must not precede the human review. Reddit token+search are two bounded,
+  polite, single-retry requests; the injected fetch takes an optional POST body
+  (`fetch(url, headers, data=None)`) so the token exchange is exercised
+  offline. PR9a-4 adds multi-language querying + the docs/contract sweep.
+
+## 2026-07-20 — R9a-2 follow-up: capture the App Store star rating; flag synthesized links
+
+- **Decision:** Small extension on the fresh Apple adapter, reversing PR9a-2's
+  "defer the star rating" note. `SearchResult` gains two fields: `rating` (a
+  provider-supplied rating verbatim) and `url_synthesized` (True when the
+  adapter CONSTRUCTED the URL rather than receiving a real permalink). The
+  Apple adapter fills `rating` from `im:rating` and sets `url_synthesized=True`
+  (Apple has no public per-review permalink); the runner records both in
+  `quality_signals`; `ResearchPanel` labels such links **"open linked page"**
+  with an explicit **"(not a direct link)"** note instead of "open source".
+- **Reasoning:** the star rating is real data already in the source feed (not a
+  fabrication risk) and cheaper to add while the adapter is fresh than to
+  retrofit once callers depend on the shape. Flagging the synthesized link
+  closes an honesty gap: a reader clicking a "source" must not expect it to
+  dereference to the exact review when Apple publishes no such URL.
+- **Alternatives rejected:** leaving rating out (loses real, useful signal);
+  a bespoke per-review DB column (a provider-specific field belongs in the
+  existing `quality_signals` bag, no schema migration needed); silently keeping
+  the "open source" label on a non-dereferencing link (misleading).
+- **Consequences:** `SearchResult` now always carries `rating`/`url_synthesized`
+  (defaults None/False — backward compatible; Brave results are unaffected).
+  Reddit (PR9a-3) sets `url_synthesized=False` (real permalinks).
+
 ## 2026-07-20 — R9a-2: review/listing sources reuse the search seam; multi-provider registry
 
 - **Decision:** New source adapters reuse the existing

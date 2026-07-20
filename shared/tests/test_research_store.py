@@ -218,6 +218,23 @@ class QueryHonesty(unittest.TestCase):
         done = self.store.mark_query(q["id"], "executed")  # count unknown -> stays null
         self.assertIsNone(done["result_count"])
 
+    def test_query_language_recorded_validated_and_persists(self):
+        # R9a — a query carries the language it was issued in; unset stays null
+        q = self.store.add_query(self.run["id"], {"query_text": "a"})
+        self.assertIsNone(q["language"])
+        ar = self.store.add_query(self.run["id"],
+                                  {"query_text": "بطاقة الشركات", "language": "ar"})
+        self.assertEqual(ar["language"], "ar")
+        # an unrecognized language code is rejected, never stored raw
+        with self.assertRaises(ResearchStoreError):
+            self.store.add_query(self.run["id"],
+                                 {"query_text": "x", "language": "klingon"})
+        # persists across reopen
+        reopened = ResearchStore(self.store.db_path)
+        got = {row["id"]: row for row in
+               reopened.get_run(self.run["id"], include_children=True)["queries"]}
+        self.assertEqual(got[ar["id"]]["language"], "ar")
+
 
 if __name__ == "__main__":
     unittest.main()

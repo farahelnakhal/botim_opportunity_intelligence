@@ -12,8 +12,8 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from shared.research.providers import (  # noqa: E402
-    AppStoreReviewsProvider, BraveSearchProvider, SearchProviderError,
-    build_provider, from_env)
+    AppStoreReviewsProvider, BraveSearchProvider, LIVE_SOCIAL_ENV,
+    SearchProviderError, build_provider, from_env, live_social_enabled)
 
 # a reviews feed: first entry is app metadata (no im:rating -> skipped),
 # then two real reviews
@@ -57,6 +57,13 @@ class AppStoreAdapter(unittest.TestCase):
         # synthesized, unique, honest per-review app-store URL
         self.assertIn("apps.apple.com/ae/app/id12345?reviewId=111", out[0]["url"])
         self.assertNotEqual(out[0]["url"], out[1]["url"])
+        # the star rating is real feed data (im:rating), captured verbatim
+        self.assertEqual(out[0]["rating"], "2")
+        self.assertEqual(out[1]["rating"], "5")
+        # every app-store review URL is CONSTRUCTED (no public per-review
+        # permalink) — flagged so citations/UI never imply a direct link
+        self.assertTrue(out[0]["url_synthesized"])
+        self.assertTrue(out[1]["url_synthesized"])
 
     def test_app_name_is_resolved_then_reviews_fetched(self):
         p = AppStoreReviewsProvider(fetch_fn=make_fetch())
@@ -106,10 +113,23 @@ class RegistryAndGate(unittest.TestCase):
         with self.assertRaises(SearchProviderError):
             build_provider("tiktok", env={})
 
-    def test_from_env_refuses_gated_appstore_until_privacy_review(self):
+    def test_from_env_refuses_gated_appstore_when_live_social_disabled(self):
+        # default: the privacy gate is off, so a gated provider is refused
         with self.assertRaises(SearchProviderError) as cm:
             from_env(env={"RESEARCH_SEARCH_PROVIDER": "appstore"})
-        self.assertIn("pending", str(cm.exception).lower())
+        self.assertIn("privacy/security review", str(cm.exception))
+
+    def test_live_social_gate_is_fail_closed(self):
+        # ONLY the exact value "1" opens the gate — typos/truthy stay closed
+        self.assertFalse(live_social_enabled(env={}))
+        for val in ("0", "true", "yes", "on", "1 ", "", "TRUE"):
+            self.assertFalse(live_social_enabled(env={LIVE_SOCIAL_ENV: val}), val)
+        self.assertTrue(live_social_enabled(env={LIVE_SOCIAL_ENV: "1"}))
+
+    def test_from_env_serves_gated_appstore_when_gate_opted_in(self):
+        prov = from_env(env={"RESEARCH_SEARCH_PROVIDER": "appstore",
+                             LIVE_SOCIAL_ENV: "1"}, fetch_fn=make_fetch())
+        self.assertIsInstance(prov, AppStoreReviewsProvider)
 
     def test_from_env_still_serves_brave_and_none(self):
         self.assertIsNone(from_env(env={}))

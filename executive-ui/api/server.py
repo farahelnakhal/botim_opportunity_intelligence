@@ -531,15 +531,19 @@ class Handler(BaseHTTPRequestHandler):
                 # a profile pre-plans the run's queries deterministically
                 if profile_name:
                     try:
-                        pairs = research_profiles.generate_queries(
+                        triples = research_profiles.generate_queries(
                             profile_name, body.get("context") or {})
                     except KeyError:
                         return self._error(400, f"unknown research profile "
                                                 f"'{profile_name}' (available: "
                                                 f"{', '.join(research_profiles.available_profiles())})")
-                    for objective, query_text in pairs:
+                    except ValueError as exc:
+                        # unknown/uncurated requested query language — honest 400
+                        return self._error(400, str(exc))
+                    for objective, query_text, language in triples:
                         store.add_query(run["id"], {"objective": objective,
-                                                    "query_text": query_text})
+                                                    "query_text": query_text,
+                                                    "language": language})
                 elif isinstance(body.get("queries"), list):
                     for q in body["queries"][:research_profiles.PROFILE_MAX_QUERIES]:
                         if isinstance(q, str) and q.strip():

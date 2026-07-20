@@ -24,6 +24,8 @@ deliberately NOT reachable through the environment, so a deployment can
 never serve synthetic search results as if they were real.
 """
 
+import base64
+import datetime
 import json
 import os
 import urllib.error
@@ -48,13 +50,25 @@ def _clean_str(value, max_len=500):
 
 class SearchResult(dict):
     """A plain dict with a fixed shape: url, title, snippet, published_at,
-    provider. Only `url` is guaranteed."""
+    provider, rating, url_synthesized. Only `url` is guaranteed.
+
+    - `rating` — a source-provided rating verbatim (e.g. an App Store review's
+      star rating), or None when the provider has none. Recorded, never
+      invented or computed.
+    - `url_synthesized` — True when `url` was CONSTRUCTED by the adapter rather
+      than returned by the provider as a real permalink (e.g. the App Store has
+      no public per-review URL, so we point at the app's page). It signals that
+      the link does NOT dereference to the exact item, so citations/UI can say
+      so instead of implying a direct permalink."""
 
     @classmethod
-    def build(cls, provider, url, title=None, snippet=None, published_at=None):
+    def build(cls, provider, url, title=None, snippet=None, published_at=None,
+              rating=None, url_synthesized=False):
         return cls(provider=provider, url=url, title=_clean_str(title),
                    snippet=_clean_str(snippet, 1000),
-                   published_at=_clean_str(published_at, 120))
+                   published_at=_clean_str(published_at, 120),
+                   rating=_clean_str(rating, 20),
+                   url_synthesized=bool(url_synthesized))
 
 
 class MockSearchProvider:
@@ -211,11 +225,147 @@ class AppStoreReviewsProvider:
             if not content:
                 continue
             review_id = self._label(entry, "id") or ""
+            # Apple publishes no public per-review permalink, so the URL is
+            # CONSTRUCTED: the app's real store page, with a reviewId hint that
+            # Apple's web UI ignores. It dereferences to the app, NOT the exact
+            # review — flagged url_synthesized so citations/UI never imply a
+            # direct review link. The star rating (im:rating) is real feed data.
             review_url = (f"{base}?reviewId={urllib.parse.quote(str(review_id))}"
                           if review_id else base)
             results.append(SearchResult.build(
                 "appstore", url=review_url, title=self._label(entry, "title"),
-                snippet=content, published_at=self._label(entry, "updated")))
+                snippet=content, published_at=self._label(entry, "updated"),
+                rating=self._label(entry, "im:rating"), url_synthesized=True))
+            if len(results) >= max_results:
+                break
+        return results
+
+
+class RedditProvider:
+    """Reddit adapter (Phase R9a) — the official API via **app-only
+    client-credentials OAuth** (a confidential client; no user context, no
+    user account data). Requires REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET, sent
+    only as request headers, never logged/stored/echoed. `query` is
+    adapter-interpreted: an optional leading `r/<subreddit>` restricts the
+    search to that subreddit, otherwise it is a global keyword search. Each
+    post becomes a SearchResult whose URL is the REAL Reddit permalink (so
+    `url_synthesized` is False). Bounded and polite (timeout, one retry, cap);
+    network is injectable so tests never touch the live network. Post text is
+    stored verbatim as untrusted data, never interpreted as instructions.
+
+    Live use is refused by `from_env` unless the fail-closed
+    RESEARCH_ALLOW_LIVE_SOCIAL gate is on (the privacy/security review)."""
+
+    name = "reddit"
+    TOKEN_ENDPOINT = "https://www.reddit.com/api/v1/access_token"
+    SEARCH_ENDPOINT = "https://oauth.reddit.com/search"
+
+    def __init__(self, client_id, client_secret, fetch_fn=None,
+                 timeout_s=DEFAULT_TIMEOUT_S):
+        if not client_id or not client_secret:
+            raise SearchProviderError(
+                "reddit provider selected but no API credentials configured")
+        self._client_id = client_id
+        self._client_secret = client_secret
+        self._fetch = fetch_fn or self._http_fetch
+        self._timeout = timeout_s
+
+    def _http_fetch(self, url, headers, data=None):
+        req = urllib.request.Request(
+            url, headers=headers, data=data,
+            method="POST" if data is not None else "GET")
+        with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+            return resp.read()
+
+    def _get_json(self, url, headers, data=None, what="reddit"):
+        last_error = None
+        for attempt in (1, 2):  # at most one retry — no storms
+            try:
+                raw = self._fetch(url, headers, data)
+                break
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                last_error = exc
+                raw = None
+        if raw is None:
+            raise SearchProviderError(
+                f"{what} request failed after retry ({type(last_error).__name__})")
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
+            raise SearchProviderError(f"{what} returned a malformed response")
+
+    def _access_token(self):
+        basic = base64.b64encode(
+            f"{self._client_id}:{self._client_secret}".encode("utf-8")).decode("ascii")
+        headers = {"Accept": "application/json", "User-Agent": USER_AGENT,
+                   "Authorization": f"Basic {basic}",
+                   "Content-Type": "application/x-www-form-urlencoded"}
+        body = urllib.parse.urlencode({"grant_type": "client_credentials"}).encode("utf-8")
+        payload = self._get_json(self.TOKEN_ENDPOINT, headers, data=body,
+                                 what="reddit authentication")
+        token = (payload or {}).get("access_token")
+        if not isinstance(token, str) or not token:
+            # never echo the credentials or the raw payload
+            raise SearchProviderError("reddit authentication failed")
+        return token
+
+    @staticmethod
+    def _parse_target(query):
+        """(subreddit_or_None, search_terms). A leading `r/<name>` (or
+        `/r/<name>`) restricts the search to that subreddit."""
+        q = query.strip()
+        first, _, rest = q.partition(" ")
+        low = first.lower().lstrip("/")
+        if low.startswith("r/") and len(low) > 2:
+            return low[2:], rest.strip()
+        return None, q
+
+    @staticmethod
+    def _iso_from_epoch(value):
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return None
+        try:
+            return datetime.datetime.fromtimestamp(
+                value, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except (OverflowError, OSError, ValueError):
+            return None
+
+    def search(self, query, max_results=8):
+        if not isinstance(query, str) or not query.strip():
+            raise SearchProviderError("empty query")
+        max_results = max(1, min(int(max_results), MAX_RESULTS_CAP))
+        subreddit, terms = self._parse_target(query)
+        if not terms:
+            raise SearchProviderError("empty query")
+        token = self._access_token()
+        params = {"q": terms, "limit": max_results, "sort": "relevance",
+                  "type": "link", "raw_json": 1}
+        if subreddit:
+            params["restrict_sr"] = "true"
+            endpoint = f"https://oauth.reddit.com/r/{urllib.parse.quote(subreddit)}/search"
+        else:
+            endpoint = self.SEARCH_ENDPOINT
+        headers = {"Accept": "application/json", "User-Agent": USER_AGENT,
+                   "Authorization": f"Bearer {token}"}
+        payload = self._get_json(f"{endpoint}?{urllib.parse.urlencode(params)}", headers)
+        children = (((payload or {}).get("data") or {}).get("children")) or []
+        results = []
+        for child in children:
+            if not isinstance(child, dict):
+                continue
+            data = child.get("data")
+            if not isinstance(data, dict):
+                continue
+            permalink = data.get("permalink")
+            if not isinstance(permalink, str) or not permalink.startswith("/"):
+                continue  # no canonical discussion URL — skip, never invent one
+            url = f"https://www.reddit.com{permalink}"
+            selftext = data.get("selftext")
+            snippet = selftext if isinstance(selftext, str) and selftext.strip() \
+                else data.get("title")
+            results.append(SearchResult.build(
+                "reddit", url=url, title=data.get("title"), snippet=snippet,
+                published_at=self._iso_from_epoch(data.get("created_utc"))))
             if len(results) >= max_results:
                 break
         return results
@@ -225,7 +375,13 @@ class AppStoreReviewsProvider:
 # name -> builder(env, fetch_fn). Adding a source is a new entry here, not a
 # new code path. Real-content social adapters are registered so build_provider
 # / tests can construct them, but from_env() will NOT live-enable a GATED one
-# until the R9a-3 privacy/security gate exists (see the decision log).
+# unless the fail-closed privacy/security gate (below) is explicitly on.
+
+# The one fail-closed switch operators flip ONLY after the Merchant-Voice-style
+# privacy/security review passes. Default off; ONLY the exact value "1" enables
+# — any typo / "true" / "yes" / empty stays off (mirrors MV_SYNTHETIC_ONLY).
+LIVE_SOCIAL_ENV = "RESEARCH_ALLOW_LIVE_SOCIAL"
+
 
 def _build_brave(env, fetch_fn):
     return BraveSearchProvider(env.get("BRAVE_SEARCH_API_KEY", ""), fetch_fn=fetch_fn)
@@ -236,10 +392,23 @@ def _build_appstore(env, fetch_fn):
                                    country=env.get("APPSTORE_COUNTRY", "us"))
 
 
-_PROVIDER_BUILDERS = {"brave": _build_brave, "appstore": _build_appstore}
-# adapters that ingest real external (PII-bearing) content — live use via the
-# environment is blocked until the privacy/security review lands (PR9a-3).
-_GATED_PROVIDERS = {"appstore"}
+def _build_reddit(env, fetch_fn):
+    return RedditProvider(env.get("REDDIT_CLIENT_ID", ""),
+                          env.get("REDDIT_CLIENT_SECRET", ""), fetch_fn=fetch_fn)
+
+
+_PROVIDER_BUILDERS = {"brave": _build_brave, "appstore": _build_appstore,
+                      "reddit": _build_reddit}
+# adapters that ingest real external (potentially PII-bearing) content — live
+# use via the environment is blocked unless LIVE_SOCIAL_ENV is explicitly on.
+_GATED_PROVIDERS = {"appstore", "reddit"}
+
+
+def live_social_enabled(env=None):
+    """True only when the privacy/security gate is explicitly opted in
+    (LIVE_SOCIAL_ENV == "1"). Fail-closed: anything else is off."""
+    e = env if env is not None else os.environ
+    return e.get(LIVE_SOCIAL_ENV, "0") == "1"
 
 
 def build_provider(name, env=None, fetch_fn=None):
@@ -258,15 +427,18 @@ def from_env(env=None, fetch_fn=None):
     """The configured provider, or None when research is not configured.
     `mock` is intentionally not accepted here — synthetic results must never
     be produced by a deployment's environment configuration. Real-content
-    social adapters are refused until the R9a privacy/security gate (PR9a-3)."""
+    social adapters are refused unless the fail-closed RESEARCH_ALLOW_LIVE_SOCIAL
+    gate (the R9a privacy/security review) is explicitly on."""
     e = env if env is not None else os.environ
     name = (e.get("RESEARCH_SEARCH_PROVIDER") or "").strip().lower()
     if not name:
         return None
     if name not in _PROVIDER_BUILDERS:
         raise SearchProviderError(f"unknown search provider '{name}'")
-    if name in _GATED_PROVIDERS:
+    if name in _GATED_PROVIDERS and not live_social_enabled(e):
         raise SearchProviderError(
-            f"search provider '{name}' ingests real external content and is not "
-            "enabled yet — pending the R9a privacy/security review (PR9a-3)")
+            f"search provider '{name}' ingests real external content "
+            "(reviews/posts, possibly personal data) and is disabled by "
+            "default; it stays off until the R9a privacy/security review "
+            f"passes and an operator sets {LIVE_SOCIAL_ENV}=1")
     return build_provider(name, e, fetch_fn)

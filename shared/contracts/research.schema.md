@@ -1,4 +1,4 @@
-# Research runs (Phases R1–R4b, PR3) — schema v3
+# Research runs (Phases R1–R4b, PR3, R8b, R9a) — schema v6
 
 Persistence + execution contract for external-research runs. Implementation:
 `shared/research/` (`store.py` — runtime SQLite at `RESEARCH_DB_PATH`, default
@@ -59,6 +59,9 @@ pending -> failed                    (setup failure before execution)
 
 ### Query
 `id`, `run_id`, `objective?`, `query_text` (required), `provider?`,
+`language?` (**R9a**; the language the query was issued in, e.g. `en`/`ar` —
+a recognized `shared.research.profiles.LANGUAGES` code or null; multi-language
+QUERYING only, not source-content language, which stays on the source),
 `status pending|executed|failed`, `error?` (required iff failed),
 `result_count?` (recorded, never invented), `created_at`, `executed_at?`.
 
@@ -94,7 +97,7 @@ them, and the run that executed it. Cross-run references are rejected.
 |---|---|
 | `GET /research/runs[?status=…&opportunity_ref=…&limit=…]` | `{runs: [run…]}` — summaries with counts, newest first; honest empty list when nothing exists |
 | `GET /research/runs/{RRUN-id}` | full run with `queries`, `sources`, `candidate_evidence`; 404 if absent; 400 on malformed id |
-| `POST /research/runs` (R2) | create a pending run; body `{title, objective?, objectives?, profile?, context?, queries?, opportunity_ref?, notes?}`. A `profile` pre-plans queries deterministically (`shared/research/profiles.py`; unknown profile → 400 listing available ones); otherwise `queries` (string list) may be supplied. Returns 201 with the full run |
+| `POST /research/runs` (R2) | create a pending run; body `{title, objective?, objectives?, profile?, context?, queries?, opportunity_ref?, notes?}`. A `profile` pre-plans queries deterministically (`shared/research/profiles.py`; unknown profile → 400 listing available ones); otherwise `queries` (string list) may be supplied. **R9a:** `context.languages` (list of `LANGUAGES` codes, default `["en"]`) issues queries in each language, tagged on the query; an unknown or profile-uncurated language → honest 400. Returns 201 with the full run |
 | `POST /research/runs/{RRUN-id}/execute` (R2) | execute pending queries with the configured provider. **No provider configured → the run finishes `failed` with "no search provider configured"** — never fabricated results. Returns the finished run (`complete`/`partial`/`failed` with reasons) |
 | `POST /research/runs/{RRUN-id}/candidates` (R3) | record a human-authored claim: `{claim, source_ids[], contradicts?}`; sources must belong to the run; a failed run (no sources) refuses; allowed on finished runs (curation ≠ execution). 201 |
 | `POST /research/candidates/{RCAND-id}/review` (R3) | `{action: "approve"\|"reject", note?}` — exactly once; 409 if already reviewed |
@@ -123,12 +126,20 @@ SQL/paths/keys/fetched content in messages.
 
 ## Execution rules (Phase R2)
 
-- **Provider seam** (`providers.py`): selected via `RESEARCH_SEARCH_PROVIDER`
-  (currently `brave`, requiring `BRAVE_SEARCH_API_KEY` — sent only as a
-  request header, never logged/stored/echoed). Unset ⇒ no provider ⇒ honest
-  failure. The deterministic `MockSearchProvider` is injectable in code for
-  tests but **deliberately not reachable via environment configuration** —
-  a deployment can never serve synthetic results as real.
+- **Provider seam** (`providers.py`): a `name → builder` registry selected via
+  `RESEARCH_SEARCH_PROVIDER`. `brave` (web search; `BRAVE_SEARCH_API_KEY`) and —
+  **R9a** — `appstore` (Apple App Store reviews; public RSS, no key) and
+  `reddit` (Reddit official API; app-only client-credentials OAuth,
+  `REDDIT_CLIENT_ID`/`REDDIT_CLIENT_SECRET`). All secrets are sent only as
+  request headers, never logged/stored/echoed. Unset ⇒ no provider ⇒ honest
+  failure. **`appstore`/`reddit` ingest real external (possibly PII-bearing)
+  content and are GATED**: `from_env` refuses to construct them unless the
+  fail-closed `RESEARCH_ALLOW_LIVE_SOCIAL=1` switch (the Merchant-Voice-style
+  privacy/security review — only the exact value `1` opts in) is set;
+  `build_provider(name)` constructs any registered adapter for tests/offline
+  use and does not consult the gate. The deterministic `MockSearchProvider` is
+  injectable in code for tests but **deliberately not reachable via environment
+  configuration** — a deployment can never serve synthetic results as real.
 - **Bounded**: per-run caps (default 20 queries, 8 results/query, 12 page
   fetches), 10s timeouts, at most one retry per request, politeness delay
   between fetches, 500 KB page cap (truncation recorded).
@@ -139,7 +150,11 @@ SQL/paths/keys/fetched content in messages.
   content-hash duplicates are stored with `duplicate_of`, never re-fetched.
 - **Quality signals**: recorded observations only (has_title,
   has_publication_date, page_fetched, excerpt_chars, preferred/excluded
-  domain flags) — no invented scores; interpretation belongs to review (R3).
+  domain flags, and — **R9a** — `rating` (a provider-supplied rating verbatim,
+  e.g. an App Store review's stars) and `url_synthesized: true` (the adapter
+  CONSTRUCTED the source URL rather than receiving a real permalink, so the
+  link opens the linked page, not the exact item — surfaced as "(not a direct
+  link)" in the UI)) — no invented scores; interpretation belongs to review (R3).
 - **Honest outcomes**: all queries executed → `complete`; some queries or
   page fetches failed → `partial` with the counts in `error`; nothing
   succeeded → `failed`. Failed pages keep their search-result metadata
@@ -215,3 +230,34 @@ never instructions — a claim survives only if grounded in a verbatim quote,
 so injected directives in a page cannot become an accepted claim. **Machine
 origin never shortcuts human review:** every accepted claim is
 `pending_review` and nothing is written to the committed knowledge base.
+
+## Source adapters, tiering & multi-language querying (Phase R9a) — schema v5, v6
+
+**Schema v5** adds `research_sources.source_tier` (backfilled from the URL);
+**schema v6** adds `research_queries.language` (nullable; legacy rows NULL).
+Both migrate in place (PRAGMA-guarded, idempotent).
+
+- **Provider adapters** (see the Execution-rules "Provider seam" above): `brave`
+  (web), `appstore` (Apple App Store reviews), `reddit` (Reddit official API).
+  `appstore`/`reddit` ingest real external (possibly PII-bearing) content and
+  are **gated** — `from_env` constructs them only when the fail-closed
+  `RESEARCH_ALLOW_LIVE_SOCIAL=1` switch is set (the Merchant-Voice-style
+  privacy/security review; **the human review itself is a separate, still-open
+  deliverable — the flag only enforces its outcome**). Adapter results may carry
+  `rating` (verbatim, e.g. App Store stars) and `url_synthesized` (the URL was
+  constructed, not a real permalink) — recorded as source `quality_signals`.
+- **Source tier** (`source_tier`, `T1|T2|T3|T4`): derived at ingestion from the
+  domain via the human-curated `shared.research.source_tier` registry — registry
+  lookup only, never caller-supplied or content/LLM-inferred; unknown → `T4`.
+  Shared with Phase C2's independent-source corroboration rule.
+- **Multi-language querying** (`shared.research.profiles`): query terms are
+  **human-curated per language** (never machine-translated — generation stays
+  deterministic and fabrication-free). `LANGUAGES` recognizes `en`/`ar`
+  (first-class), `hi`/`ur` (second), `ml`/`tl` (deferred); a language is usable
+  for a profile only if that profile curates templates in it (else honest
+  error). Ships `en`+`ar` curated on `sme-financial-product`; context values
+  (`{market}` etc.) localize via a curated glossary with an English fall-back
+  for anything uncurated. **Querying only** — source-content translation is
+  R9c. `generate_queries` returns `(objective, query_text, language)` triples;
+  each query is stored with its `language`, so results trace to the language
+  that surfaced them.

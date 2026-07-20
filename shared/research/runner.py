@@ -46,6 +46,14 @@ def _quality_signals(result, fetched, preferred_domains, excluded_domains, domai
         signals["preferred_domain"] = True
     if domain in excluded_domains:
         signals["excluded_domain"] = True  # recorded, and the source is skipped
+    # R9a — recorded verbatim from the provider (never computed here): a
+    # source-provided rating (e.g. an App Store review's stars), and whether
+    # the adapter CONSTRUCTED the URL rather than getting a real permalink
+    # (so the "open source" link does not dereference to the exact item).
+    if result.get("rating"):
+        signals["rating"] = result["rating"]
+    if result.get("url_synthesized"):
+        signals["url_synthesized"] = True
     return signals
 
 
