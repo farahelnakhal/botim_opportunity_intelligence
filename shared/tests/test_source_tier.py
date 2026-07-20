@@ -29,7 +29,12 @@ class Registry(unittest.TestCase):
 
     def test_bare_domain_and_www_and_case(self):
         self.assertEqual(tier_for("WWW.IMF.ORG"), "T1")
-        self.assertEqual(tier_for("statista.com"), "T2")
+        self.assertEqual(tier_for("gartner.com"), "T2")
+
+    def test_statista_is_t3_aggregator_not_t2(self):
+        # an aggregator that republishes others' figures must not carry
+        # primary-analyst weight (matters for C2 independent-source corroboration)
+        self.assertEqual(tier_for("https://www.statista.com/statistics/123"), "T3")
 
     def test_government_tld_suffix_is_t1(self):
         self.assertEqual(tier_for("https://example.gov/report"), "T1")

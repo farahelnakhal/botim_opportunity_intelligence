@@ -32,10 +32,15 @@ _REGISTRY = {
     "imf.org": "T1", "worldbank.org": "T1", "oecd.org": "T1", "bis.org": "T1",
     "un.org": "T1", "wto.org": "T1",
     # ---- T2: industry / analyst research ----
-    "mckinsey.com": "T2", "statista.com": "T2", "gartner.com": "T2",
+    "mckinsey.com": "T2", "gartner.com": "T2",
     "deloitte.com": "T2", "pwc.com": "T2", "kpmg.com": "T2", "ey.com": "T2",
     "spglobal.com": "T2", "bcg.com": "T2", "forrester.com": "T2", "idc.com": "T2",
     # ---- T3: reputable press ----
+    # statista.com is T3 (not T2): it is an AGGREGATOR that re-publishes others'
+    # figures, so it must not carry primary-analyst weight — this matters for
+    # C2's corroboration rule (a primary source + Statista repeating it are NOT
+    # two independent sources).
+    "statista.com": "T3",
     "reuters.com": "T3", "bloomberg.com": "T3", "ft.com": "T3", "wsj.com": "T3",
     "economist.com": "T3", "thenationalnews.com": "T3", "arabianbusiness.com": "T3",
     "zawya.com": "T3", "gulfnews.com": "T3", "khaleejtimes.com": "T3",
@@ -70,7 +75,12 @@ def tier_for(url_or_domain):
     if not host:
         return DEFAULT_TIER
     labels = host.split(".")
-    # exact host, then each parent domain (data.worldbank.org -> worldbank.org)
+    # exact host, then each parent domain (data.worldbank.org -> worldbank.org).
+    # CAVEAT: parent-domain matching means ANY content hosted under a listed
+    # org's main domain inherits that org's tier — fine for the current seed,
+    # but revisit once PR9a-2+ adapters pull from large multi-content domains
+    # (e.g. a T2/T3 org that also hosts user-generated content on the same host
+    # would wrongly lend its tier to that content).
     for i in range(len(labels) - 1):
         candidate = ".".join(labels[i:])
         if candidate in _REGISTRY:
