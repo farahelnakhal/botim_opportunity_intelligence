@@ -51,6 +51,8 @@ try:
     from shared.llm import provider as llm_provider
     from shared import workspace as workspace_pkg
     from shared import documents as documents_pkg
+    from shared import email as email_pkg
+    from shared.email import monitoring_digest
 except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -64,6 +66,8 @@ except ImportError:
     from shared.llm import provider as llm_provider
     from shared import workspace as workspace_pkg
     from shared import documents as documents_pkg
+    from shared import email as email_pkg
+    from shared.email import monitoring_digest
 
 
 class _ExtractionLLMConfig:
@@ -175,6 +179,14 @@ def get_document_store():
     return _DOCUMENT_STORE
 
 
+# Phase R6 — outbound email sender, resolved fresh each call from the SMTP_*
+# environment (so a deploy can configure it without a restart quirk). Returns
+# a real SMTP sender when configured, else an honest unconfigured sender that
+# fails loudly. Tests inject a MockEmailSender by monkeypatching this.
+def get_email_sender():
+    return email_pkg.make_sender()
+
+
 SESSION_COOKIE = "botim_session"
 
 
@@ -199,7 +211,16 @@ def registration_open():
 # QUOTA_CHAT_PER_DAY, QUOTA_RESEARCH_EXECUTE_PER_DAY, ...
 QUOTA_DEFAULTS = {"chat": 200, "research_execute": 25, "research_extract": 25,
                   "workspace_refresh": 25, "monitoring_run": 25,
-                  "document_upload": 25}
+                  "document_upload": 25, "monitoring_workspace_run": 6}
+
+
+def monitoring_run_quota_limit(ws, owner_user_id):
+    """R6 scheduled-run quota, SCALED by the owner's active subscriptions so a
+    multi-chat user is not silently cut off at a flat cap: base-per-subscription
+    (QUOTA_MONITORING_WORKSPACE_RUN_PER_DAY, default 6) × active subscriptions."""
+    base = quota_limit("monitoring_workspace_run")
+    active = ws.count_enabled_subscriptions(owner_user_id) if owner_user_id else 0
+    return base * max(1, active)
 
 
 def quota_limit(action):
@@ -433,6 +454,11 @@ class Handler(BaseHTTPRequestHandler):
         # every other API write requires one when enforcement is on.
         if sub.startswith("/auth/"):
             return self._auth_api("POST", sub)
+        # Phase R6 — the scheduled-monitoring tick is authenticated by a shared
+        # secret (external cron), NOT a user session; it must bypass the session
+        # gate exactly like /auth/*.
+        if sub == "/monitoring/tick":
+            return self._monitoring_tick()
         if auth_required() and self._require_session() is None:
             return
         # Phase 6/7 — user-opportunity writes (create / archive / restore /
@@ -572,7 +598,7 @@ class Handler(BaseHTTPRequestHandler):
         m = re.match(r"^/user-opportunities"
                      r"(?:/(UOPP-[0-9a-f]{12})"
                      r"(?:/(archive|restore|monitoring|workspace|documents)"
-                     r"(?:/(pause|resume|run|events|refresh|versions|diff))?)?)?/?$", sub)
+                     r"(?:/(pause|resume|run|events|refresh|versions|diff|monitoring))?)?)?/?$", sub)
         if not m:
             # a syntactically different id shape (e.g. OPP-010) is a client
             # error, not a missing record — never resolves to committed data
@@ -735,6 +761,8 @@ class Handler(BaseHTTPRequestHandler):
         ws = get_workspace_store()
         try:
             opp = store.get(opp_id)  # 404 for unknown opportunity
+            if sub_action == "monitoring":
+                return self._workspace_monitoring(method, opp_id, ws, opp)
             if sub_action == "refresh" and method == "POST":
                 if not self._quota_guard("workspace_refresh"):
                     return
@@ -743,19 +771,13 @@ class Handler(BaseHTTPRequestHandler):
                 # explicit refreshes are 'manual_refresh'
                 trigger = ("first_analysis" if not ws.list_versions(opp_id, limit=1)
                            else "manual_refresh")
-                try:
-                    search_provider = research_providers.from_env()
-                except research_providers.SearchProviderError:
-                    search_provider = None  # builder records an honest gap
-                cfg = _ExtractionLLMConfig()
-                llm = (llm_provider.make_provider(cfg)
-                       if cfg.provider in ("anthropic", "openai_compatible") else None)
+                search_provider, llm, llm_cfg = self._resolve_build_providers()
                 viewer = self._current_user() if auth_required() else None
                 version = workspace_pkg.build_workspace(
                     ws, get_research_store(), opp, trigger=trigger,
                     question=body.get("question") if isinstance(body.get("question"), str) else None,
                     search_provider=search_provider,
-                    llm_provider=llm, llm_config=cfg if llm else None,
+                    llm_provider=llm, llm_config=llm_cfg,
                     document_store=get_document_store(),
                     viewer_user_id=viewer["id"] if viewer else None)
                 return self._json(self._workspace_view(ws, version), status=201)
@@ -813,6 +835,327 @@ class Handler(BaseHTTPRequestHandler):
                 pass  # claims stay listable by id even if the run vanished
         view["claims"] = claims
         return view
+
+    # -- Phase R6: scheduled-monitoring subscription (consent/recipients) ---- #
+    # GET    .../workspace/monitoring -> this chat's subscription + recipients
+    # POST   .../workspace/monitoring -> the signed-in user opts THEMSELVES in
+    #                                    (their own registered account email;
+    #                                    no free text), sets the cadence, and is
+    #                                    emailed a DOUBLE-OPT-IN confirmation
+    #                                    link. Re-POSTing while unconfirmed
+    #                                    resends it. No mail (incl. monitoring
+    #                                    mail) goes out until confirmed.
+    # DELETE .../workspace/monitoring -> the signed-in user opts themselves out
+    # A recipient is always a signed-in account acting through its own session
+    # (its registered email), and must confirm control of that address via the
+    # tokened link before becoming eligible — see the decision log.
+    def _workspace_monitoring(self, method, opp_id, ws, opp):
+        # Monitoring email is meaningless without an identity to scope it to.
+        # When auth enforcement is off on this deployment, say so honestly
+        # rather than returning a confusing "sign in" error for a sign-in
+        # system that isn't switched on.
+        if not auth_required():
+            return self._error(403, "scheduled monitoring email is unavailable on "
+                                    "this deployment — it requires sign-in to be "
+                                    "enabled (BOTIM_AUTH_MODE=required) so recipients "
+                                    "are tied to a signed-in account")
+        user = self._current_user()
+        if user is None:
+            return self._error(401, "sign in to manage monitoring email")
+        if method == "GET":
+            sub = ws.get_subscription(opp_id)
+            owner_id = (sub or {}).get("owner_user_id") or opp.get("owner_user_id") or user["id"]
+            quota = None
+            try:
+                quota = get_auth_store().quota_status(
+                    owner_id, "monitoring_workspace_run",
+                    monitoring_run_quota_limit(ws, owner_id))
+            except auth_store.AuthError:
+                pass  # honest: no quota view rather than a crash
+            return self._json({"subscription": sub, "quota": quota})
+        if method == "POST":
+            body = self._read_json_body()
+            cadence = body.get("cadence_hours")
+            # the subscription is owned by the opportunity's owner; a legacy
+            # shared record (NULL owner) is anchored to the first subscriber so
+            # quota and scheduling always tie to a real account (never NULL).
+            owner_id = opp.get("owner_user_id") or user["id"]
+            result = ws.subscribe(opp_id, owner_user_id=owner_id,
+                                  recipient_user_id=user["id"],
+                                  recipient_email=user["email"],
+                                  cadence_hours=cadence)
+            confirmation = self._maybe_send_confirmation(user["email"], opp, result)
+            return self._json({"subscription": ws.get_subscription(opp_id),
+                               "confirmation": confirmation}, status=201)
+        if method == "DELETE":
+            return self._json(ws.unsubscribe_recipient(opp_id, user["id"]))
+        return self._error(405, "method not allowed")
+
+    def _public_base(self):
+        """Absolute base URL for links emailed to users. Prefer an explicit
+        MONITORING_PUBLIC_BASE_URL; otherwise derive from the Host header
+        (https unless the host is clearly a plain-HTTP local/test address)."""
+        base = os.environ.get("MONITORING_PUBLIC_BASE_URL")
+        if base:
+            return base.rstrip("/")
+        host = self.headers.get("Host") or "localhost"
+        scheme = "http" if host.startswith(("127.0.0.1", "localhost")) else "https"
+        return f"{scheme}://{host}"
+
+    def _maybe_send_confirmation(self, to_email, opp, subscribe_result):
+        """Send the double-opt-in confirmation email if this opt-in produced a
+        confirm token. Honest states: already-confirmed -> nothing to send;
+        send failure / unconfigured SMTP -> reported truthfully (the recipient
+        simply stays unconfirmed and receives no mail), never a fake success."""
+        token = subscribe_result.get("confirm_token")
+        if not token:  # already confirmed — no confirmation needed
+            return {"required": False, "email_sent": False,
+                    "note": "this address is already confirmed"}
+        title = opp.get("title") or opp.get("id") or "this opportunity"
+        ttl = int(os.environ.get("MONITORING_CONFIRM_TTL_HOURS", 48))
+        link = f"{self._public_base()}/api/monitoring/confirm?token={token}"
+        subject = f"Confirm monitoring email for {title}"
+        text = (
+            "You asked to receive scheduled analysis-monitoring updates for the "
+            f"opportunity \"{title}\".\n\n"
+            f"Confirm this address to start receiving them:\n{link}\n\n"
+            f"This link expires in {ttl} hours. Until it is confirmed, no email "
+            "is sent — if you didn't request this, simply ignore this message.")
+        try:
+            get_email_sender().send(to_email, subject, text)
+            return {"required": True, "email_sent": True, "sent_to": to_email,
+                    "note": f"confirmation email sent to {to_email}; "
+                            "monitoring starts once you confirm"}
+        except email_pkg.EmailError as exc:
+            # unconfigured SMTP or a delivery failure — honest, not fabricated
+            return {"required": True, "email_sent": False, "sent_to": to_email,
+                    "note": f"could not send the confirmation email ({exc}) — "
+                            "no monitoring mail will go out until confirmed"}
+
+    def _monitoring_confirm(self, query):
+        """Tokened, login-free confirmation (the link in the opt-in email).
+        Reachable without a session even under required-auth mode."""
+        token = (query.get("token") or [None])[0]
+        try:
+            get_workspace_store().confirm_recipient(token)
+        except workspace_pkg.WorkspaceStoreError as exc:
+            return self._error(exc.status, str(exc))
+        return self._html_page(
+            "Monitoring confirmed",
+            "<h1>Monitoring confirmed</h1><p>This address is now confirmed. "
+            "You'll receive an email only when a scheduled re-run finds a "
+            "material change — never for an unchanged or failed run. Every "
+            "message includes a one-click unsubscribe link.</p>")
+
+    def _monitoring_unsubscribe(self, query):
+        """Tokened, login-free unsubscribe (the link in a monitoring email).
+        Reachable without a session even under required-auth mode."""
+        token = (query.get("token") or [None])[0]
+        try:
+            get_workspace_store().unsubscribe_by_token(
+                token, os.environ.get("MONITORING_UNSUBSCRIBE_SIGNING_KEY", ""))
+        except workspace_pkg.WorkspaceStoreError as exc:
+            return self._error(exc.status, str(exc))
+        return self._html_page(
+            "Unsubscribed",
+            "<h1>Unsubscribed</h1><p>You will no longer receive scheduled "
+            "analysis-monitoring emails for this opportunity. You can opt back "
+            "in any time from its Analysis tab.</p>")
+
+    def _html_page(self, title, body_html):
+        """A tiny self-contained confirmation page for a link opened from an
+        email client (unsubscribe / confirm) — no session, no app shell."""
+        from html import escape
+        page = (f"<!doctype html><html lang=en><meta charset=utf-8>"
+                f"<title>{escape(title)}</title>"
+                "<body style=\"font-family:system-ui,sans-serif;max-width:34rem;"
+                "margin:3rem auto;padding:0 1rem;line-height:1.5\">"
+                f"{body_html}</body></html>")
+        body = page.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        # the page never echoes the token, but set no-referrer defensively so a
+        # future external link on it could never leak the token via Referer
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    @staticmethod
+    def _resolve_build_providers():
+        """Resolve the search + LLM providers for a workspace build from the
+        environment (same discipline as the manual refresh). A missing provider
+        is returned as None so the builder records an HONEST gap on a complete
+        version — it never fabricates a step. Shared by the manual refresh and
+        the scheduled tick so both paths call the same orchestrator identically."""
+        try:
+            search_provider = research_providers.from_env()
+        except research_providers.SearchProviderError:
+            search_provider = None
+        cfg = _ExtractionLLMConfig()
+        llm = (llm_provider.make_provider(cfg)
+               if cfg.provider in ("anthropic", "openai_compatible") else None)
+        return search_provider, llm, (cfg if llm else None)
+
+    # -- Phase R6: scheduled-monitoring tick (external-cron dispatcher) ------- #
+    # POST /api/monitoring/tick  (shared-secret protected; NO user session)
+    # For each due subscription: atomically claim-and-advance (idempotent
+    # against an at-least-once cron), skip if a build is already running, else
+    # run the SAME orchestrator the manual refresh uses with trigger
+    # 'monitoring', then (PR6c) diff the result and email opted-in+confirmed
+    # recipients ONLY on a material change. Every outcome is recorded honestly
+    # on the subscription — a no-change / partial / failed run never emails.
+    def _monitoring_tick(self):
+        expected = os.environ.get("MONITORING_TICK_TOKEN", "").strip()
+        if not expected:
+            # the feature is not enabled on this deployment — do not disclose it
+            return self._error(404, "not found")
+        import hmac
+        provided = self.headers.get("X-Monitoring-Token", "") or ""
+        if not hmac.compare_digest(provided, expected):
+            return self._error(401, "invalid monitoring token")
+        ws = get_workspace_store()
+        store = get_user_store()
+        try:
+            max_chats = max(1, int(os.environ.get("MONITORING_TICK_MAX_CHATS", "25")))
+        except ValueError:
+            max_chats = 25
+        summary = {"claimed": 0, "chats": []}
+        for cand in ws.due_subscriptions(limit=max_chats):
+            opp_id = cand["opportunity_id"]
+            claimed = ws.claim_due(opp_id)
+            if claimed is None:
+                continue  # a concurrent / double-fired tick already took it
+            summary["claimed"] += 1
+            outcome = self._run_scheduled_build(ws, store, claimed)
+            summary[outcome] = summary.get(outcome, 0) + 1
+            summary["chats"].append({"opportunity_id": opp_id, "outcome": outcome})
+        return self._json(summary)
+
+    def _run_scheduled_build(self, ws, store, claimed):
+        """Run one claimed subscription's chain, then decide whether to email.
+        Concurrency: skip (never queue) when a build is already running for this
+        chat — reusing R5's running/complete distinction. Returns the recorded
+        outcome (emailed / no_change / partial_no_email / email_unavailable /
+        skipped_in_progress / failed)."""
+        opp_id = claimed["opportunity_id"]
+        if ws.latest(opp_id, status="running") is not None:
+            ws.record_run_result(opp_id, "skipped_in_progress")
+            return "skipped_in_progress"
+        try:
+            opp = store.get(opp_id)
+        except user_store.StoreError:
+            ws.record_run_result(opp_id, "failed: opportunity no longer exists")
+            return "failed"
+        # R6 quota — count against the owner's per-user daily cap (scaled by
+        # active subscriptions) BEFORE the expensive chain. Over quota -> skip
+        # honestly, no build, no email. check_quota both counts and enforces.
+        owner = claimed.get("owner_user_id")
+        if owner:
+            try:
+                get_auth_store().check_quota(owner, "monitoring_workspace_run",
+                                             monitoring_run_quota_limit(ws, owner))
+            except auth_store.AuthError:
+                ws.record_run_result(opp_id, "skipped_quota")
+                return "skipped_quota"
+        try:
+            search_provider, llm, llm_cfg = self._resolve_build_providers()
+            version = workspace_pkg.build_workspace(
+                ws, get_research_store(), opp, trigger="monitoring",
+                search_provider=search_provider, llm_provider=llm,
+                llm_config=llm_cfg, document_store=get_document_store(),
+                viewer_user_id=claimed.get("owner_user_id"))
+        except Exception as exc:  # honest failure, never a fabricated success
+            ws.record_run_result(opp_id, f"failed: {type(exc).__name__}")
+            return "failed"
+        return self._email_on_material_change(ws, claimed, opp, version)
+
+    def _resolve_claims(self, version):
+        """Resolve a version's claim ids to {id, claim, status} using the
+        CURRENT review status from the research store (approvals live on
+        claims). Empty when the run is gone — never fabricated."""
+        rid, cids = version.get("research_run_id"), version.get("claim_ids") or []
+        if not (rid and cids):
+            return []
+        try:
+            detail = get_research_store().get_run(rid, include_children=True)
+        except research_store.ResearchStoreError:
+            return []
+        by_id = {c["id"]: c for c in detail.get("candidate_evidence", [])}
+        return [{"id": c["id"], "claim": c["claim"], "status": c["status"]}
+                for cid in cids if (c := by_id.get(cid))]
+
+    def _email_on_material_change(self, ws, claimed, opp, version):
+        """Diff the new version against the baseline and email only on a real
+        material change. No-change / degraded / send-unavailable all record an
+        honest outcome and send nothing. Advances last_notified_version only
+        when the delta has been dealt with (emailed, or baseline established)."""
+        opp_id = opp["id"]
+        completed = version.get("completed_at")
+        # baseline: the version we last notified about; fall back to the prior
+        # complete version. The first-ever complete version just seeds it.
+        baseline = None
+        lnv = claimed.get("last_notified_version")
+        if lnv is not None:
+            baseline = ws.version_by_number(opp_id, lnv)
+        if baseline is None:
+            prior = [v for v in ws.list_versions(opp_id)
+                     if v["status"] == "complete" and v["version"] < version["version"]]
+            baseline = ws.get_version(prior[0]["id"]) if prior else None
+        if baseline is None:
+            ws.record_run_result(opp_id, "no_change", ran_at=completed,
+                                 last_notified_version=version["version"])
+            return "no_change"
+
+        ev = monitoring_digest.evaluate(
+            baseline, version, self._resolve_claims(baseline), self._resolve_claims(version))
+        if ev["degraded"]:
+            ws.record_run_result(opp_id, "partial_no_email", ran_at=completed)
+            return "partial_no_email"
+        if not ev["material"]:
+            ws.record_run_result(opp_id, "no_change", ran_at=completed,
+                                 last_notified_version=version["version"])
+            return "no_change"
+
+        # material — email every eligible (confirmed) recipient, if we can.
+        # A real change we could not DELIVER never advances the baseline (so it
+        # retries once fixed), and the WHY is recorded as a DISTINCT outcome —
+        # not one ambiguous 'email_unavailable' — so 'why did nobody get mail?'
+        # is answerable: no signing key vs SMTP unconfigured (503) vs a delivery
+        # / auth / TLS failure (502) vs an overclaim-guard abort.
+        signing_key = os.environ.get("MONITORING_UNSUBSCRIBE_SIGNING_KEY", "").strip()
+        if not signing_key:
+            # can't mint a working unsubscribe link -> never send without one
+            ws.record_run_result(opp_id, "email_no_signing_key", ran_at=completed)
+            return "email_no_signing_key"
+        sender = get_email_sender()
+        base = self._public_base()
+        workspace_url = f"{base}/report/{opp_id}"
+        sent, failure = 0, None
+        for r in ws.eligible_recipients(opp_id):
+            unsub = workspace_pkg.sign_unsubscribe_token(r["id"], signing_key)
+            try:
+                digest = monitoring_digest.render(opp, baseline, version, ev,
+                                                  workspace_url,
+                                                  f"{base}/api/monitoring/unsubscribe?token={unsub}")
+            except monitoring_digest.DigestError:
+                # render is recipient-independent — it will abort for all of them
+                failure = "email_suppressed_overclaim"
+                break
+            try:
+                sender.send(r["recipient_email"], digest["subject"], digest["text_body"])
+                sent += 1
+            except email_pkg.EmailError as exc:
+                failure = "email_unconfigured" if exc.status == 503 else "email_send_failed"
+                continue  # honest per-recipient failure; try the rest
+        if sent:
+            ws.record_run_result(opp_id, "emailed", ran_at=completed,
+                                 last_notified_version=version["version"])
+            return "emailed"
+        outcome = failure or "email_unavailable"  # no eligible recipients (shouldn't occur)
+        ws.record_run_result(opp_id, outcome, ran_at=completed)
+        return outcome
 
     # -- Phase 5: mode-aware read models ------------------------------------ #
     def _mode_overview(self, root, mode):
@@ -946,6 +1289,12 @@ class Handler(BaseHTTPRequestHandler):
         # is on (the read models include user data and grounded evidence).
         if path.startswith("/auth/"):
             return self._auth_api("GET", path)
+        # Phase R6 — tokened unsubscribe/confirm links must work from an email
+        # client with no session, even under required-auth mode (like /auth/*).
+        if path == "/monitoring/unsubscribe":
+            return self._monitoring_unsubscribe(query)
+        if path == "/monitoring/confirm":
+            return self._monitoring_confirm(query)
         if auth_required() and self._require_session() is None:
             return
         try:
@@ -1082,8 +1431,8 @@ def make_server(port=8000, root=".", host="127.0.0.1"):
 
 
 def main():
-    # PORT is the convention most PaaS/container platforms (Hugging Face Spaces,
-    # Render, Railway, ...) use to tell the app which port to bind.
+    # PORT is the convention most PaaS/container platforms (Render, Railway,
+    # ...) use to tell the app which port to bind.
     ap = argparse.ArgumentParser(description="Read-only Opportunity Intelligence API")
     ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)))
     ap.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"),

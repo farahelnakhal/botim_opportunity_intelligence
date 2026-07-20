@@ -678,3 +678,36 @@ export interface WorkspaceDiff {
   new_gaps: string[];
   resolved_gaps: string[];
 }
+
+// Phase R6 — scheduled-monitoring subscription (opt-in / cadence / recipients)
+export interface WorkspaceRecipient {
+  recipient_user_id: string;
+  recipient_email: string;
+  enabled: boolean;
+  confirmed: boolean;
+  pending_confirmation: boolean;
+  opted_in_at: string;
+}
+export interface WorkspaceSubscription {
+  opportunity_id: string;
+  owner_user_id: string;
+  enabled: boolean;
+  cadence_hours: number;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  last_notified_version: number | null;
+  last_outcome: string | null;
+  recipients: WorkspaceRecipient[];
+}
+export interface MonitoringQuota {
+  action: string;
+  used: number;
+  limit: number;
+  remaining: number;
+}
+export interface MonitoringConfirmation {
+  required: boolean;
+  email_sent: boolean;
+  sent_to?: string;
+  note: string;
+}

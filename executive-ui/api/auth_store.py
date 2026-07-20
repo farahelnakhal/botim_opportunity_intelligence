@@ -281,6 +281,23 @@ class AuthStore:
                          (user_id, action, _iso(now)))
         return {"action": action, "used": used + 1, "limit": int(limit)}
 
+    def quota_status(self, user_id, action, limit, window_s=86400):
+        """Read-only quota view (used for UI indicators): how many of `action`
+        the user performed inside the window, the limit, and how many remain —
+        WITHOUT recording anything (unlike check_quota, which counts-and-records)."""
+        if not isinstance(user_id, str) or not USER_RE.match(user_id):
+            raise AuthError("invalid user id")
+        now = _now_dt()
+        window_start = _iso(now - datetime.timedelta(seconds=window_s))
+        with self._connect() as conn:
+            used = conn.execute(
+                "SELECT COUNT(*) AS n FROM quota_events "
+                "WHERE user_id=? AND action=? AND at >= ?",
+                (user_id, action, window_start)).fetchone()["n"]
+        lim = max(1, int(limit))
+        return {"action": action, "used": used, "limit": lim,
+                "remaining": max(0, lim - used)}
+
     def logout(self, token):
         if not isinstance(token, str) or not token:
             return False

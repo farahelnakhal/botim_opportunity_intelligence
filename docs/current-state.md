@@ -3,6 +3,12 @@
 > Baseline: `main` @ `38dee97` (merge of PR #34) + Phase R1. Every claim below was
 > verified against code/git, not copied from handoff prompts. Update this file at
 > the end of each merged phase.
+>
+> **Before citing any capability as shipped, see
+> [`docs/capability-vs-claim.md`](capability-vs-claim.md)** — it reconciles
+> aspirational/methodology language in `product-context.md` / `MASTER_PROMPT.md`
+> / `WORKSTREAMS.md` / the research guides against what the runtime code
+> actually does (with the code cited). When they disagree, the code wins.
 
 ## Verified completed work
 
@@ -26,6 +32,7 @@
 | R5 PR4-UI | this branch | Analysis tab for saved user opportunities (`WorkspacePanel.tsx` + `lib/workspaceApi.ts`): "Run first analysis"/"Refresh analysis" with an honest running state (names the real chain steps, no fake per-step completion), PRELIMINARY badges on every machine number with the engine cap stated, approved claims separated from pending-review ones, gaps always listed, related KB evidence, version history, provenance, stale banner; new `GET /user-opportunities/{id}/workspace/diff` (deterministic `compare_versions` of the two newest complete versions — the seed of R6 notifications), rendered as the "changes since previous version" surface |
 | R8a | this branch | Sign-in + tenancy core: `auth_store.py` (PBKDF2-HMAC-SHA256 600k-iteration password hashes, sessions stored as SHA-256 token hashes, in-process login lockout, `USER-` namespace, `AUTH_DB_PATH`), `POST /auth/register\|login\|logout` + `GET /auth/me` (mode probe, sessionless), HttpOnly SameSite=Lax cookie (Secure outside test mode / `AUTH_COOKIE_SECURE`), `BOTIM_AUTH_MODE` opt-in enforcement (default off; unknown values fail closed) gating every `/api` route + the copilot proxy, user-store v3 `owner_user_id` (creator-owned records; legacy NULL rows shared; foreign records → indistinguishable 404), `AUTH_ALLOW_REGISTRATION`, frontend `AuthGate` (sign-in/register screen, session bar + sign-out, honest unreachable state). Password reset deferred to R6 email (stated in UI). R8b (chat/research scoping, quotas) remains |
 | R8b | this branch | Tenancy completion: copilot conversations owner-scoped (proxy forwards the session identity as `X-Botim-User`, never client-supplied; honored only with `COPILOT_TRUST_PROXY_USER=1`, set in the single-container image; foreign conversations → `conversation_not_found`; legacy NULL rows shared), research-store schema v4 `research_runs.owner_user_id` (create/list/detail/execute/candidates/review/revalidate/extract owner-guarded with indistinguishable 404s; candidate listings follow run ownership), per-user daily quotas in the auth DB (`check_quota`; defaults chat 200, research_execute/research_extract/workspace_refresh/monitoring_run 25; `QUOTA_*_PER_DAY` overrides; honest 429 with the limit stated; no quota when auth is off). Deferred: MV static-token replacement, grounding-side external-research filter, password reset (R6) |
+| R6 | this branch | Scheduled monitoring re-run + email-on-change. Per-chat `workspace_subscriptions` + a multi-recipient child table in the workspace store (schema v3→v5) with **double opt-in** (hashed, 48h `MONITORING_CONFIRM_TTL_HOURS` confirm tokens; no mail until confirmed, enforced at the persistence layer) and **deterministic signed unsubscribe links** (`MONITORING_UNSUBSCRIBE_SIGNING_KEY`, RFC 8058-style, nothing stored per row). External-cron tick `POST /api/monitoring/tick` (`.github/workflows/monitoring-tick.yml`, hourly; shared secret `MONITORING_TICK_TOKEN`; idempotent claim-and-advance; skip-if-running) calls the SAME `build_workspace` orchestrator with `trigger='monitoring'`. `shared/email/` (pure-stdlib `smtplib` seam, MockEmailSender in tests, honest unconfigured no-op) + `monitoring_digest.py` email confirmed recipients ONLY on a **material change** (normalized-claim-**text** diff layered on `compare_versions` so `RCAND-` id churn can't spam; composite ≥0.01; degraded/no-change/failed send nothing, recorded honestly; overclaim guard fails safe). Per-user daily quota scaled by active subscriptions (`QUOTA_MONITORING_WORKSPACE_RUN_PER_DAY`, surfaced as `quota_used`/`quota_limit`); Analysis-tab opt-in/cadence/quota UI; `render.yaml` declares all R6 env. Nothing writes `knowledge-base/`; changed items stay preliminary. HuggingFace deploy path removed (Render only) |
 | R7 | this branch | Document attachments: `shared/documents/` (extract .txt/.md/.csv/.docx via stdlib — PDF is an honest 415; 2 MB cap; deterministic paragraph chunking + transparent keyword-overlap retrieval as the scoped-RAG seam; `DOC-` store at `DOCUMENTS_DB_PATH` with cascade-deleted chunks), routes `POST/GET /user-opportunities/{id}/documents` (base64 upload, synchronous honest extraction, `document_upload` quota) + `DELETE /documents/{DOC-id}` (real deletion, double ownership guard), workspace builder step 1b snapshots verbatim excerpts (`document_evidence`, workspace schema v2) with `document_ids` provenance, copilot grounds excerpts as USER-PROVIDED data-never-instructions, frontend Files tab (upload/list/delete, honest errors) + workspace excerpt section, contract `shared/contracts/documents.schema.md`. Open: PDF (dependency decision), document→claim extraction |
 
 Handoff corrections found during verification:
@@ -58,8 +65,11 @@ Handoff corrections found during verification:
 - Monitoring: internal-KB events (demo corpus) + user monitoring configs; "Run
   monitoring now" performs one real manual run (R4a) when a search provider is
   configured, recording `MEVT-` events for genuinely new sources — otherwise it
-  fails honestly and the config shows the error. Cadence remains stored intent
-  (no scheduler).
+  fails honestly and the config shows the error. The `MCFG-` cadence remains
+  stored intent (no runner). Separately, a saved chat's Analysis tab can opt
+  into **scheduled workspace monitoring** (R6): confirm your account email, pick
+  a cadence, and the external-cron tick re-runs the analysis and emails you only
+  when a material change is found.
 - Research workspace (sidebar → Research): create/execute runs, review candidate
   claims; approved claims ground chat ("what did the external research find?")
   and appear in report appendices, always labelled external.
@@ -73,6 +83,13 @@ See `docs/architecture.md` for the full route table. Key env vars:
 | `BOTIM_APP_MODE` | `normal` (default) \| `demo` \| `test`; backend-authoritative |
 | `USER_OPPORTUNITIES_DB_PATH` | runtime SQLite (default `runtime/user-opportunities.db`, gitignored) |
 | `WORKSPACE_DB_PATH` / `WORKSPACE_STALE_HOURS` | analysis-workspace runtime SQLite (default `runtime/workspace.db`) and staleness threshold (default 24h) |
+| `MONITORING_TICK_TOKEN` / `MONITORING_TICK_MAX_CHATS` | R6 tick shared secret (unset → `POST /api/monitoring/tick` 404s, scheduler off) / max chats processed per tick (default 25) |
+| `MONITORING_MIN_CADENCE_HOURS` / `MONITORING_DEFAULT_CADENCE_HOURS` | R6 per-chat cadence floor (default 4) / default when opt-in omits it (default 6); ceiling fixed at 720 |
+| `MONITORING_CONFIRM_TTL_HOURS` | R6 double-opt-in confirm-link lifetime (default 48h; expired → 410, re-opt-in reissues) |
+| `MONITORING_UNSUBSCRIBE_SIGNING_KEY` | R6 HMAC key for signed unsubscribe links (unset → links can't be minted; a material run records `email_unavailable`, never sends). **Rotating it dead-links every already-emailed unsubscribe link.** |
+| `MONITORING_PUBLIC_BASE_URL` | R6 absolute base for links in emails (unset → derived from the request `Host` header) |
+| `QUOTA_MONITORING_WORKSPACE_RUN_PER_DAY` | R6 scheduled-run daily cap **per active subscription** (default 6; effective limit = base × active subs) |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM` / `SMTP_STARTTLS` / `SMTP_SSL` | R6 outbound email relay (pure-stdlib `smtplib`, provider-neutral; unset `SMTP_HOST`/`SMTP_FROM` → honest "not sent (no SMTP)" no-op, never a crash) |
 | `DOCUMENTS_DB_PATH` | R7 uploaded-document runtime SQLite (default `runtime/documents.db`) |
 | `QUOTA_CHAT_PER_DAY`, `QUOTA_RESEARCH_EXECUTE_PER_DAY`, `QUOTA_RESEARCH_EXTRACT_PER_DAY`, `QUOTA_WORKSPACE_REFRESH_PER_DAY`, `QUOTA_MONITORING_RUN_PER_DAY` / `COPILOT_TRUST_PROXY_USER` | R8b per-user daily quotas (required-auth mode only) / copilot honors the proxy's identity header (single-container deploy sets it) |
 | `BOTIM_AUTH_MODE` / `AUTH_DB_PATH` / `AUTH_ALLOW_REGISTRATION` / `AUTH_COOKIE_SECURE` | R8a auth: enforcement (`off` default; anything unrecognized fails closed to required), accounts/sessions SQLite (default `runtime/auth.db`), registration switch (default open), cookie Secure flag override |
@@ -92,6 +109,14 @@ merchant-voice 31 · opportunity-intelligence 9 · intelligence-monitoring 3 · 
 deploy 1 · frontend Vitest 23 files. Gate: `python3 shared/integration_check.py`
 (10 steps). PR #33 reported 1,041 tests green across suites at Phase 4.
 
+Phase R6 adds test files `shared/tests/{test_workspace_subscriptions,test_email_sender,test_monitoring_digest}.py`
+and `executive-ui/api/tests/test_workspace_monitoring_routes.py`, plus render-blueprint
+and WorkspacePanel cases. Full-suite tallies at the R6 tip: shared **228**,
+executive-ui/api **158**, executive-ui adapter/render 44, deploy **23**,
+copilot-backend 131, frontend Vitest **156**. The integration gate's last two
+steps (`executive-ui/api/tests`, `shared/tests`) exercise the new tick/email/
+digest/subscription paths — not just pre-existing ones.
+
 ## Current limitations (verified)
 
 - **Live research requires operator configuration.** The research platform
@@ -101,11 +126,14 @@ deploy 1 · frontend Vitest 23 files. Gate: `python3 shared/integration_check.py
   notes are manual (`contradicts` field) — automated KB-contradiction
   detection remains future work; the citation chip is informational (full
   traceability lives in the Research view, not a chip click-through).
-- **No monitoring scheduler.** Manual monitoring runs (R4a) and source
-  revalidation (R4b) work; cadence remains stored intent. Revalidation
-  covers research-platform sources — committed KB evidence records still
-  rely on Phase 4 freshness display only (re-checking KB source URLs and
-  proposing impact updates remains future/H1 work).
+- **Scheduled *workspace* monitoring exists (R6); other schedulers do not.**
+  Saved chats can opt into scheduled analysis re-runs + email-on-change via the
+  external-cron tick (R6). Separately, the `MCFG-` monitoring config (R4a, which
+  mints `MEVT-` events) is still **manual-run only** — its cadence remains
+  stored intent with no runner. Source revalidation (R4b) covers
+  research-platform sources; committed KB evidence records still rely on Phase 4
+  freshness display only (re-checking KB source URLs and proposing impact
+  updates remains future/H1 work).
 - **No PDF export** (web reports only).
 - **No real attachment processing** (file names noted only, disclosed in the UI).
 - **No authentication/tenancy** on the executive API; copilot has optional bearer

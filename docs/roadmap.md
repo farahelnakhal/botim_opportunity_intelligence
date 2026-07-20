@@ -148,17 +148,47 @@ Ships as a sequence of focused PRs:
   backed analysis distinguishing confirmed / preliminary / assumed / unknown,
   with a recommendation and next steps; follow-ups don't re-run the chain.
 
-## Phase R6 — Scheduled monitoring re-run + email-on-change
+## Phase R6 — Scheduled monitoring re-run + email-on-change — ✅ DONE (this branch)
 
 **Depends on:** R5 (re-run the chain), R8 (recipients need identity), an
 always-on scheduler, and email infrastructure.
 - Per-saved-chat re-run on a configurable cadence; snapshot + diff the
   workspace; email the delta of changed numbers/predictions to opted-in
   recipients; changed items stay preliminary until reviewed.
-- **Gotchas (decide before building):** the free-tier container sleeps — needs
-  an always-on plan or external cron trigger; no email sender exists yet
-  (provider + verified sender + opt-in/unsubscribe); throttling/budget per
-  user; concurrency with live edits.
+- **Delivered (PR6a–d, decision-log 2026-07-19):** per-chat
+  `workspace_subscriptions` + multi-recipient child table (workspace-store
+  schema v5) with **double-opt-in** confirmation and **deterministic signed
+  unsubscribe** links; external-cron tick `POST /api/monitoring/tick`
+  (`.github/workflows/monitoring-tick.yml`, hourly, shared-secret, idempotent
+  claim-and-advance, skip-if-running) calling the same `build_workspace`
+  orchestrator with `trigger='monitoring'`; `shared/email/` pure-stdlib SMTP
+  seam + `monitoring_digest.py` emailing confirmed recipients **only on a
+  material change** (normalized-claim-text diff over `compare_versions`,
+  composite ≥0.01; degraded/no-change/failed send nothing; overclaim guard);
+  per-user quota scaled by active subscriptions; Analysis-tab opt-in/cadence/
+  quota UI; all env declared in `render.yaml`. Nothing writes `knowledge-base/`.
+- **Gotchas (decided, per decision-log):** the free tier sleeps → **external
+  GitHub Actions cron** (not an in-process scheduler); email is **stdlib
+  `smtplib`** against an operator SMTP relay (no SDK); throttling via the R8b
+  quota mechanism; concurrency handled by claim-and-advance + skip-if-running.
+- **Deferred to backlog (not R6):** chat-sharing/multi-recipient teammate flow
+  (schema already supports N recipients), `List-Unsubscribe` one-click headers,
+  HTML email bodies, and password reset (now unblocked by the email seam).
+- **Known tradeoffs — intentional for now, revisit deliberately (not defects):**
+  - *Tick is not wall-clock-bounded.* `MONITORING_TICK_MAX_CHATS` caps the chat
+    *count* per tick but not total *time* (each build runs live research + LLM).
+    The cron curl has a `--max-time` ceiling on the trigger side; the endpoint
+    itself does not abort a long backlog. Deciding the in-handler behavior
+    (abort mid-backlog vs. finish the current chat vs. warn-only) is a real
+    design call, deferred rather than made silently.
+  - *Confirmation email is sent synchronously in the opt-in request.* "Turn on
+    monitoring" blocks the HTTP response for the SMTP round-trip (≤15s timeout).
+    Fine on the threading server (doesn't block other requests); moving to an
+    async/queued send is a deliberate future choice, not a drive-by change.
+  - *Quota is consumed on attempt, not on delivery.* A build that runs then
+    fails to email still counts against `monitoring_workspace_run` — so a chat
+    stuck in `email_send_failed` burns its daily quota retrying. Intentional
+    (an attempt is real work); revisit if it proves noisy in practice.
 
 ## Phase R7 — Attachments + internal-document ingestion
 
@@ -224,6 +254,122 @@ case's deck. Independent of R-phases; can run in parallel after R1.
   states, security/trust-boundary tests.
 - (Auth/tenancy and attachments are now first-class phases R8/R7, no longer
   deferred here.)
+
+## Capability-vs-claim build-out (planned 2026-07-20)
+
+> Committed build-out of the gaps in `docs/capability-vs-claim.md`. Roadmap-
+> scale (each phase ≈ an R1–R8-sized effort). Approved **one phase at a time**;
+> **R9a is the foundation everything else builds on** and is fully specified
+> below — the rest are sketches to be deepened in turn (same cadence as R6).
+> Claim #4 ("auto-update models/data") produced **no phase**: it was a
+> mis-wording of an already-shipped behavior and a deliberate non-goal (the
+> read-only-KB + human-approval invariant stands). Decisions locked in the
+> 2026-07-20 decision-log entries.
+
+### Phase R9a — Social-listening source adapters + source tiering (foundation) — SPEC
+
+**Value:** first-party voice-of-customer evidence (app-store reviews, Reddit)
+beyond generic web search, feeding the existing candidate-evidence pipeline;
+plus the shared **source-tier/provenance** layer that C2's "verified sources"
+also needs.
+**Depends on:** R1–R3 (research store, provider seam, candidate review); reuses
+`shared/research/providers.py`, `retrieval.py`, `freshness.py`, `source_urls.py`.
+**Blocked on:** the Merchant-Voice-style **privacy/security review** before any
+LIVE ingestion of real (non-synthetic) content (decision log 2026-07-20).
+
+- **Two new provider adapters behind the existing seam** (no new architecture,
+  no scraping aggregator):
+  - **Apple App Store customer-reviews RSS** — public, per-app/per-country, no
+    auth; bounded/polite like the Brave adapter.
+  - **Reddit** — official API (OAuth key, rate-limited); keyed, ToS/cost
+    accepted as an ops decision, injectable in tests.
+  - **Explicitly out of scope** (decision log): Google Play reviews, X,
+    Instagram, TikTok, Facebook (no clean API / ToS-hostile), and
+    WhatsApp/Telegram (private, consent-gated — belongs to Merchant Voice).
+- **Source-tier/provenance layer** on the research store: each source tagged
+  **T1** (govt/regulator/official statistics) · **T2** (industry/analyst) ·
+  **T3** (reputable press) · **T4** (general web/forums/social) from a
+  **human-curated registry** (domain/publisher → tier); the tier is **never
+  LLM-inferred**. Reused by C2.
+- **Network injectable / offline-testable** exactly like the Brave adapter and
+  `adapter_regulator.py`; live use is an explicit ops opt-in
+  (`RESEARCH_SEARCH_PROVIDER`-style) AND gated behind the privacy review.
+- Output is **candidate evidence only** (existing review pipeline); external
+  content stays **data, never instructions**.
+
+**Acceptance:**
+- Apple-RSS and Reddit adapters return persisted, cited, **tier-labelled**
+  candidate sources with honest partial/failure states; **all tests offline**
+  (injected fetch), no live key required.
+- Source tier is stored, surfaced on candidates, and registry-driven/auditable.
+- No live PII-bearing ingestion path is reachable until the privacy/security
+  gate passes (enforced like the Merchant Voice synthetic-only guard).
+**Risks:** Reddit ToS/rate/cost; **PII/privacy** (why the review gates it);
+prompt-injection surface grows (mitigated by data-never-instructions + H2);
+tier-registry curation burden; Apple RSS shape changes.
+**Exclusions:** no Play/X/IG/TikTok/FB/WhatsApp/Telegram; no aggregator; no
+multi-language (R9b); no non-English source-content handling (R9c).
+
+### Phase R9b — Multi-language querying — SKETCH
+**Value:** issue search terms per language for the supported adapters. **Scope:**
+querying only (translate/localize query terms; tag results with query
+language) — **not** translating source bodies. **Languages:** Arabic + English
+first-class, Hindi + Urdu second tier; Malayalam/Tagalog deferred to R9c/later.
+**Depends on:** R9a. **Risks:** per-language query-term quality; false
+"no results" from weak localization.
+
+### Phase R9c — Non-English source-content handling — SKETCH (deferred)
+**Value:** fetch/store/ground non-English source *text*. **Scope (separate,
+not bundled):** translation + making the evidence/wordguard/grounding pipeline
+handle non-English (preserve original, mark translations as derived, never let
+a translation fabricate a claim); Malayalam/Tagalog as stretch. Scoped only
+after R9a/b prove out.
+
+### Phase C1 — Deterministic calculators — (existing phase above; still NOT built)
+Prerequisite for C2. No re-scope; see the C1 section earlier in this file.
+
+### Phase C2 — Verified-source market sizing (TAM/SAM/SOM) — SKETCH
+**Value:** traceable TAM/SAM/SOM for the SME case. **Depends on:** C1 +
+R9a source-tier layer. **"Verified" =** ≥2 independent **T1/T2** sources
+agreeing within a **conservative (tight) tolerance** band, else flagged
+low-confidence (decision to be logged with C2; starting tight so disagreeing
+sources are never quietly treated as agreeing). Figures are **extracted** from
+sources (PR3 exact-substring discipline), **never computed/estimated by the
+LLM**; the C1 calculator derives TAM→SAM→SOM via shown formulas, every input
+traced to an `RSRC-` id. Results are **candidate/preliminary**, human-reviewed,
+never auto-written to committed scores. **Risks:** sizing figures often
+single-source/paywalled → frequent honest low-confidence; tolerance tuning.
+
+### Phase R10 — Evidence-gap-driven research-question generation — SKETCH
+**Value:** turn "weakest links" into targeted next questions. **Gap signals:**
+fewest approved evidence records; assumption-capped scorecard dimensions;
+contradictory evidence; stale load-bearing evidence (>180d); open
+`REQ-`/evidence-gap items (`impact/gaps`). **Gate:** questions are **proposals
+only** — LLM-drafted, taxonomy-validated → **human reviewer approves/edits the
+set** → only then attached to a guide/campaign. **No auto-send to a real
+merchant.** Answers flow into the existing candidate→review pipeline; never
+auto-update models. **Depends on:** the gap/assumption engine + Merchant Voice;
+benefits from R9 but not blocked by it.
+
+### Phase P1 — PDF export — (existing phase above)
+Confirmed not built; web reports only. Architecturally independent — recommend
+sequencing **last** (a brief is more valuable once C2/R9 add real data), but it
+is not blocked and can slot in anytime.
+
+### Phase H2 — External-content ingestion hardening — SKETCH
+**Value:** R9's real-external-content ingestion sharply widens the untrusted-
+content + PII + ToS surface the deferred H1 sweep doesn't cover. **Scope:**
+adversarial prompt-injection tests over scraped review/forum content; PII
+detection/redaction; per-adapter ToS/rate-limit conformance; translation-
+fidelity checks (with R9c). **Depends on:** R9 (and C2 ingestion).
+
+### Suggested sequence
+```
+R9a (adapters + tiering)  ─┬─▶ R9b (multi-lang query) ─▶ R9c (non-EN content, later)
+                           └─▶ C2 (market sizing) ◀── C1 (calculators, parallel)
+R10 (gap→questions) — deps exist now; richer after R9
+P1 (PDF) — last / anytime · H2 (hardening) — after R9/C2
+```
 
 ## Explicit exclusions (do not build without a product decision)
 

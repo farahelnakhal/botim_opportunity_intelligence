@@ -1,5 +1,5 @@
-# Keep the Hugging Face Space build context (executive-ui/deploy/Dockerfile)
-# small and free of stale local artifacts.
+# Keep the Docker build context (executive-ui/deploy/Dockerfile, deployed on
+# Render) small and free of stale local artifacts.
 .git/
 **/__pycache__/
 **/*.pyc
