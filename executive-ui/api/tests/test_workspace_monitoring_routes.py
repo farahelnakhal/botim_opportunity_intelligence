@@ -440,6 +440,81 @@ class WorkspaceMonitoringRoutes(unittest.TestCase):
             (server.research_providers.from_env, server.research_runner.execute_run,
              server._ExtractionLLMConfig, server.llm_provider.make_provider) = orig
 
+    def test_tick_records_distinct_email_failure_outcomes(self):
+        # a real material change we cannot DELIVER records a DISTINCT outcome per
+        # cause — never one ambiguous 'email_unavailable'. Failures inject an
+        # EmailError at each status; no network needed. None advance the baseline
+        # (so the change stays pending re-delivery once the cause is fixed).
+        os.environ["BOTIM_AUTH_MODE"] = "required"
+        os.environ["MONITORING_TICK_TOKEN"] = "tick-secret"
+        os.environ["MONITORING_UNSUBSCRIBE_SIGNING_KEY"] = "unsub-key"
+        from shared.research.providers import SearchResult
+        from shared.llm.provider import ConversationModel, ModelResponse
+        from shared.email import EmailError
+
+        opp, _ = self._opt_in_confirmed("r6-failmodes@example.com")
+        rs = server.get_research_store()
+        facts = ["A rival launched a card.", "Onboarding got faster for merchants.",
+                 "Fees changed across the sector.", "A new partner joined the market."]
+        pick = {"n": 0}
+
+        class Search:
+            name = "mock"
+            def search(self, query, max_results=8):
+                return [SearchResult.build("mock", url="https://example.com/r", title="Report")]
+
+        class Stub(ConversationModel):
+            model = "stub"
+            def generate(self, messages, tools, system_prompt, configuration):
+                blob = (system_prompt or "") + " " + " ".join(
+                    (m.get("content", "") if isinstance(m, dict) else str(m))
+                    for m in (messages or []))
+                sid = re.search(r"RSRC-[0-9a-f]{12}", blob).group(0)
+                fact = facts[pick["n"]]
+                return ModelResponse(content=json.dumps({"claims": [{
+                    "claim": fact, "sources": [{"source_id": sid, "supporting_quote": fact}]}]}))
+
+        class Cfg:
+            provider = "openai_compatible"; api_key = "x"; model = "stub"
+            base_url = "u"; timeout_s = 30
+
+        class FailingSender:
+            def __init__(self, status): self.status = status; self.sender = "relay@test"
+            def send(self, to, subject, text_body, html_body=None):
+                raise EmailError("boom", status=self.status)
+
+        page = ("<html><title>Report</title><body>" + " ".join(facts)
+                + "</body></html>").encode()
+        orig = (server.research_providers.from_env, server.research_runner.execute_run,
+                server._ExtractionLLMConfig, server.llm_provider.make_provider,
+                server.get_email_sender)
+        server.research_providers.from_env = lambda *a, **k: Search()
+        server.research_runner.execute_run = (lambda store, run_id, prov, **kw: orig[1](
+            store, run_id, prov, fetch_fn=lambda url, t: (200, "text/html", page),
+            sleep_fn=lambda s: None))
+        server._ExtractionLLMConfig = lambda: Cfg()
+        server.llm_provider.make_provider = lambda cfg: Stub()
+        try:
+            pick["n"] = 0; self._force_due(opp["id"]); self._tick()   # baseline v1
+            server.get_email_sender = lambda: FailingSender(503)
+            pick["n"] = 1; self._force_due(opp["id"]); _, s = self._tick()
+            self.assertEqual(s.get("email_unconfigured"), 1)          # SMTP not configured
+            server.get_email_sender = lambda: FailingSender(502)
+            pick["n"] = 2; self._force_due(opp["id"]); _, s = self._tick()
+            self.assertEqual(s.get("email_send_failed"), 1)           # auth/TLS/delivery
+            os.environ.pop("MONITORING_UNSUBSCRIBE_SIGNING_KEY", None)
+            pick["n"] = 3; self._force_due(opp["id"]); _, s = self._tick()
+            self.assertEqual(s.get("email_no_signing_key"), 1)        # can't mint unsubscribe link
+        finally:
+            (server.research_providers.from_env, server.research_runner.execute_run,
+             server._ExtractionLLMConfig, server.llm_provider.make_provider,
+             server.get_email_sender) = orig
+        # every failure left the baseline where build 1 set it — the change is
+        # still pending delivery, not silently marked done
+        sub = server.get_workspace_store().get_subscription(opp["id"])
+        self.assertEqual(sub["last_outcome"], "email_no_signing_key")
+        self.assertEqual(sub["last_notified_version"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

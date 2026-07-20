@@ -1119,32 +1119,43 @@ class Handler(BaseHTTPRequestHandler):
             return "no_change"
 
         # material — email every eligible (confirmed) recipient, if we can.
-        sender = get_email_sender()
+        # A real change we could not DELIVER never advances the baseline (so it
+        # retries once fixed), and the WHY is recorded as a DISTINCT outcome —
+        # not one ambiguous 'email_unavailable' — so 'why did nobody get mail?'
+        # is answerable: no signing key vs SMTP unconfigured (503) vs a delivery
+        # / auth / TLS failure (502) vs an overclaim-guard abort.
         signing_key = os.environ.get("MONITORING_UNSUBSCRIBE_SIGNING_KEY", "").strip()
+        if not signing_key:
+            # can't mint a working unsubscribe link -> never send without one
+            ws.record_run_result(opp_id, "email_no_signing_key", ran_at=completed)
+            return "email_no_signing_key"
+        sender = get_email_sender()
         base = self._public_base()
         workspace_url = f"{base}/report/{opp_id}"
-        recipients = ws.eligible_recipients(opp_id)
-        sent = 0
-        for r in recipients:
+        sent, failure = 0, None
+        for r in ws.eligible_recipients(opp_id):
             unsub = workspace_pkg.sign_unsubscribe_token(r["id"], signing_key)
-            if not unsub:   # no signing key -> cannot offer a working opt-out
-                break
             try:
                 digest = monitoring_digest.render(opp, baseline, version, ev,
                                                   workspace_url,
                                                   f"{base}/api/monitoring/unsubscribe?token={unsub}")
+            except monitoring_digest.DigestError:
+                # render is recipient-independent — it will abort for all of them
+                failure = "email_suppressed_overclaim"
+                break
+            try:
                 sender.send(r["recipient_email"], digest["subject"], digest["text_body"])
                 sent += 1
-            except (email_pkg.EmailError, monitoring_digest.DigestError):
+            except email_pkg.EmailError as exc:
+                failure = "email_unconfigured" if exc.status == 503 else "email_send_failed"
                 continue  # honest per-recipient failure; try the rest
         if sent:
             ws.record_run_result(opp_id, "emailed", ran_at=completed,
                                  last_notified_version=version["version"])
             return "emailed"
-        # a real change we could not deliver (no SMTP / no signing key / all
-        # sends failed): do NOT advance the baseline, so it retries once fixed.
-        ws.record_run_result(opp_id, "email_unavailable", ran_at=completed)
-        return "email_unavailable"
+        outcome = failure or "email_unavailable"  # no eligible recipients (shouldn't occur)
+        ws.record_run_result(opp_id, outcome, ran_at=completed)
+        return outcome
 
     # -- Phase 5: mode-aware read models ------------------------------------ #
     def _mode_overview(self, root, mode):

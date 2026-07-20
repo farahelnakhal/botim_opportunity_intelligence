@@ -131,9 +131,12 @@ out until confirmed** — enforced by the derived `enabled` flag AND an
 verified by recomputation — stateless, stable across every email, nothing
 stored per row. Rotating the key invalidates all previously-emailed links.
 
-**Outcomes** recorded in `last_outcome`: run results `built`/`emailed`/
-`no_change`/`partial_no_email`/`email_unavailable`/`skipped_in_progress`/
-`skipped_quota`/`failed`, and dormancy reasons `dormant_pending_confirmation`/
+**Outcomes** recorded in `last_outcome`: run results `emailed`/`no_change`/
+`partial_no_email`/`skipped_in_progress`/`skipped_quota`/`failed`; a material
+change we could not DELIVER records a distinct cause —
+`email_unconfigured` (SMTP 503) / `email_send_failed` (502: auth/TLS/delivery) /
+`email_no_signing_key` / `email_suppressed_overclaim` — none of which advance
+the notification baseline; and dormancy reasons `dormant_pending_confirmation`/
 `dormant_all_unsubscribed`/`dormant_no_recipients`.
 
 ### Tick (external cron)

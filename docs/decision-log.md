@@ -187,7 +187,19 @@
   app's. Recipients are restricted to session-authenticated account emails (see
   the recipient decision); we do not do bulk/marketing sending. Send failures are caught and
   recorded as an honest failed-notification state on the subscription; a failed
-  send is never logged as a delivered update.
+  send is never logged as a delivered update. A delivery failure is recorded
+  with a DISTINCT outcome per cause — `email_unconfigured` (EmailError 503),
+  `email_send_failed` (502: auth/TLS/delivery), `email_no_signing_key`,
+  `email_suppressed_overclaim` — never one ambiguous string, and none advance
+  the notification baseline (the change stays pending re-delivery).
+- **Live-send validation constraint (recorded so the next person doesn't
+  rediscover it):** the real `smtplib` STARTTLS/auth/send path can only be
+  exercised where SMTP egress exists. This repo's CI/dev sandbox permits 443
+  only — outbound 587/465 time out — so the live send (a real relay send, the
+  confirmation flow, a real digest) CANNOT run here; `MockEmailSender` covers
+  the offline logic. Use `scripts/smoke_smtp.py` (credential-free, reads
+  `SMTP_*`) from a machine with egress to validate a real relay after a key
+  rotation, provider change, or first deploy.
 
 ## 2026-07-19 — R6 cadence + recipients: per-chat `workspace_subscriptions` with a multi-recipient child table, owner-scoped, distinct from `MCFG-`
 
