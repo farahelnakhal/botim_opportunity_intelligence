@@ -3,6 +3,12 @@
 > Durable product memory. Describes what this product is, who it serves, and the
 > constraints every implementation decision must respect. For the technical map see
 > `docs/architecture.md`; for what is actually built see `docs/current-state.md`.
+>
+> **This is vision + constraints, not a shipped-capability list.** Much of the
+> language below (and in `MASTER_PROMPT.md` / `WORKSTREAMS.md` / the research
+> guides) describes intended behavior or methodology for the human+LLM
+> KB-authoring agent — not features the runtime executes. Before treating any
+> capability here as built, check it against `docs/capability-vs-claim.md`.
 
 ## Vision
 

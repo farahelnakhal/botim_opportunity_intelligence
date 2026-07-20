@@ -3,6 +3,12 @@
 > Baseline: `main` @ `38dee97` (merge of PR #34) + Phase R1. Every claim below was
 > verified against code/git, not copied from handoff prompts. Update this file at
 > the end of each merged phase.
+>
+> **Before citing any capability as shipped, see
+> [`docs/capability-vs-claim.md`](capability-vs-claim.md)** — it reconciles
+> aspirational/methodology language in `product-context.md` / `MASTER_PROMPT.md`
+> / `WORKSTREAMS.md` / the research guides against what the runtime code
+> actually does (with the code cited). When they disagree, the code wins.
 
 ## Verified completed work
 
