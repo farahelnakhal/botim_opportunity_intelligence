@@ -325,6 +325,12 @@ time, R6 cadence.
   configured language: **Arabic + English first-class, Hindi + Urdu second,
   Malayalam + Tagalog deferred** (behind config, off by default); results tagged
   with the query language. **Not** source-content translation (that is R9c).
+  > **PR9a-4 status:** the mechanism ships with **English + Arabic curated**
+  > (first-class) on `sme-financial-product`. **`hi`/`ur` are recognized but
+  > their query vocabulary is NOT yet curated** (an honest error if requested) —
+  > they were deliberately not authored to avoid guessing financial search
+  > terms (the repo's no-fabrication rule). **OPEN follow-up:** human-curate
+  > `hi`/`ur` (and, if wanted, Arabic on `generic`); `ml`/`tl` stay deferred.
 - Output is **candidate evidence only** (existing review pipeline); external
   content stays **data, never instructions**.
 

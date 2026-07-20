@@ -48,7 +48,7 @@ try:
 except ImportError:  # imported with repo root not on sys.path (e.g. as shared.research from elsewhere)
     from ..source_urls import safe_url
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_DB_PATH = REPO / "runtime" / "research.db"
@@ -202,6 +202,8 @@ class ResearchStore:
                 self._migrate_to_v4(conn)
             if version < 5:
                 self._migrate_to_v5(conn)
+            if version < 6:
+                self._migrate_to_v6(conn)
             conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)",
                          (str(SCHEMA_VERSION),))
 
@@ -367,6 +369,15 @@ class ResearchStore:
                 conn.execute("UPDATE research_sources SET source_tier=? WHERE id=?",
                              (source_tier.tier_for(r["canonical_url"]), r["id"]))
 
+    @staticmethod
+    def _migrate_to_v6(conn):
+        # Phase R9a (PR9a-4) — the language a query was issued in (multi-language
+        # QUERYING; not source-content language, which stays NULL/R9c). Nullable;
+        # legacy rows stay NULL (language unspecified). Idempotent (PRAGMA guard).
+        existing = {row["name"] for row in conn.execute("PRAGMA table_info(research_queries)")}
+        if "language" not in existing:
+            conn.execute("ALTER TABLE research_queries ADD COLUMN language TEXT")
+
     def create_run(self, payload, owner_user_id=None):
         if not isinstance(payload, dict):
             raise ResearchStoreError("payload must be an object")
@@ -495,6 +506,14 @@ class ResearchStore:
         query_text = _require_str(payload, "query_text", TEXT_MAX, required=True)
         objective = _require_str(payload, "objective", TEXT_MAX)
         provider = _require_str(payload, "provider", SHORT_MAX)
+        # R9a — the language the query was issued in (multi-language querying).
+        # Registry-validated against the profiles language set; never invented.
+        language = payload.get("language")
+        if language is not None:
+            from .profiles import LANGUAGES
+            if not isinstance(language, str) or language.strip().lower() not in LANGUAGES:
+                raise ResearchStoreError("'language' must be a recognized query language code")
+            language = language.strip().lower()
         query_id = _new_id("RQRY")
         now = _now()
         with self._connect() as conn:
@@ -503,9 +522,9 @@ class ResearchStore:
                 raise ResearchStoreError("cannot add queries to a finished run", status=409)
             conn.execute(
                 """INSERT INTO research_queries
-                   (id, run_id, objective, query_text, provider, status, created_at)
-                   VALUES (?,?,?,?,?,'pending',?)""",
-                (query_id, run_id, objective, query_text, provider, now))
+                   (id, run_id, objective, query_text, provider, language, status, created_at)
+                   VALUES (?,?,?,?,?,?,'pending',?)""",
+                (query_id, run_id, objective, query_text, provider, language, now))
             return dict(conn.execute(
                 "SELECT * FROM research_queries WHERE id=?", (query_id,)).fetchone())
 

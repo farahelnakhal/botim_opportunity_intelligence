@@ -4,6 +4,46 @@
 > decision would surprise a future maintainer or constrains future work.
 > Format: date · decision · reasoning · alternatives · consequences.
 
+## 2026-07-20 — R9a-4: multi-language querying is human-curated, not machine-translated
+
+- **Decision:** Multi-language querying issues search terms in more than one
+  language by **human-curated per-language query templates**, exactly the way
+  `profiles.py` already works (deterministic data, no LLM). It is **querying
+  only** — no source-content translation (that stays R9c). English is always
+  on; other languages are **opt-in per run** via `context.languages` (default
+  `["en"]`). Ships with **English + Arabic curated (first-class)** on the
+  `sme-financial-product` validation profile; a small `CONTEXT_L10N` glossary
+  localizes `{market}/{segment}/{product}` values for Arabic, with an
+  **English fall-back for any uncurated value** (never a guessed translation).
+  Each generated query is **tagged with its language** (`research_queries.language`,
+  research-store **schema v6**); `generate_queries` now returns
+  `(objective, query_text, language)` triples. Requesting a language the chosen
+  profile has no curated templates for raises an **honest error** naming what
+  is curated — it never emits empty or machine-translated queries.
+- **Reasoning:** the profile layer's whole point is transparent, testable,
+  free, deterministic query generation; machine-translating queries would break
+  that and risk fabricated terms. Arabic is genuinely first-class for the
+  UAE/GCC validation case and I can author accurate MSA financial/search terms.
+  Query-language ≠ content-language, so it lives on the query row and does NOT
+  reuse `research_sources.language` (which remains for source content, R9c).
+- **Alternatives rejected:** LLM/machine translation of queries
+  (non-deterministic, fabrication risk, violates the no-LLM profile invariant);
+  term-substitution on English phrases via a word glossary (produces
+  mixed-language, unidiomatic queries); reusing `sources.language` for the query
+  language (conflates two different things); **authoring Hindi/Urdu query terms
+  now** (I am not confident enough in idiomatic financial search terms in those
+  languages — guessing them would be the fabrication this repo forbids).
+- **Consequences:** `hi`/`ur` (roadmap "second") and `ml`/`tl` ("deferred") are
+  **recognized language codes but not yet curated for any profile** — selecting
+  one is an honest error, and their curation is a **tracked open follow-up**
+  (see the roadmap R9a note). `generic` stays English-only until someone curates
+  it. The triple return shape is a one-caller change (executive API) plus test
+  updates. This PR also carries the **docs/contract sweep**: research.schema.md
+  bumped v3→v6 and documents the provider registry, the two gated social
+  adapters + the `RESEARCH_ALLOW_LIVE_SOCIAL` fail-closed gate, `source_tier`,
+  `rating`/`url_synthesized`, `languages`, and the query-language field;
+  current-state.md gains the R9a work and carries the open privacy-review item.
+
 ## 2026-07-20 — R9a-3: Reddit adapter + the real fail-closed privacy/security gate
 
 - **Decision:** Add a **Reddit** adapter (`RedditProvider`) behind the same
