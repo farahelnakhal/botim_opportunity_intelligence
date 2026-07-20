@@ -4,6 +4,70 @@
 > decision would surprise a future maintainer or constrains future work.
 > Format: date · decision · reasoning · alternatives · consequences.
 
+## 2026-07-20 — R9a-3: Reddit adapter + the real fail-closed privacy/security gate
+
+- **Decision:** Add a **Reddit** adapter (`RedditProvider`) behind the same
+  search seam, and replace PR9a-2's interim hard-refusal with the **real
+  opt-in gate**. Reddit uses the official API with **app-only
+  client-credentials OAuth** (confidential client; `REDDIT_CLIENT_ID` /
+  `REDDIT_CLIENT_SECRET`, sent only as request headers, never logged/echoed) —
+  no user context, no user data. `query` is adapter-interpreted: an optional
+  `r/<subreddit>` prefix restricts the search to that subreddit, otherwise it
+  is a global keyword search. Each post maps to the fixed `SearchResult` shape;
+  the URL is the **real Reddit permalink** (`https://www.reddit.com` +
+  `permalink`), so `url_synthesized` is **False** (unlike Apple, Reddit
+  publishes a dereferenceable per-item URL). The gate is a single fail-closed
+  flag, **`RESEARCH_ALLOW_LIVE_SOCIAL`** (default off; **only the exact value
+  `1` enables**, any typo/`true`/empty stays off — the Merchant-Voice
+  `MV_SYNTHETIC_ONLY` posture). `from_env` refuses to construct ANY gated
+  provider (`appstore`, `reddit`) unless the flag is on, with an honest error
+  naming the privacy/security review; `build_provider` still does not consult
+  the gate (direct/offline callers and tests own that).
+- **Reasoning:** the flag is the operator's explicit attestation that the
+  Merchant-Voice-style privacy/security review has passed — the code path
+  exists and is testable, but real PII-bearing ingestion is unreachable by
+  default and cannot be enabled by accident. App-only OAuth avoids handling any
+  Reddit user's credentials or personal account data. Reusing the seam keeps
+  the runner/dedup/storage/candidate-review pipeline unchanged.
+- **Alternatives rejected:** Reddit script-app `password` grant (needs a real
+  user's credentials — more PII, worse posture); enabling gated providers via a
+  `_bool`-style "truthy" match (`true`/`yes`/`on` — too easy to trip
+  accidentally; exact-`1` is deliberately narrow); a per-provider flag each
+  (one clearly-named live-social switch is easier to reason about and audit);
+  capturing Reddit post score as `rating` (score is upvotes, not a rating —
+  would misuse the field; left None to stay faithful).
+- **Consequences:** with the flag off (every environment until the review is
+  cleared **with the product owner**), selecting `appstore`/`reddit` fails
+  honestly and no live social fetch happens; all adapter tests stay offline
+  (injected fetch, no key/credentials). Turning the flag on is an ops decision
+  that must not precede the human review. Reddit token+search are two bounded,
+  polite, single-retry requests; the injected fetch takes an optional POST body
+  (`fetch(url, headers, data=None)`) so the token exchange is exercised
+  offline. PR9a-4 adds multi-language querying + the docs/contract sweep.
+
+## 2026-07-20 — R9a-2 follow-up: capture the App Store star rating; flag synthesized links
+
+- **Decision:** Small extension on the fresh Apple adapter, reversing PR9a-2's
+  "defer the star rating" note. `SearchResult` gains two fields: `rating` (a
+  provider-supplied rating verbatim) and `url_synthesized` (True when the
+  adapter CONSTRUCTED the URL rather than receiving a real permalink). The
+  Apple adapter fills `rating` from `im:rating` and sets `url_synthesized=True`
+  (Apple has no public per-review permalink); the runner records both in
+  `quality_signals`; `ResearchPanel` labels such links **"open linked page"**
+  with an explicit **"(not a direct link)"** note instead of "open source".
+- **Reasoning:** the star rating is real data already in the source feed (not a
+  fabrication risk) and cheaper to add while the adapter is fresh than to
+  retrofit once callers depend on the shape. Flagging the synthesized link
+  closes an honesty gap: a reader clicking a "source" must not expect it to
+  dereference to the exact review when Apple publishes no such URL.
+- **Alternatives rejected:** leaving rating out (loses real, useful signal);
+  a bespoke per-review DB column (a provider-specific field belongs in the
+  existing `quality_signals` bag, no schema migration needed); silently keeping
+  the "open source" label on a non-dereferencing link (misleading).
+- **Consequences:** `SearchResult` now always carries `rating`/`url_synthesized`
+  (defaults None/False — backward compatible; Brave results are unaffected).
+  Reddit (PR9a-3) sets `url_synthesized=False` (real permalinks).
+
 ## 2026-07-20 — R9a-2: review/listing sources reuse the search seam; multi-provider registry
 
 - **Decision:** New source adapters reuse the existing

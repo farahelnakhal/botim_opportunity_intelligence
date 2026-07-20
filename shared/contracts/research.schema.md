@@ -123,12 +123,20 @@ SQL/paths/keys/fetched content in messages.
 
 ## Execution rules (Phase R2)
 
-- **Provider seam** (`providers.py`): selected via `RESEARCH_SEARCH_PROVIDER`
-  (currently `brave`, requiring `BRAVE_SEARCH_API_KEY` — sent only as a
-  request header, never logged/stored/echoed). Unset ⇒ no provider ⇒ honest
-  failure. The deterministic `MockSearchProvider` is injectable in code for
-  tests but **deliberately not reachable via environment configuration** —
-  a deployment can never serve synthetic results as real.
+- **Provider seam** (`providers.py`): a `name → builder` registry selected via
+  `RESEARCH_SEARCH_PROVIDER`. `brave` (web search; `BRAVE_SEARCH_API_KEY`) and —
+  **R9a** — `appstore` (Apple App Store reviews; public RSS, no key) and
+  `reddit` (Reddit official API; app-only client-credentials OAuth,
+  `REDDIT_CLIENT_ID`/`REDDIT_CLIENT_SECRET`). All secrets are sent only as
+  request headers, never logged/stored/echoed. Unset ⇒ no provider ⇒ honest
+  failure. **`appstore`/`reddit` ingest real external (possibly PII-bearing)
+  content and are GATED**: `from_env` refuses to construct them unless the
+  fail-closed `RESEARCH_ALLOW_LIVE_SOCIAL=1` switch (the Merchant-Voice-style
+  privacy/security review — only the exact value `1` opts in) is set;
+  `build_provider(name)` constructs any registered adapter for tests/offline
+  use and does not consult the gate. The deterministic `MockSearchProvider` is
+  injectable in code for tests but **deliberately not reachable via environment
+  configuration** — a deployment can never serve synthetic results as real.
 - **Bounded**: per-run caps (default 20 queries, 8 results/query, 12 page
   fetches), 10s timeouts, at most one retry per request, politeness delay
   between fetches, 500 KB page cap (truncation recorded).
