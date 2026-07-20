@@ -169,6 +169,69 @@
   R9a social sources (`reddit.com`, `apps.apple.com`) — are T4 by default; C2's
   corroboration rule reads this field directly. Firms up the 2026-07-20
   source-tiering decision with the storage/default specifics. (PR9a-1.)
+
+## 2026-07-20 — R10 evidence-gap-driven merchant question generation: 3-PR shape, layering, distinct RQSET- object, and NO cross-service write into Merchant Voice
+
+- **Decision (phase shape):** R10 ships as **three PRs**: **PR10a** — a
+  deterministic, read-only per-opportunity *evidence-gap profiler*
+  (`impact/gap_profile.py`) composing the five signals the codebase already
+  computes (no supporting evidence, assumption-capped dimensions, contradicted
+  evidence, stale >180d load-bearing evidence, open gaps) into a ranked
+  "weakest-link" profile, reusing the existing `impact/gaps.py` heuristic
+  ranker; **PR10b** — LLM-drafted merchant research questions from that profile,
+  each **taxonomy-validated** against Merchant Voice's
+  `models.validate_questions_input` and tagged with its motivating
+  `ASM-OPP-nnn-*`, persisted as a draft **question-set** in a new owner-scoped
+  runtime store; **PR10c** — human review of the draft set + a Merchant Voice
+  hand-off + frontend.
+- **Decision (D1 — layering):** the deterministic profiler lives in `impact/`
+  (Workstream B, which already reads the committed KB); the draft-question-set
+  store lives in `shared/questions/` (a pure store); the generation
+  orchestration (profile + `shared.llm.provider` + MV taxonomy validation) lives
+  in `executive-ui/api/` — so `shared/` never imports *up* into `impact/` or
+  Merchant Voice.
+- **Decision (D2 — distinct object):** R10's output is a new `RQSET-` draft
+  question-set, **not** an overload of `impact/research_request.py` (that is a
+  per-assumption single-question `REQ-` decision record with no `purpose`/
+  `question_type` taxonomy shape). R10 borrows its proposal/status idiom
+  (`status="draft"`, human-approval-before-actionable) and validates every
+  generated question against MV's taxonomy before it can be offered for a human
+  to attach to a real campaign guide.
+- **Decision (D3 — NO cross-service write into Merchant Voice in R10):** after
+  human review, R10 stops at a reviewed, taxonomy-valid **draft set**; a human
+  manually creates the Merchant Voice guide from it through MV's existing
+  `POST /campaigns/{id}/guides` → `guides.approve` (reviewer+, no self-approval)
+  flow. R10 does **not** call MV to auto-create even a draft guide.
+  **Why (a) is the safer default:** Merchant Voice is a separate,
+  synthetic-only, prototype-auth service with a tightly gated human-review
+  pipeline; opening an executive→MV **cross-service write path** is exactly the
+  kind of scope that deserves its own dedicated privacy/security review rather
+  than riding in on R10's first cut. Creating even a *draft* guide attaches it
+  to a campaign, so the conservative boundary keeps R10 strictly on the
+  proposal side. A future human-triggered "create draft guide in MV" automation
+  is its **own follow-up phase** with its own decision-log entry — never
+  bundled into R10.
+- **Decision (D4 — no-fabrication discipline):** gap **severity/ranking is
+  deterministic** (PR10a's heuristic, weights shown), never an LLM guess; the
+  LLM (PR10b) drafts only question *text*, and a question carrying an invented
+  or unmatched `ASM-` link is rejected (PR3's no-invented-id rule); a missing
+  search/LLM provider yields an honest gap, never a fabricated question; nothing
+  R10 produces auto-updates a committed score or opportunity record — only a
+  human running the `impact` CLI with `--approver` commits KB changes, and
+  answers still flow through the existing candidate→human-review pipeline.
+- **Alternatives rejected:** overloading `research_request.py` (wrong shape, no
+  taxonomy); putting the profiler in `shared/` (would import up); an
+  LLM-assigned severity (non-deterministic, unshowable); auto-creating an MV
+  draft guide in R10's first cut (the cross-service-write scope above);
+  LLM-drafted questions bypassing MV's taxonomy/human-review (violates the
+  "proposals only, human disposes" invariant).
+- **Consequences:** PR10a adds `impact/gap_profile.py` (+ contract
+  `shared/contracts/evidence-gap-profile.schema.md`), a read-only copilot tool
+  `get_evidence_gap_profile`, and `GET /api/opportunities/{OPP-nnn}/gap-profile`
+  (mode-gated). Later PRs add `shared/questions/` (`RQSET-`), the
+  `executive-ui/api/question_generator.py` orchestration, review routes, and a
+  frontend. Nothing writes `knowledge-base/` or Merchant Voice.
+
 ## 2026-07-20 — C1 deterministic calculators: a self-verifying typed-step engine, stateless compute + a re-derivable CALC- store, and no LLM arithmetic
 
 - **Decision:** Ship **request-time deterministic calculators** as a new
