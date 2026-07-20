@@ -547,6 +547,44 @@ def get_analysis_workspace(opportunity_ref):
                 "pending human review.")}
 
 
+def list_calculators():
+    """Phase C1 — the deterministic-calculator catalog: each calculator's id,
+    title, and REQUIRED inputs (with units). Use this to learn which inputs
+    run_calculator needs before calling it; never invent input values."""
+    from shared.calculators import catalog
+    out = []
+    for c in catalog():
+        out.append({"id": c["id"], "title": c["title"], "description": c["description"],
+                    "inputs": [{"name": i["name"], "unit": i["unit"], "kind": i["kind"],
+                                "required": i["required"], "description": i["description"]}
+                               for i in c["inputs"]]})
+    return {"calculators": out,
+            "note": ("Deterministic calculators compute exact, shown-working results from "
+                     "the numbers you pass — the model must never do the arithmetic itself.")}
+
+
+def run_calculator(calculator_id, inputs):
+    """Phase C1 — run a deterministic calculator and return its FULLY SHOWN
+    working (typed steps + outputs + disclaimers). The formula is fixed in
+    code; only numbers are supplied (never an expression). A calculation over
+    assumed inputs is illustrative/preliminary, never a validated figure; the
+    numbers here are authoritative over anything the model might compute."""
+    from shared.calculators import compute, render_markdown, CalculatorError
+    if not isinstance(calculator_id, str):
+        raise ToolError("calculator_id must be a string")
+    if inputs is None:
+        inputs = {}
+    if not isinstance(inputs, dict):
+        raise ToolError("inputs must be an object of {name: number | {value,label,note}}")
+    try:
+        envelope = compute(calculator_id, inputs)
+    except CalculatorError as exc:
+        raise ToolError(str(exc), not_found=(exc.status == 404))
+    return {"calculation": envelope, "shown_working": render_markdown(envelope),
+            "note": ("Deterministic calculation — every number is computed and shown; "
+                     "inputs labelled 'assumption' make the result illustrative, not validated.")}
+
+
 # --- registry ----------------------------------------------------------------
 
 def _schema(props, required):
@@ -578,6 +616,12 @@ REGISTRY = {
     "get_analysis_workspace": (get_analysis_workspace,
                                _schema({"opportunity_ref": _ID}, ["opportunity_ref"]),
                                "Latest preliminary analysis workspace for a saved opportunity (machine-generated, pending review)"),
+    "list_calculators": (list_calculators, _schema({}, []),
+                         "List the deterministic calculators and their required inputs (call before run_calculator)"),
+    "run_calculator": (run_calculator,
+                       _schema({"calculator_id": _ID, "inputs": {"type": "object"}},
+                               ["calculator_id", "inputs"]),
+                       "Run a deterministic calculator (market sizing, unit economics, payback, ...) and return fully shown working; the model must NEVER do the arithmetic itself"),
     "generate_research_request_draft": (generate_research_request_draft, _schema({"assumption_id": _ID}, ["assumption_id"]), "Draft research request (ephemeral)"),
     "generate_executive_brief": (generate_executive_brief, _schema({"opp_id": _ID}, ["opp_id"]), "Draft executive brief (ephemeral)"),
     "generate_impact_proposal_draft": (generate_impact_proposal_draft,

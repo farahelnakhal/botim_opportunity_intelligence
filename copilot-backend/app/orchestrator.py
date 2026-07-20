@@ -12,7 +12,7 @@ from . import grounding, intents, security
 from .provider import MockProvider, ProviderError, make_provider
 from .system_prompt import SYSTEM_PROMPT
 from .tools_registry import REGISTRY, ToolError, call_tool, tool_specs
-from .wordguard import check_wording
+from .wordguard import check_wording, check_numeric_fidelity
 
 
 import re as _re
@@ -303,6 +303,15 @@ class Orchestrator:
         if verdict is not None:
             warnings.append(f"model wording rejected ({verdict}); deterministic grounded text used")
             prose = facts_block
+        # Phase C1 — for a deterministic calculation, the model may only narrate
+        # the computed numbers. A fabricated/miscopied figure -> fall back to the
+        # exact grounded working.
+        elif pack.has_calculation:
+            bad_number = check_numeric_fidelity(prose, facts_block)
+            if bad_number is not None:
+                warnings.append(f"model introduced a number not in the calculation "
+                                f"({bad_number}); deterministic grounded working used")
+                prose = facts_block
         if pack.needs_no_decision and grounding.NO_DECISION not in prose:
             prose = prose.rstrip() + "\n\n" + grounding.NO_DECISION
         # PR2 (baseline synthesis) — the old "## Evidence used" id-list

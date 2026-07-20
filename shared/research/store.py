@@ -21,7 +21,8 @@ pattern in this repository):
   ids, or promotes anything. `candidate_evidence.status` starts at
   `pending_review`; approval semantics arrive with the review workflow (R3)
   and even "approved" here will never mean authoritative Part A evidence.
-- ID namespaces (cannot collide with committed KB ids or UOPP-/MCFG-):
+- ID namespaces (cannot collide with committed KB ids or UOPP-/MCFG-/AWV-/
+  WSUB-/DOC-/USER-/CALC-):
   runs RRUN-<12 hex>, queries RQRY-<12 hex>, sources RSRC-<12 hex>,
   candidates RCAND-<12 hex>.
 
