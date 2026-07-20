@@ -9,6 +9,7 @@ const WORKSPACE_NAV: { key: string; label: string; icon: IconName; view: View }[
   { key: "monitoring", label: "Monitoring", icon: "bell", view: "monitoring" },
   { key: "reports", label: "Reports & Briefs", icon: "file", view: "reports" },
   { key: "research", label: "Research", icon: "search", view: "research" },
+  { key: "calculators", label: "Calculators", icon: "activity", view: "calculators" },
   { key: "library", label: "Knowledge Base", icon: "book", view: "knowledge" },
   { key: "settings", label: "Settings", icon: "settings", view: "settings" },
 ];
@@ -16,7 +17,7 @@ const WORKSPACE_NAV: { key: string; label: string; icon: IconName; view: View }[
 export default function Sidebar() {
   const {
     projects, generated, userProjects, appMode, view, activeProjectId, theme, toggleTheme,
-    sidebarOpen, goHome, goUpdates, goMonitoring, goKnowledge, goReports, goResearch, goSettings,
+    sidebarOpen, goHome, goUpdates, goMonitoring, goKnowledge, goReports, goResearch, goCalculators, goSettings,
     openProject,
   } = useApp();
   const [showDemo, setShowDemo] = useState(true);
@@ -30,6 +31,7 @@ export default function Sidebar() {
     knowledge: goKnowledge,
     reports: goReports,
     research: goResearch,
+    calculators: goCalculators,
     settings: goSettings,
   };
 

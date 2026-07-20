@@ -10,6 +10,7 @@ import Report from "./components/Report";
 import Icon from "./components/Icon";
 import { KnowledgePanel, MonitoringPanel, ReportsPanel, SettingsPanel } from "./components/panels";
 import ResearchPanel from "./components/ResearchPanel";
+import CalculatorsPanel from "./components/CalculatorsPanel";
 
 export default function App() {
   const { view, loading, error, setSidebarOpen } = useApp();
@@ -48,6 +49,8 @@ export default function App() {
             {view === "reports" && <section className="view" id="view-reports"><ReportsPanel /></section>}
             {/* Phase R3 — external research runs, sources, and candidate review */}
             {view === "research" && <section className="view" id="view-research"><ResearchPanel /></section>}
+            {/* Phase C1 — deterministic calculators (market sizing, unit economics, ...) */}
+            {view === "calculators" && <section className="view" id="view-calculators"><CalculatorsPanel /></section>}
             {/* Phase 4 — URL-addressed web report (/report/OPP-nnn) */}
             {view === "report" && <Report />}
             {view === "settings" && <section className="view" id="view-settings"><SettingsPanel /></section>}

@@ -53,6 +53,7 @@ try:
     from shared import documents as documents_pkg
     from shared import email as email_pkg
     from shared.email import monitoring_digest
+    from shared import calculators as calculators_pkg
 except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -68,6 +69,7 @@ except ImportError:
     from shared import documents as documents_pkg
     from shared import email as email_pkg
     from shared.email import monitoring_digest
+    from shared import calculators as calculators_pkg
 
 
 class _ExtractionLLMConfig:
@@ -155,6 +157,18 @@ def get_workspace_store():
     return _WORKSPACE_STORE
 
 
+# Phase C1 — shared runtime store for saved deterministic calculations
+# (path from CALCULATORS_DB_PATH, default runtime/calculators.db). Lazy.
+_CALCULATOR_STORE = None
+
+
+def get_calculator_store():
+    global _CALCULATOR_STORE
+    if _CALCULATOR_STORE is None:
+        _CALCULATOR_STORE = calculators_pkg.CalculatorStore()
+    return _CALCULATOR_STORE
+
+
 # Phase R8a — accounts + sessions (path from AUTH_DB_PATH, default
 # runtime/auth.db). Lazy for the same reason.
 _AUTH_STORE = None
@@ -211,7 +225,8 @@ def registration_open():
 # QUOTA_CHAT_PER_DAY, QUOTA_RESEARCH_EXECUTE_PER_DAY, ...
 QUOTA_DEFAULTS = {"chat": 200, "research_execute": 25, "research_extract": 25,
                   "workspace_refresh": 25, "monitoring_run": 25,
-                  "document_upload": 25, "monitoring_workspace_run": 6}
+                  "document_upload": 25, "monitoring_workspace_run": 6,
+                  "calculator_save": 100}
 
 
 def monitoring_run_quota_limit(ws, owner_user_id):
@@ -470,6 +485,9 @@ class Handler(BaseHTTPRequestHandler):
         # with a stated reason — it never fabricates results.
         if sub.startswith("/research/"):
             return self._research_post(sub)
+        # Phase C1 — deterministic calculators: compute (stateless) or save.
+        if sub.startswith("/calculators"):
+            return self._calculators_post(sub)
         if sub in LEGACY_ROUTE_PATHS and not LEGACY_UNGROUNDED_ROUTES_ENABLED:
             return self._legacy_disabled()
         body = self._read_json_body()
@@ -589,6 +607,69 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(exc.status, str(exc))
         except Exception as exc:  # never leak a stack trace
             return self._error(500, f"{type(exc).__name__}: {exc}")
+
+    # -- Phase C1: deterministic calculators -------------------------------- #
+    # Pure request-time compute (inputs -> full shown working) plus an
+    # owner-scoped CALC- store of saved calculations. The engine never writes
+    # the knowledge base and does no LLM arithmetic.
+    def _calculators_post(self, sub):
+        try:
+            # POST /calculators/{name}/compute — stateless, nothing saved
+            m = re.match(r"^/calculators/([a-z0-9_]{1,60})/compute$", sub)
+            if m:
+                body = self._read_json_body()
+                envelope = calculators_pkg.compute(m.group(1), body.get("inputs") or {})
+                return self._json({"calculation": envelope}, status=200)
+            # POST /calculators/{name} — compute AND save (owner-scoped, quota)
+            m = re.match(r"^/calculators/([a-z0-9_]{1,60})/?$", sub)
+            if m:
+                if not self._quota_guard("calculator_save"):
+                    return
+                body = self._read_json_body()
+                envelope = calculators_pkg.compute(m.group(1), body.get("inputs") or {})
+                owner = self._current_user() if auth_required() else None
+                saved = get_calculator_store().save(
+                    envelope,
+                    opportunity_ref=body.get("opportunity_ref"),
+                    label=body.get("label"),
+                    owner_user_id=owner["id"] if owner else None)
+                return self._json({"saved_calculation": saved}, status=201)
+            # DELETE is issued via do_DELETE -> _calculators_delete
+            return self._error(404, "unknown calculator endpoint")
+        except calculators_pkg.CalculatorError as exc:
+            return self._error(exc.status, str(exc))
+        except Exception as exc:  # never leak a stack trace
+            return self._error(500, f"{type(exc).__name__}: {exc}")
+
+    def _calculators_get(self, path, query):
+        try:
+            if path in ("/calculators", "/calculators/"):
+                return self._json({"calculators": calculators_pkg.catalog()})
+            if path in ("/calculators/results", "/calculators/results/"):
+                viewer = self._current_user() if auth_required() else None
+                opp_ref = (query.get("opportunity_ref") or [None])[0]
+                return self._json({"saved_calculations": get_calculator_store().list(
+                    opportunity_ref=opp_ref,
+                    visible_to=viewer["id"] if viewer else None)})
+            m = re.match(r"^/calculators/results/([A-Za-z0-9-]{1,40})$", path)
+            if m:
+                viewer = self._current_user() if auth_required() else None
+                return self._json({"saved_calculation": get_calculator_store().get(
+                    m.group(1), visible_to=viewer["id"] if viewer else None)})
+            return self._error(404, "unknown calculator endpoint")
+        except calculators_pkg.CalculatorError as exc:
+            return self._error(exc.status, str(exc))
+
+    def _calculators_delete(self, sub):
+        m = re.match(r"^/calculators/results/([A-Za-z0-9-]{1,40})$", sub)
+        if not m:
+            return self._error(404, "unknown calculator endpoint")
+        try:
+            owner = self._current_user() if auth_required() else None
+            return self._json(get_calculator_store().delete(
+                m.group(1), owner_user_id=owner["id"] if owner else None))
+        except calculators_pkg.CalculatorError as exc:
+            return self._error(exc.status, str(exc))
 
     # -- Phase 6/7: user-opportunity + monitoring-config API ---------------- #
     # All writes go through user_store.UserStore (separate runtime SQLite DB;
@@ -1236,6 +1317,8 @@ class Handler(BaseHTTPRequestHandler):
             m = re.match(r"^/documents/(DOC-[0-9a-f]{12})$", sub)
             if m:  # Phase R7 — permanent document deletion
                 return self._document_delete(m.group(1))
+            if sub.startswith("/calculators/results/"):  # Phase C1
+                return self._calculators_delete(sub)
         return self._error(404, "not found")
 
     def do_PATCH(self):
@@ -1318,6 +1401,9 @@ class Handler(BaseHTTPRequestHandler):
                 except research_store.ResearchStoreError as exc:
                     return self._error(exc.status, str(exc))
                 return self._json({"runs": runs})
+            # Phase C1 — calculator catalog + saved-calculation reads
+            if path.startswith("/calculators"):
+                return self._calculators_get(path, query)
             if path == "/research/candidates":
                 status_f = (query.get("status") or [None])[0]
                 opp_ref = (query.get("opportunity_ref") or [None])[0]

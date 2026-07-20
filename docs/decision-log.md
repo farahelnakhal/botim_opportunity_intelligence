@@ -65,6 +65,68 @@
   R9a social sources (`reddit.com`, `apps.apple.com`) — are T4 by default; C2's
   corroboration rule reads this field directly. Firms up the 2026-07-20
   source-tiering decision with the storage/default specifics. (PR9a-1.)
+## 2026-07-20 — C1 deterministic calculators: a self-verifying typed-step engine, stateless compute + a re-derivable CALC- store, and no LLM arithmetic
+
+- **Decision:** Ship **request-time deterministic calculators** as a new
+  bottom-layer module `shared/calculators/` (pure engine + `CALC-` store),
+  exposed by the executive API (`/calculators/*`) and the copilot
+  (`run_calculator`/`list_calculators` tools), with a Calculators UI panel.
+  Nine calculators v1: `market_sizing` (top-down TAM/SAM/SOM) +
+  `market_sizing_bottomup`, `growth_projection`, `implied_cagr`,
+  `adoption_forecast`, `unit_contribution`, `breakeven`, `payback_period`,
+  and `payments_take`. Each calculator declares a **typed dataflow of steps**
+  (`{op, operands:[{ref,value,label}], result, unit, expression, substituted}`);
+  the engine both evaluates the steps AND renders the display strings **from the
+  same structure**, and a per-compute **self-consistency check** re-evaluates
+  every step (`op(operands)==result`) — "formula shown" becomes "formula
+  verified", so a rendering typo is a 500, never a wrong number displayed.
+  Inputs reuse the offline engine's **F/E/A provenance labels** (replicated
+  locally — `shared/` never imports up into `opportunity-intelligence/`);
+  labels **propagate worst-of**, so the "illustrative / not-a-validated-figure"
+  stamp is derived automatically. Raw floats are computed/stored; display
+  formatting is separate and **never fed back**. Divide-by-zero is an honest
+  "never"/"undefined", never a silent 0. `payments_take` hard-warns that BOTIM
+  never earns the gross MDR and flags issuer-implying magnitudes (the
+  not-a-bank invariant). The copilot does **no arithmetic**: the tool computes,
+  grounding presents the shown working as facts + low confidence + no-decision
+  banner, and a new **wordguard numeric-fidelity guard** rejects any large
+  figure in the model's prose that is not in the grounded facts (falling back
+  to the exact computed working).
+- **Persistence decision (stateless compute + a re-derivable store):** compute
+  is a **stateless pure function** (`POST …/compute`, no persistence, no
+  quota); saving is a separate owner-scoped action (`POST /calculators/{name}`
+  → a `CALC-` row) so a result can be referenced by id and attached to an
+  opportunity. A design review argued for stateless-only in C1 (a stored number
+  can drift from the formula code); we keep the store the user asked for but
+  **neutralize the drift concern** by persisting the full envelope **plus
+  `calculator_version` and the normalized inputs**, so every saved result is
+  re-derivable/verifiable against the exact formula that produced it. The store
+  mirrors the research/user stores (runtime SQLite at `CALCULATORS_DB_PATH`,
+  owner-scoped, legacy NULL-owner rows shared, indistinguishable 404s).
+- **C2 seam reserved now:** each normalized input carries an unused
+  `source_id` field; C2 (verified-source TAM/SAM/SOM) will bind inputs to
+  `RSRC-` ids additively, with no migration.
+- **Reasoning:** `docs/capability-vs-claim.md` flagged "transparent analytical
+  calculations" / "TAM/SAM/SOM" as promised-but-not-built — the offline engine
+  runs on committed JSON via a CLI and is not a runtime surface, and TAM/SAM/SOM
+  existed nowhere in code. The typed-step-plus-self-check design makes the
+  "every number traceable to its inputs" acceptance a *verified* property, not
+  a hope; routing the numbers through the copilot's existing facts-own-the-
+  numbers path (the model "writes prose only") is what makes "no LLM arithmetic"
+  structural rather than aspirational.
+- **Alternatives rejected:** display-only step strings (unverifiable — the
+  shown working could diverge from the computed number); wrapping the heavy
+  20-input three-case `commercial` engine into request time (it belongs to the
+  offline Workstream-B flow); silent percent→fraction coercion (a fabrication
+  trap — a `fraction` input >1 is rejected with a hint instead); LLM-scored
+  numbers (violates no-LLM-arithmetic).
+- **Consequences:** new `CALCULATORS_DB_PATH` and `QUOTA_CALCULATOR_SAVE_PER_DAY`
+  env; new contract `shared/contracts/calculators.schema.md` (additive-only);
+  a new copilot intent `deterministic_calculation` (scoped to explicit calc
+  vocabulary; a bare "size the market" with no numbers routes here and the model
+  **asks for inputs rather than inventing them**). Nothing writes
+  `knowledge-base/`. C1 unblocks **C2**; **P1** (PDF) can later render saved
+  calculations.
 
 ## 2026-07-20 — capability-vs-claim build-out: scope + the #4 non-goal
 
