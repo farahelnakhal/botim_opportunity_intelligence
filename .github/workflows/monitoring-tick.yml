@@ -43,10 +43,12 @@ jobs:
             echo "See docs/roadmap.md (Phase R6) to enable scheduled monitoring."
             exit 0
           fi
-          # -sS: quiet but show errors; -f: nonzero exit on HTTP >= 400 so a
-          # failing tick surfaces in the Actions log (the token is only ever
-          # sent as a header, never echoed).
-          code=$(curl -sS -o /tmp/tick-body.json -w '%{http_code}' \
+          # -sS: quiet but show errors; the token is only ever a header, never
+          # echoed. --max-time bounds the whole request so a slow/large tick
+          # backlog can't hang the job up to GitHub's 6h default. The endpoint
+          # itself is not yet wall-clock-bounded (see roadmap R6 backlog) — this
+          # is a defensive ceiling on the trigger side only.
+          code=$(curl -sS --max-time 300 -o /tmp/tick-body.json -w '%{http_code}' \
             -X POST "${MONITORING_TICK_URL%/}/api/monitoring/tick" \
             -H "X-Monitoring-Token: ${MONITORING_TICK_TOKEN}" \
             -H "Content-Type: application/json" -d '{}') || true

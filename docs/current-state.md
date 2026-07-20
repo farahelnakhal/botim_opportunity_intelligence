@@ -105,8 +105,8 @@ deploy 1 · frontend Vitest 23 files. Gate: `python3 shared/integration_check.py
 
 Phase R6 adds test files `shared/tests/{test_workspace_subscriptions,test_email_sender,test_monitoring_digest}.py`
 and `executive-ui/api/tests/test_workspace_monitoring_routes.py`, plus render-blueprint
-and WorkspacePanel cases. Full-suite tallies at the R6 tip: shared **226**,
-executive-ui/api **154**, executive-ui adapter/render 44, deploy **21**,
+and WorkspacePanel cases. Full-suite tallies at the R6 tip: shared **228**,
+executive-ui/api **158**, executive-ui adapter/render 44, deploy **23**,
 copilot-backend 131, frontend Vitest **156**. The integration gate's last two
 steps (`executive-ui/api/tests`, `shared/tests`) exercise the new tick/email/
 digest/subscription paths — not just pre-existing ones.

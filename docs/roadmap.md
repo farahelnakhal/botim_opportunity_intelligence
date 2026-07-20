@@ -174,6 +174,21 @@ always-on scheduler, and email infrastructure.
 - **Deferred to backlog (not R6):** chat-sharing/multi-recipient teammate flow
   (schema already supports N recipients), `List-Unsubscribe` one-click headers,
   HTML email bodies, and password reset (now unblocked by the email seam).
+- **Known tradeoffs — intentional for now, revisit deliberately (not defects):**
+  - *Tick is not wall-clock-bounded.* `MONITORING_TICK_MAX_CHATS` caps the chat
+    *count* per tick but not total *time* (each build runs live research + LLM).
+    The cron curl has a `--max-time` ceiling on the trigger side; the endpoint
+    itself does not abort a long backlog. Deciding the in-handler behavior
+    (abort mid-backlog vs. finish the current chat vs. warn-only) is a real
+    design call, deferred rather than made silently.
+  - *Confirmation email is sent synchronously in the opt-in request.* "Turn on
+    monitoring" blocks the HTTP response for the SMTP round-trip (≤15s timeout).
+    Fine on the threading server (doesn't block other requests); moving to an
+    async/queued send is a deliberate future choice, not a drive-by change.
+  - *Quota is consumed on attempt, not on delivery.* A build that runs then
+    fails to email still counts against `monitoring_workspace_run` — so a chat
+    stuck in `email_send_failed` burns its daily quota retrying. Intentional
+    (an attempt is real work); revisit if it proves noisy in practice.
 
 ## Phase R7 — Attachments + internal-document ingestion
 
