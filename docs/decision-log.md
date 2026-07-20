@@ -4,6 +4,33 @@
 > decision would surprise a future maintainer or constrains future work.
 > Format: date · decision · reasoning · alternatives · consequences.
 
+## 2026-07-20 — R9a-1: source tier stored at ingestion, registry-derived, unknown→T4
+
+- **Decision:** `shared/research/source_tier.py` is the single shared tier
+  authority — a **human-curated domain→tier registry** (T1 govt/regulator/
+  official statistics · T2 industry/analyst · T3 reputable press · T4 general/
+  forums/social) matched by **registrable (parent) domain** plus a conservative
+  government-TLD-suffix rule; an **unknown domain returns T4**. Every research
+  source's tier is **derived from its `canonical_url` at `add_source` time** and
+  stored on the row (**research-store schema v5**; existing rows backfilled
+  deterministically from their URL). The tier is **never taken from the
+  caller/adapter payload and never inferred by a model or from page content**.
+- **Reasoning:** makes "verified/authoritative source" concrete, deterministic,
+  and auditable, and keeps the no-fabrication + data-never-instructions
+  discipline — an adapter can't assert its own authority and fetched content
+  can't upgrade a source. Storing at ingestion makes the tier first-class
+  provenance C2 can rely on without recomputation drift; it lives in a shared
+  module (not adapter-local) because C2 reuses the exact same tiers.
+- **Alternatives rejected:** caller/adapter-supplied tier (spoofable — defeats
+  "verified"); LLM- or content-inferred trust (non-deterministic, injectable);
+  compute-at-read-time only (no stored provenance, drift risk); skip backfill
+  (legacy rows would read as untiered/None).
+- **Consequences:** adding or re-tiering a domain is a human registry commit
+  (ongoing curation cost, logged as a risk); unknown domains — including the
+  R9a social sources (`reddit.com`, `apps.apple.com`) — are T4 by default; C2's
+  corroboration rule reads this field directly. Firms up the 2026-07-20
+  source-tiering decision with the storage/default specifics. (PR9a-1.)
+
 ## 2026-07-20 — capability-vs-claim build-out: scope + the #4 non-goal
 
 - **Decision:** The four gaps in `docs/capability-vs-claim.md` become a

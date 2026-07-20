@@ -69,7 +69,10 @@ only**), `domain` (derived from the URL), `title?`, `publisher?`, `author?`,
 `published_at?`, `retrieved_at?`, `language?`, `excerpt?` (≤2000),
 `content_hash?`, `duplicate_of?` (a source in the same run),
 `quality_signals` (flat object ≤20 entries of recorded string/number/boolean
-signals — recorded observations, never computed here), `created_at`.
+signals — recorded observations, never computed here),
+`source_tier` (**R9a**; `T1|T2|T3|T4` derived from `domain` via the curated
+`shared.research.source_tier` registry at ingestion — registry lookup only,
+never caller-supplied or content-inferred; unknown → `T4`), `created_at`.
 
 ### Candidate evidence
 `id`, `run_id`, `claim` (required ≤4000), `source_ids` (**non-empty**, each an

@@ -47,7 +47,7 @@ try:
 except ImportError:  # imported with repo root not on sys.path (e.g. as shared.research from elsewhere)
     from ..source_urls import safe_url
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_DB_PATH = REPO / "runtime" / "research.db"
@@ -199,6 +199,8 @@ class ResearchStore:
                 self._migrate_to_v3(conn)
             if version < 4:
                 self._migrate_to_v4(conn)
+            if version < 5:
+                self._migrate_to_v5(conn)
             conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)",
                          (str(SCHEMA_VERSION),))
 
@@ -348,6 +350,21 @@ class ResearchStore:
         existing = {row["name"] for row in conn.execute("PRAGMA table_info(research_runs)")}
         if "owner_user_id" not in existing:
             conn.execute("ALTER TABLE research_runs ADD COLUMN owner_user_id TEXT")
+
+    @staticmethod
+    def _migrate_to_v5(conn):
+        # Phase R9a — source tier (T1..T4) from the human-curated registry
+        # (shared/research/source_tier). Registry lookup by domain only, never
+        # inferred. Idempotent (PRAGMA guard); existing rows are backfilled
+        # deterministically from their canonical_url (same lookup new rows use).
+        from . import source_tier
+        existing = {row["name"] for row in conn.execute("PRAGMA table_info(research_sources)")}
+        if "source_tier" not in existing:
+            conn.execute("ALTER TABLE research_sources ADD COLUMN source_tier TEXT")
+            for r in conn.execute(
+                    "SELECT id, canonical_url FROM research_sources").fetchall():
+                conn.execute("UPDATE research_sources SET source_tier=? WHERE id=?",
+                             (source_tier.tier_for(r["canonical_url"]), r["id"]))
 
     def create_run(self, payload, owner_user_id=None):
         if not isinstance(payload, dict):
@@ -543,6 +560,10 @@ class ResearchStore:
         content_hash = _require_str(payload, "content_hash", SHORT_MAX)
         quality_signals = _require_quality_signals(payload)
         duplicate_of = payload.get("duplicate_of")
+        # R9a — tier is DERIVED from the domain via the curated registry, never
+        # taken from the payload (an adapter can't assert its own authority).
+        from . import source_tier
+        tier = source_tier.tier_for(url)
         source_id = _new_id("RSRC")
         now = _now()
         with self._connect() as conn:
@@ -566,11 +587,11 @@ class ResearchStore:
                 """INSERT INTO research_sources
                    (id, run_id, query_id, canonical_url, domain, title, publisher,
                     author, published_at, retrieved_at, language, excerpt,
-                    content_hash, duplicate_of, quality_signals, created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    content_hash, duplicate_of, quality_signals, source_tier, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (source_id, run_id, query_id, url, domain, title, publisher,
                  author, published_at, retrieved_at, language, excerpt,
-                 content_hash, duplicate_of, json.dumps(quality_signals), now))
+                 content_hash, duplicate_of, json.dumps(quality_signals), tier, now))
             return self._source_dict(conn.execute(
                 "SELECT * FROM research_sources WHERE id=?", (source_id,)).fetchone())
 
