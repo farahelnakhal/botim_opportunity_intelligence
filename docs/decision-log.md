@@ -190,6 +190,16 @@
   orchestration (profile + `shared.llm.provider` + MV taxonomy validation) lives
   in `executive-ui/api/` — so `shared/` never imports *up* into `impact/` or
   Merchant Voice.
+  - **Coupling note (PR10b, E1):** the orchestrator validates generated
+    questions against Merchant Voice's taxonomy by importing MV's
+    `validate_question_input` as pure code (the `mv_app` alias load that
+    `copilot-backend/app/mv_tools.py` already uses) — a single source of truth,
+    and today harmless (no MV DB, HTTP, or data touched). **But if Merchant
+    Voice's service boundary ever tightens** — becomes independently deployable
+    or separately versioned — **this import turns into a real cross-service
+    dependency to revisit** (vendor the taxonomy as a shared contract, or call a
+    versioned MV endpoint). Not urgent now; the flag exists so it does not
+    quietly become load-bearing without someone noticing.
 - **Decision (D2 — distinct object):** R10's output is a new `RQSET-` draft
   question-set, **not** an overload of `impact/research_request.py` (that is a
   per-assumption single-question `REQ-` decision record with no `purpose`/

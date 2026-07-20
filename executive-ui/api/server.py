@@ -30,13 +30,13 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 try:
-    from . import (auth_store, generate, modes, monitoring_runner, router,
-                   serialize, user_store)
+    from . import (auth_store, generate, modes, monitoring_runner,
+                   question_generator, router, serialize, user_store)
 except ImportError:  # run directly as a script (python3 executive-ui/api/server.py)
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from api import (auth_store, generate, modes, monitoring_runner, router,
-                     serialize, user_store)
+    from api import (auth_store, generate, modes, monitoring_runner,
+                     question_generator, router, serialize, user_store)
 
 # shared.research lives at the repo root (the platform layer, reused later by
 # the runner/monitoring), not under executive-ui — make the root importable
@@ -55,6 +55,7 @@ try:
     from shared import email as email_pkg
     from shared.email import monitoring_digest
     from shared import calculators as calculators_pkg
+    from shared import questions as questions_pkg
     from impact import gap_profile as impact_gap_profile
 except ImportError:
     import sys
@@ -72,6 +73,7 @@ except ImportError:
     from shared import email as email_pkg
     from shared.email import monitoring_digest
     from shared import calculators as calculators_pkg
+    from shared import questions as questions_pkg
     from impact import gap_profile as impact_gap_profile
 
 
@@ -172,6 +174,18 @@ def get_calculator_store():
     return _CALCULATOR_STORE
 
 
+# Phase R10 — shared runtime store for draft merchant research-question sets
+# (path from QUESTION_SETS_DB_PATH, default runtime/question-sets.db). Lazy.
+_QUESTION_STORE = None
+
+
+def get_question_store():
+    global _QUESTION_STORE
+    if _QUESTION_STORE is None:
+        _QUESTION_STORE = questions_pkg.QuestionSetStore()
+    return _QUESTION_STORE
+
+
 def _iso_now():
     """UTC ISO-8601 timestamp (seconds, trailing Z) — the `now` impact read
     models require (they never invent it themselves)."""
@@ -235,7 +249,7 @@ def registration_open():
 QUOTA_DEFAULTS = {"chat": 200, "research_execute": 25, "research_extract": 25,
                   "workspace_refresh": 25, "monitoring_run": 25,
                   "document_upload": 25, "monitoring_workspace_run": 6,
-                  "calculator_save": 100}
+                  "calculator_save": 100, "question_generate": 25}
 
 
 def monitoring_run_quota_limit(ws, owner_user_id):
@@ -497,6 +511,10 @@ class Handler(BaseHTTPRequestHandler):
         # Phase C1 — deterministic calculators: compute (stateless) or save.
         if sub.startswith("/calculators"):
             return self._calculators_post(sub)
+        # Phase R10 — generate a DRAFT merchant research-question set for an
+        # opportunity from its evidence-gap profile (proposals only).
+        if sub.startswith("/opportunities/") and sub.endswith("/question-sets"):
+            return self._question_sets_post(sub)
         if sub in LEGACY_ROUTE_PATHS and not LEGACY_UNGROUNDED_ROUTES_ENABLED:
             return self._legacy_disabled()
         body = self._read_json_body()
@@ -682,6 +700,51 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(get_calculator_store().delete(
                 m.group(1), owner_user_id=owner["id"] if owner else None))
         except calculators_pkg.CalculatorError as exc:
+            return self._error(exc.status, str(exc))
+
+    # -- Phase R10: draft merchant research-question sets ------------------- #
+    # Generate a taxonomy-valid DRAFT question set for a committed opportunity
+    # from its evidence-gap profile. Proposals only: nothing is written to the
+    # knowledge base or Merchant Voice, and nothing is sent to a merchant.
+    def _question_sets_post(self, sub):
+        m = re.match(r"^/opportunities/(OPP-\d{3})/question-sets/?$", sub)
+        if not m:
+            return self._error(404, "unknown endpoint")
+        if not modes.demo_corpus_visible(modes.get_mode()):
+            return self._error(404, "demo opportunities are not available in normal mode")
+        if not self._quota_guard("question_generate"):
+            return
+        owner = self._current_user() if auth_required() else None
+        cfg = _ExtractionLLMConfig()
+        provider = None
+        if cfg.provider in ("anthropic", "openai_compatible"):
+            provider = llm_provider.make_provider(cfg)
+        try:
+            result = question_generator.generate_question_set(
+                get_question_store(), m.group(1), provider, cfg,
+                now=_iso_now(), owner_user_id=owner["id"] if owner else None)
+            return self._json({"question_set": result}, status=201)
+        except FileNotFoundError:
+            return self._error(404, "no such opportunity")
+        except questions_pkg.QuestionStoreError as exc:
+            return self._error(exc.status, str(exc))
+        except Exception as exc:  # never leak a stack trace
+            return self._error(500, f"{type(exc).__name__}: {exc}")
+
+    def _question_sets_get(self, path, query):
+        try:
+            viewer = self._current_user() if auth_required() else None
+            vt = viewer["id"] if viewer else None
+            if path in ("/question-sets", "/question-sets/"):
+                opp = (query.get("opportunity_id") or [None])[0]
+                return self._json({"question_sets": get_question_store().list(
+                    opportunity_id=opp, visible_to=vt)})
+            m = re.match(r"^/question-sets/([A-Za-z0-9-]{1,40})$", path)
+            if m:
+                return self._json({"question_set": get_question_store().get(
+                    m.group(1), visible_to=vt)})
+            return self._error(404, "unknown endpoint")
+        except questions_pkg.QuestionStoreError as exc:
             return self._error(exc.status, str(exc))
 
     # -- Phase 6/7: user-opportunity + monitoring-config API ---------------- #
@@ -1417,6 +1480,9 @@ class Handler(BaseHTTPRequestHandler):
             # Phase C1 — calculator catalog + saved-calculation reads
             if path.startswith("/calculators"):
                 return self._calculators_get(path, query)
+            # Phase R10 — draft question-set reads (owner-scoped)
+            if path.startswith("/question-sets"):
+                return self._question_sets_get(path, query)
             if path == "/research/candidates":
                 status_f = (query.get("status") or [None])[0]
                 opp_ref = (query.get("opportunity_ref") or [None])[0]
