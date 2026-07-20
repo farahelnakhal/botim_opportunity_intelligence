@@ -54,6 +54,12 @@ def main():
         return 0
     except EmailError as exc:
         print(f"SEND FAILED (EmailError status={exc.status}): {exc}")
+        # surface the raw server response for diagnosis (rejection reason, not
+        # a secret — auth already succeeded before this point)
+        if exc.smtp_code is not None:
+            print(f"  SMTP response code: {exc.smtp_code}")
+        if exc.smtp_detail:
+            print(f"  SMTP server said : {exc.smtp_detail}")
         return 1
 
 

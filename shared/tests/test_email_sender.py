@@ -71,6 +71,64 @@ class EmailSeam(unittest.TestCase):
         self.assertNotIn("\r", msg["Subject"])
         self.assertIsNone(msg["Bcc"])
 
+    def test_smtp_response_error_surfaces_code_and_server_text(self):
+        # a DATA-phase rejection (like Brevo's) must surface the server's own
+        # code + message text for diagnosis — not just the exception class name
+        import smtplib
+        from shared.email import sender as sndr
+
+        class FakeSMTP:
+            def __init__(self, host, port, timeout=None): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def starttls(self, context=None): pass
+            def login(self, u, p): pass
+            def send_message(self, msg):
+                raise smtplib.SMTPDataError(554, b"5.7.1 Message rejected as spam")
+
+        cfg = sndr.resolve_email_env({"SMTP_HOST": "h", "SMTP_FROM": "f@x.io",
+                                      "SMTP_STARTTLS": "1"})
+        orig = smtplib.SMTP
+        smtplib.SMTP = FakeSMTP
+        try:
+            with self.assertRaises(EmailError) as cm:
+                sndr.SmtpEmailSender(cfg).send("d@example.com", "Subj", "Body")
+        finally:
+            smtplib.SMTP = orig
+        exc = cm.exception
+        self.assertEqual(exc.status, 502)
+        self.assertEqual(exc.smtp_code, 554)
+        self.assertIn("Message rejected as spam", exc.smtp_detail)
+        # the human-readable message carries the code + text too
+        self.assertIn("554", str(exc))
+        self.assertIn("Message rejected as spam", str(exc))
+
+    def test_recipients_refused_surfaces_each_address_reason(self):
+        import smtplib
+        from shared.email import sender as sndr
+
+        class FakeSMTP:
+            def __init__(self, host, port, timeout=None): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def starttls(self, context=None): pass
+            def send_message(self, msg):
+                raise smtplib.SMTPRecipientsRefused(
+                    {"d@example.com": (550, b"5.1.1 unknown recipient")})
+
+        cfg = sndr.resolve_email_env({"SMTP_HOST": "h", "SMTP_FROM": "f@x.io",
+                                      "SMTP_STARTTLS": "1"})
+        orig = smtplib.SMTP
+        smtplib.SMTP = FakeSMTP
+        try:
+            with self.assertRaises(EmailError) as cm:
+                sndr.SmtpEmailSender(cfg).send("d@example.com", "Subj", "Body")
+        finally:
+            smtplib.SMTP = orig
+        self.assertEqual(cm.exception.status, 502)
+        self.assertIn("unknown recipient", cm.exception.smtp_detail)
+        self.assertIn("550", str(cm.exception))
+
     def test_smtp_send_failures_do_not_leak_the_dialog(self):
         # a real SMTP send to an unreachable host fails as a safe EmailError
         cfg = resolve_email_env({"SMTP_HOST": "127.0.0.1", "SMTP_PORT": "1",

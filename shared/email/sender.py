@@ -36,12 +36,24 @@ BODY_MAX = 200_000
 
 
 class EmailError(Exception):
-    """Safe, structured email error — `status` maps to the HTTP status; the
-    message never contains the SMTP password or the raw server dialog."""
+    """Safe, structured email error — `status` maps to the HTTP status. It may
+    carry the SMTP server's own response code + message text (`smtp_code` /
+    `smtp_detail`) for diagnosis; that is the server's rejection reason, never
+    the password (auth happens before DATA, and its text is the server's, not
+    the secret)."""
 
-    def __init__(self, message, status=500):
+    def __init__(self, message, status=500, smtp_code=None, smtp_detail=None):
         super().__init__(message)
         self.status = status
+        self.smtp_code = smtp_code
+        self.smtp_detail = smtp_detail
+
+
+def _decode(value):
+    """Readable text from an smtplib error field (often bytes), bounded."""
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8", "replace")
+    return str(value).replace("\r", " ").replace("\n", " ").strip()[:500]
 
 
 def _env_bool(env, name, default):
@@ -171,9 +183,26 @@ class SmtpEmailSender:
                     self._auth_send(smtp, msg)
         except EmailError:
             raise
+        except smtplib.SMTPRecipientsRefused as exc:
+            # {recipient: (code, b"message")} — the server refused every RCPT
+            parts = "; ".join(
+                f"{addr}: {code} {_decode(msg_bytes)}"
+                for addr, (code, msg_bytes) in exc.recipients.items())
+            raise EmailError(f"email delivery failed: all recipients refused ({parts})",
+                             status=502, smtp_detail=parts)
+        except smtplib.SMTPResponseException as exc:
+            # SMTPDataError / SMTPSenderRefused / SMTPHeloError / … carry the
+            # server's own code + text — surface it (it's the rejection reason,
+            # not the password) so a rejected send is actually diagnosable
+            detail = _decode(exc.smtp_error)
+            raise EmailError(
+                f"email delivery failed: {type(exc).__name__} "
+                f"(SMTP {exc.smtp_code}: {detail})",
+                status=502, smtp_code=exc.smtp_code, smtp_detail=detail)
         except (smtplib.SMTPException, OSError) as exc:
-            # never surface the password or the full SMTP dialog
-            raise EmailError(f"email delivery failed: {type(exc).__name__}", status=502)
+            # connection/timeout/other — include the message (never the password)
+            raise EmailError(f"email delivery failed: {type(exc).__name__}: {exc}",
+                             status=502)
         return {"sent": True, "transport": "smtp", "to": to}
 
     def _auth_send(self, smtp, msg):
