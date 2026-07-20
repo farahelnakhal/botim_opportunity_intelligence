@@ -279,6 +279,31 @@ def build(intent, executed, ids):
                 pack.cite(g["assumption_id"], "assumption", g["statement"], "contextual")
             pack.unknowns += [f"{g['opportunity_id']}: {g['question']}" for g in r["gaps"][:5]]
 
+        elif name == "get_evidence_gap_profile":
+            # Phase R10 — the per-opportunity weakest-link profile. Read-only,
+            # deterministic; each weak link becomes an unknown to target, never
+            # a conclusion. Nothing here drafts or sends a merchant question.
+            eb = r["evidence_base"]
+            pack.facts.append(
+                f"EVIDENCE-GAP PROFILE for {r['opportunity_id']} — where the evidence is "
+                f"weakest ({eb['supporting_ev_records']} supporting Part A records; "
+                f"{eb['assumptions_open']}/{eb['assumptions_total']} assumptions open, "
+                f"{eb['assumptions_without_evidence']} with no evidence"
+                + (f"; classification CAPPED, {eb['assumptions_to_lift_cap']} to lift" if eb["assumption_capped"] else "")
+                + "):")
+            for w in r["weak_links"][:6]:
+                pack.facts.append(
+                    f"- P{w['priority_rank']} [{w['priority_band']}] {w['assumption_id']} "
+                    f"({', '.join(w['signals'])}): {w['statement'][:120]}")
+                pack.cite(w["assumption_id"], "assumption", w["statement"], "contextual")
+            pack.unknowns += [f"{w['assumption_id']}: {', '.join(w['signals'])}"
+                              for w in r["weak_links"][:6]]
+            if eb["stale_load_bearing_ev"]:
+                pack.warnings.append(
+                    f"{len(eb['stale_load_bearing_ev'])} load-bearing evidence record(s) are "
+                    f"stale (>180d): {', '.join(eb['stale_load_bearing_ev'])} — re-verify before relying on them.")
+            pack.needs_no_decision = True
+
         elif name == "get_segment":
             pack.facts.append(f"{r['segment_id']} — {r['title']} (confidence {r['confidence']}). "
                               f"Job-to-be-done: {r.get('job_to_be_done') or 'see profile'}")

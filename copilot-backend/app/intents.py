@@ -247,6 +247,8 @@ def tool_plan(intent, ids, message):
     elif intent in ("evidence_gap", "research_recommendation"):
         plan.append(("get_evidence_gaps", {}))
         if opp:
+            # Phase R10 — the per-opportunity weakest-link profile (ranked)
+            plan.append(("get_evidence_gap_profile", {"opp_id": opp}))
             plan.append(("get_opportunity_assumptions", {"opp_id": opp}))
     elif intent == "challenge_hypothesis":
         if opp:

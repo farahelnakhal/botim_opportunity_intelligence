@@ -19,6 +19,7 @@ and this server will also serve web/dist.
 """
 
 import argparse
+import datetime
 import json
 import os
 import re
@@ -54,6 +55,7 @@ try:
     from shared import email as email_pkg
     from shared.email import monitoring_digest
     from shared import calculators as calculators_pkg
+    from impact import gap_profile as impact_gap_profile
 except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -70,6 +72,7 @@ except ImportError:
     from shared import email as email_pkg
     from shared.email import monitoring_digest
     from shared import calculators as calculators_pkg
+    from impact import gap_profile as impact_gap_profile
 
 
 class _ExtractionLLMConfig:
@@ -167,6 +170,12 @@ def get_calculator_store():
     if _CALCULATOR_STORE is None:
         _CALCULATOR_STORE = calculators_pkg.CalculatorStore()
     return _CALCULATOR_STORE
+
+
+def _iso_now():
+    """UTC ISO-8601 timestamp (seconds, trailing Z) — the `now` impact read
+    models require (they never invent it themselves)."""
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # Phase R8a — accounts + sessions (path from AUTH_DB_PATH, default
@@ -1473,6 +1482,17 @@ class Handler(BaseHTTPRequestHandler):
                 except ValueError:
                     return self._error(400, "invalid opportunity id")
                 return self._json(data) if data else self._error(404, "no such opportunity")
+            # Phase R10 — deterministic evidence-gap profile for one committed
+            # opportunity (read-only; recomputes no score). Mode-gated exactly
+            # like the opportunity detail route.
+            m = re.match(r"^/opportunities/(OPP-\d{3})/gap-profile$", path)
+            if m:
+                if not modes.demo_corpus_visible(mode):
+                    return self._error(404, "demo opportunities are not available in normal mode")
+                try:
+                    return self._json(impact_gap_profile.build_gap_profile(m.group(1), _iso_now()))
+                except FileNotFoundError:
+                    return self._error(404, "no such opportunity")
             m = re.match(r"^/opportunities/(OPP-\d{3})$", path)
             if m:
                 if not modes.demo_corpus_visible(mode):
