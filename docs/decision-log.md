@@ -4,6 +4,67 @@
 > decision would surprise a future maintainer or constrains future work.
 > Format: date · decision · reasoning · alternatives · consequences.
 
+## 2026-07-20 — R9a-2: review/listing sources reuse the search seam; multi-provider registry
+
+- **Decision:** New source adapters reuse the existing
+  `SearchProvider.search(query, max_results) -> [SearchResult]` seam rather than
+  a new interface. `query` is **adapter-interpreted** — Brave: web keywords;
+  **Apple App Store: an app identifier** (a numeric app id, or an app name
+  resolved to an id via the public iTunes Search API); (Reddit, PR9a-3:
+  keyword/subreddit). Each adapter maps its native items (a review, a post) onto
+  the fixed `SearchResult` shape (`url/title/snippet/published_at`). A
+  **provider registry** (`name → builder`) replaces the hard-coded single brave
+  branch; `build_provider(name, env, fetch_fn)` constructs any registered
+  adapter (injectable, used by tests and later the runner). `from_env()` still
+  returns exactly ONE provider named by `RESEARCH_SEARCH_PROVIDER`, and — honoring
+  the privacy-gate decision — **refuses to live-enable the real-content social
+  adapters** (`appstore`, and later `reddit`): selecting one raises an honest
+  "gated — pending the R9a privacy/security review" error until PR9a-3 wires the
+  real fail-closed gate.
+- **Reasoning:** one seam keeps the runner + dedup + storage + candidate-review
+  pipeline unchanged and avoids a parallel code path; an adapter-interpreted
+  `query` is the least-invasive way to fit non-keyword sources; the registry
+  makes adding adapters additive; deferring live enablement honors "don't wire
+  live real-content ingestion before the privacy review."
+- **Alternatives rejected:** a separate "listing"/"fetch-by-id" interface
+  (forks the pipeline, duplicates dedup/storage); extending `SearchResult` with
+  per-source fields now (premature — e.g. a review's star rating isn't captured
+  yet); enabling `appstore` through `from_env` in PR9a-2 (would wire live
+  ingestion before the gate exists).
+- **Consequences:** `SearchResult` stays minimal for now (star rating is a
+  possible later extension). Apple reviews have no public per-review permalink,
+  so the adapter synthesizes a unique, honest per-review app-store URL
+  (`…/app/id{n}?reviewId=…`) — http(s), points at the app, distinct per review
+  for dedup. `build_provider` does not itself consult the gate (direct callers
+  own that); `from_env` is the gated entry point. PR9a-3 replaces the interim
+  "gated" refusal with the real opt-in and registers the Reddit builder.
+
+## 2026-07-20 — R9a-1: source tier stored at ingestion, registry-derived, unknown→T4
+
+- **Decision:** `shared/research/source_tier.py` is the single shared tier
+  authority — a **human-curated domain→tier registry** (T1 govt/regulator/
+  official statistics · T2 industry/analyst · T3 reputable press · T4 general/
+  forums/social) matched by **registrable (parent) domain** plus a conservative
+  government-TLD-suffix rule; an **unknown domain returns T4**. Every research
+  source's tier is **derived from its `canonical_url` at `add_source` time** and
+  stored on the row (**research-store schema v5**; existing rows backfilled
+  deterministically from their URL). The tier is **never taken from the
+  caller/adapter payload and never inferred by a model or from page content**.
+- **Reasoning:** makes "verified/authoritative source" concrete, deterministic,
+  and auditable, and keeps the no-fabrication + data-never-instructions
+  discipline — an adapter can't assert its own authority and fetched content
+  can't upgrade a source. Storing at ingestion makes the tier first-class
+  provenance C2 can rely on without recomputation drift; it lives in a shared
+  module (not adapter-local) because C2 reuses the exact same tiers.
+- **Alternatives rejected:** caller/adapter-supplied tier (spoofable — defeats
+  "verified"); LLM- or content-inferred trust (non-deterministic, injectable);
+  compute-at-read-time only (no stored provenance, drift risk); skip backfill
+  (legacy rows would read as untiered/None).
+- **Consequences:** adding or re-tiering a domain is a human registry commit
+  (ongoing curation cost, logged as a risk); unknown domains — including the
+  R9a social sources (`reddit.com`, `apps.apple.com`) — are T4 by default; C2's
+  corroboration rule reads this field directly. Firms up the 2026-07-20
+  source-tiering decision with the storage/default specifics. (PR9a-1.)
 ## 2026-07-20 — C1 deterministic calculators: a self-verifying typed-step engine, stateless compute + a re-derivable CALC- store, and no LLM arithmetic
 
 - **Decision:** Ship **request-time deterministic calculators** as a new

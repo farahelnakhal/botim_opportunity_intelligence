@@ -291,6 +291,10 @@ also needs.
 `shared/research/providers.py`, `retrieval.py`, `freshness.py`, `source_urls.py`.
 **Blocked on:** the Merchant-Voice-style **privacy/security review** before any
 LIVE ingestion of real (non-synthetic) content (decision log 2026-07-20).
+**Ships as (approved 2026-07-20):** PR9a-1 (source-tier registry) → PR9a-2
+(Apple App Store adapter + provider registry) → PR9a-3 (Reddit adapter +
+privacy gate) → PR9a-4 (multi-language querying + docs). Reviewed one PR at a
+time, R6 cadence.
 
 - **Two new provider adapters behind the existing seam** (no new architecture,
   no scraping aggregator):
@@ -309,6 +313,10 @@ LIVE ingestion of real (non-synthetic) content (decision log 2026-07-20).
 - **Network injectable / offline-testable** exactly like the Brave adapter and
   `adapter_regulator.py`; live use is an explicit ops opt-in
   (`RESEARCH_SEARCH_PROVIDER`-style) AND gated behind the privacy review.
+- **Multi-language querying (querying only)** — issue/localize search terms per
+  configured language: **Arabic + English first-class, Hindi + Urdu second,
+  Malayalam + Tagalog deferred** (behind config, off by default); results tagged
+  with the query language. **Not** source-content translation (that is R9c).
 - Output is **candidate evidence only** (existing review pipeline); external
   content stays **data, never instructions**.
 
@@ -323,15 +331,9 @@ LIVE ingestion of real (non-synthetic) content (decision log 2026-07-20).
 prompt-injection surface grows (mitigated by data-never-instructions + H2);
 tier-registry curation burden; Apple RSS shape changes.
 **Exclusions:** no Play/X/IG/TikTok/FB/WhatsApp/Telegram; no aggregator; no
-multi-language (R9b); no non-English source-content handling (R9c).
-
-### Phase R9b — Multi-language querying — SKETCH
-**Value:** issue search terms per language for the supported adapters. **Scope:**
-querying only (translate/localize query terms; tag results with query
-language) — **not** translating source bodies. **Languages:** Arabic + English
-first-class, Hindi + Urdu second tier; Malayalam/Tagalog deferred to R9c/later.
-**Depends on:** R9a. **Risks:** per-language query-term quality; false
-"no results" from weak localization.
+non-English source-content handling (that is R9c). Multi-language **querying**
+is in R9a (above) — the earlier standalone "R9b" sketch is folded in and
+dropped (reconciled 2026-07-20).
 
 ### Phase R9c — Non-English source-content handling — SKETCH (deferred)
 **Value:** fetch/store/ground non-English source *text*. **Scope (separate,
@@ -382,8 +384,8 @@ fidelity checks (with R9c). **Depends on:** R9 (and C2 ingestion).
 
 ### Suggested sequence
 ```
-R9a (adapters + tiering)  ─┬─▶ R9b (multi-lang query) ─▶ R9c (non-EN content, later)
-                           └─▶ C2 (market sizing) ◀── C1 (calculators, parallel)
+R9a (adapters + tiering + multi-lang querying) ─┬─▶ R9c (non-EN content, later)
+                                                └─▶ C2 (market sizing) ◀── C1 (calculators, parallel)
 R10 (gap→questions) — deps exist now; richer after R9
 P1 (PDF) — last / anytime · H2 (hardening) — after R9/C2
 ```
