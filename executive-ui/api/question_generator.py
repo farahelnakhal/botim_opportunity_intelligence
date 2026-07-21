@@ -186,3 +186,68 @@ def generate_question_set(store, opp_id, provider, configuration, *, now,
         note = "the model proposed no questions that passed taxonomy validation"
     return store.create(opp_id, accepted, provenance=prov, rejected_count=rejected,
                         note=note, owner_user_id=owner_user_id)
+
+
+# --- PR10c: reviewer-edit taxonomy validation + Merchant Voice hand-off ----- #
+
+def validate_edited_questions(questions):
+    """Re-validate a reviewer's EDITED question list against Merchant Voice's
+    OWN taxonomy (the same single source of truth the generator uses) before it
+    is persisted on approval — so a human edit can never smuggle a question past
+    the taxonomy gate. Raises ValidationError (message names the bad index) on
+    the first non-conforming question; returns None on success. Pure code — no
+    MV DB/HTTP/data touched (D1 coupling note)."""
+    if not isinstance(questions, list) or not questions:
+        raise ValidationError("an approved question set needs a non-empty list of questions")
+    for i, q in enumerate(questions):
+        if not isinstance(q, dict):
+            raise ValidationError(f"question[{i}] must be an object")
+        # MV's validator checks text/purpose/question_type/follow_up_prompts/
+        # linked_assumption shape; question_type defaults to open_text there.
+        _mv_models.validate_question_input({
+            "text": q.get("text"),
+            "purpose": q.get("purpose"),
+            "question_type": q.get("question_type", "open_text"),
+            "follow_up_prompts": q.get("follow_up_prompts", []),
+            "linked_assumption": q.get("linked_assumption"),
+            "linked_hypothesis": q.get("linked_hypothesis"),
+        }, i)
+
+
+def render_handoff(question_set):
+    """Render an APPROVED question set into a manual Merchant-Voice hand-off:
+    copy-paste markdown plus a JSON payload shaped exactly like MV's
+    `POST /campaigns/{id}/guides` question input. This is a PROPOSAL a human
+    pastes into Merchant Voice's OWN review/approve flow — R10 never calls MV
+    (D3). No merchant is contacted; nothing is written to MV here."""
+    questions = question_set.get("questions") or []
+    payload = [{
+        "text": q.get("text"),
+        "purpose": q.get("purpose"),
+        "question_type": q.get("question_type", "open_text"),
+        "follow_up_prompts": q.get("follow_up_prompts", []),
+        "linked_assumption": q.get("linked_assumption"),
+        "linked_hypothesis": q.get("linked_hypothesis"),
+    } for q in questions]
+    opp = question_set.get("opportunity_id", "")
+    lines = [
+        f"# Merchant Voice hand-off — {question_set.get('id', '')} ({opp})",
+        "",
+        "> **Proposal only.** These reviewer-approved, taxonomy-valid questions "
+        "are a DRAFT for a human to create a Merchant Voice guide from, through "
+        "Merchant Voice's own campaign/guide review+approval flow. Nothing here "
+        "has been sent to Merchant Voice or to any merchant; creating the guide "
+        "is a manual step you take in Merchant Voice.",
+        "",
+    ]
+    for i, q in enumerate(questions, 1):
+        lines.append(f"{i}. **{q.get('text', '')}**  ")
+        lines.append(f"   purpose: `{q.get('purpose')}` · type: "
+                     f"`{q.get('question_type', 'open_text')}`"
+                     + (f" · tests: `{q.get('linked_assumption')}`"
+                        if q.get("linked_assumption") else ""))
+        for fup in q.get("follow_up_prompts") or []:
+            lines.append(f"   - follow-up: {fup}")
+    if not questions:
+        lines.append("_(no questions in this set)_")
+    return {"markdown": "\n".join(lines) + "\n", "mv_guide_payload": payload}

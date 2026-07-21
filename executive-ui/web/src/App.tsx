@@ -11,6 +11,7 @@ import Icon from "./components/Icon";
 import { KnowledgePanel, MonitoringPanel, ReportsPanel, SettingsPanel } from "./components/panels";
 import ResearchPanel from "./components/ResearchPanel";
 import CalculatorsPanel from "./components/CalculatorsPanel";
+import QuestionSetsPanel from "./components/QuestionSetsPanel";
 
 export default function App() {
   const { view, loading, error, setSidebarOpen } = useApp();
@@ -51,6 +52,8 @@ export default function App() {
             {view === "research" && <section className="view" id="view-research"><ResearchPanel /></section>}
             {/* Phase C1 — deterministic calculators (market sizing, unit economics, ...) */}
             {view === "calculators" && <section className="view" id="view-calculators"><CalculatorsPanel /></section>}
+            {/* Phase R10 — evidence-gap-driven merchant research questions (proposals) */}
+            {view === "questions" && <section className="view" id="view-questions"><QuestionSetsPanel /></section>}
             {/* Phase 4 — URL-addressed web report (/report/OPP-nnn) */}
             {view === "report" && <Report />}
             {view === "settings" && <section className="view" id="view-settings"><SettingsPanel /></section>}

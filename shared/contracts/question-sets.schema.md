@@ -1,4 +1,4 @@
-# Merchant research-question sets (Phase R10, PR10b) — schema v1
+# Merchant research-question sets (Phase R10, PR10b–c) — schema v2
 
 Contract for **draft, proposal-only** merchant research-question sets generated
 from an opportunity's evidence-gap profile. Implementation: the pure store
@@ -51,13 +51,16 @@ draft with a note** — never a fabricated question.
 |---|---|---|
 | `id` | `RQSET-…` | |
 | `opportunity_id` | `OPP-nnn` | R10 targets committed opportunities (where gap profiles exist) |
-| `status` | `draft\|approved\|rejected` | born `draft`; `approved`/`rejected` transitions arrive with review (PR10c) |
+| `status` | `draft\|approved\|rejected` | born `draft`; a human review transitions it **exactly once** (PR10c) |
 | `questions` | question[] | validated survivors (below) |
 | `provenance` | object \| null | `{generator, model, generated_at, gap_profile_weak_links:[{assumption_id, priority_rank, signals}]}` |
 | `rejected_count` | int | proposed-but-rejected count (honest; shown) |
 | `note` | string \| null | honest gap note (no model / no gaps / none passed validation) |
 | `owner_user_id` | `USER-…` \| null | owner-scoped; legacy NULL shared; foreign → indistinguishable 404 |
 | `created_at` | UTC ISO-8601 | |
+| `reviewed_at` | UTC ISO-8601 \| null | set on review (**PR10c**, schema v2) |
+| `reviewer` | `USER-…` \| null | the reviewing user (null when auth is off) |
+| `review_note` | string \| null | optional reviewer note |
 
 ### Question object (Merchant Voice taxonomy shape)
 
@@ -72,10 +75,16 @@ draft with a note** — never a fabricated question.
 |---|---|
 | `POST /opportunities/{OPP-nnn}/question-sets` | generate a draft set from the gap profile → 201 `{question_set}`. Owner-scoped; `question_generate` quota; mode-gated like the opportunity detail route |
 | `GET /question-sets[?opportunity_id=]` | list draft sets (owner-scoped) |
-| `GET /question-sets/{RQSET-id}` | one draft set (owner-scoped; foreign → 404) |
+| `GET /question-sets/{RQSET-id}` | one set (owner-scoped; foreign → 404) |
+| `POST /question-sets/{RQSET-id}/review` (**PR10c**) | `{action: "approve"\|"reject", questions?, note?}` — draft → approved\|rejected, **exactly once** (409 if already reviewed). On approve, optional reviewer-edited `questions` REPLACE the set and are **re-validated against Merchant Voice's taxonomy** first (a bad edit → 400, the set stays a draft). Owner-scoped |
+| `GET /question-sets/{RQSET-id}/handoff` (**PR10c**) | for an **approved** set only (else 409): `{handoff: {markdown, mv_guide_payload}}` — a copy-paste hand-off + a Merchant-Voice-guide-shaped payload. **Read-only; R10 never calls Merchant Voice** |
+| `DELETE /question-sets/{RQSET-id}` (**PR10c**) | owner-scoped hard delete of a proposal (foreign/absent → 404) |
 
-No review / edit / delete / Merchant-Voice-hand-off routes exist yet — those are
-**PR10c**. Errors are structured `{error: message}` with no SQL/paths/model output.
+Review/hand-off **never** write the knowledge base or Merchant Voice, mint an EV
+id, change a score, or contact a merchant — approval only unlocks the manual
+hand-off (D3). Taxonomy re-validation of reviewer edits happens in the route
+layer (executive-ui/api), never in the pure store (D1). Errors are structured
+`{error: message}` with no SQL/paths/model output.
 
 ## Boundary (unchanged R10 invariants)
 
