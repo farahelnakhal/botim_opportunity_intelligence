@@ -71,6 +71,32 @@ describe("QuestionSetsPanel (Phase R10 / PR10c)", () => {
     });
   });
 
+  it("lets a reviewer edit a question's purpose/type and sends them on approve", async () => {
+    const calls: { url: string; body: string }[] = [];
+    global.fetch = fetchMockFor([
+      (u, init) => {
+        if (u.includes("/review")) { calls.push({ url: u, body: String(init?.body) }); return { question_set: { ...draftSet, status: "approved" } }; }
+        return undefined;
+      },
+      (u) => u.includes("/question-sets") ? { question_sets: [draftSet] } : undefined,
+    ]) as unknown as typeof fetch;
+    render(<QuestionSetsPanel />);
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByLabelText("question purpose")).toBeInTheDocument());
+
+    // change purpose behaviour -> willingness_to_pay and type -> scale
+    await user.selectOptions(screen.getByLabelText("question purpose"), "willingness_to_pay");
+    await user.selectOptions(screen.getByLabelText("question type"), "scale");
+    // editing a taxonomy field marks the set dirty -> button relabels
+    await user.click(screen.getByRole("button", { name: /Approve edited/ }));
+
+    await waitFor(() => expect(calls.length).toBeGreaterThan(0));
+    const body = JSON.parse(calls[0].body);
+    expect(body.action).toBe("approve");
+    expect(body.questions[0].purpose).toBe("willingness_to_pay");
+    expect(body.questions[0].question_type).toBe("scale");
+  });
+
   it("loads the Merchant Voice hand-off for an approved set with the proposal-only boundary", async () => {
     global.fetch = fetchMockFor([
       (u) => u.includes("/handoff") ? {

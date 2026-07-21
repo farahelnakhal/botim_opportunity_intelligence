@@ -16,20 +16,43 @@ const STATUS_LABEL: Record<string, string> = {
   rejected: "Rejected",
 };
 
+// Merchant Voice question taxonomy (mirrors merchant-voice/app/models.py). A UI
+// affordance only — the review route re-validates every edit against MV's own
+// validator, so this list can never let an out-of-taxonomy value through.
+const PURPOSES = ["problem", "behaviour", "workaround", "frequency", "severity",
+  "willingness_to_pay", "switching_barrier", "trust", "concept_reaction",
+  "rejection_condition", "follow_up"];
+const TYPES = ["open_text", "single_choice", "multi_choice", "scale", "yes_no"];
+
 function QuestionEditor({ q, editable, onChange }: {
-  q: QuestionDraft; editable: boolean; onChange: (text: string) => void;
+  q: QuestionDraft; editable: boolean; onChange: (patch: Partial<QuestionDraft>) => void;
 }) {
   return (
     <div className="qset-question">
       {editable ? (
         <textarea className="qset-question-text" value={q.text}
-          aria-label="question text" rows={2} onChange={(e) => onChange(e.target.value)} />
+          aria-label="question text" rows={2} onChange={(e) => onChange({ text: e.target.value })} />
       ) : (
         <div className="qset-question-text-static">{q.text}</div>
       )}
-      <div className="research-source-meta">
-        {q.purpose && <span className="qset-chip">purpose: {q.purpose}</span>}
-        {q.question_type && <span className="qset-chip">type: {q.question_type}</span>}
+      <div className="research-source-meta qset-question-meta">
+        {editable ? (
+          <>
+            <select className="qset-edit-select" aria-label="question purpose"
+              value={q.purpose ?? ""} onChange={(e) => onChange({ purpose: e.target.value })}>
+              {PURPOSES.map((p) => <option key={p} value={p}>purpose: {p}</option>)}
+            </select>
+            <select className="qset-edit-select" aria-label="question type"
+              value={q.question_type ?? "open_text"} onChange={(e) => onChange({ question_type: e.target.value })}>
+              {TYPES.map((t) => <option key={t} value={t}>type: {t}</option>)}
+            </select>
+          </>
+        ) : (
+          <>
+            {q.purpose && <span className="qset-chip">purpose: {q.purpose}</span>}
+            {q.question_type && <span className="qset-chip">type: {q.question_type}</span>}
+          </>
+        )}
         {q.linked_assumption && (
           <span className="qset-chip" title="the evidence gap this question tests">
             tests: {q.linked_assumption}
@@ -50,7 +73,10 @@ function SetCard({ set, onChanged }: { set: QuestionSet; onChanged: () => void }
   const [copied, setCopied] = useState(false);
   const isDraft = set.status === "draft";
 
-  const dirty = edited.some((q, i) => q.text !== set.questions[i]?.text);
+  const dirty = edited.some((q, i) =>
+    q.text !== set.questions[i]?.text
+    || q.purpose !== set.questions[i]?.purpose
+    || q.question_type !== set.questions[i]?.question_type);
 
   const review = async (action: "approve" | "reject") => {
     setBusy(true); setError(null);
@@ -106,7 +132,7 @@ function SetCard({ set, onChanged }: { set: QuestionSet; onChanged: () => void }
 
       {edited.map((q, i) => (
         <QuestionEditor key={q.question_id ?? i} q={q} editable={isDraft}
-          onChange={(text) => setEdited(edited.map((x, j) => (j === i ? { ...x, text } : x)))} />
+          onChange={(patch) => setEdited(edited.map((x, j) => (j === i ? { ...x, ...patch } : x)))} />
       ))}
 
       {isDraft && set.questions.length > 0 && (
