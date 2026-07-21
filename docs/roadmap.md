@@ -256,8 +256,11 @@ case's deck. Independent of R-phases; can run in parallel after R1.
 ## Phase P1 — Executive outputs (PDF export, answer orchestration polish)
 
 **Depends on:** nothing hard; more valuable after R3 (reports carry research).
-- PDF export of web reports (server-rendered; no client-only hacks).
-- First-answer orchestration improvements in chat.
+- ✅ **PDF export of web reports (server-rendered; no client-only hacks) — DONE**
+  (this branch, PR-P1a/b): `executive-ui/api/report_pdf.py` renders the existing
+  brief read models via reportlab (the repo's first runtime dependency);
+  `GET /brief/{id}/pdf` + a Download button. Honest-state distinctions preserved.
+- First-answer orchestration improvements in chat (still open).
 
 ## Phase H1 — Hardening milestone (the deferred full sweep)
 
@@ -391,10 +394,11 @@ the MV guide manually — no executive→MV cross-service write. A future
 human-triggered "create the MV guide" automation is its own phase. (Branch cut
 from pre-R9a `67f3ddf`; rebase onto current `main` before merge.)
 
-### Phase P1 — PDF export — (existing phase above)
-Confirmed not built; web reports only. Architecturally independent — recommend
-sequencing **last** (a brief is more valuable once C2/R9 add real data), but it
-is not blocked and can slot in anytime.
+### Phase P1 — PDF export — ✅ DONE (this branch, PR-P1a/b)
+Server-rendered PDF of the existing web brief via reportlab (the repo's first
+runtime dependency — logged decision). `executive-ui/api/report_pdf.py` +
+`GET /brief/{id}/pdf` + a Download button; renders the same read model with all
+honest-state distinctions preserved, no client-side print hack.
 
 ### Phase H2 — External-content ingestion hardening — SKETCH
 **Value:** R9's real-external-content ingestion sharply widens the untrusted-

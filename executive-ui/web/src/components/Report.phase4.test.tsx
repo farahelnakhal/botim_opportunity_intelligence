@@ -73,6 +73,7 @@ vi.mock("../lib/api", () => ({
   api: {
     overview: vi.fn(() => Promise.resolve(overviewFixture)),
     brief: vi.fn((id: string) => Promise.resolve(id === "OPP-001" ? briefFixture : null)),
+    briefPdfUrl: (id: string) => `/executive-api/brief/${id}/pdf`,
     journal: vi.fn(() => Promise.resolve({ predictions: briefFixture.predictions, calibration: null })),
     monitoring: vi.fn(() => Promise.resolve({ events: briefFixture.monitoring.events, alerts: [], summaries: [], summary_state: null })),
     monitoringSummary: vi.fn(() => Promise.resolve(null)),
@@ -132,6 +133,14 @@ describe("Web report route (Phase 4)", () => {
     await mount();
     await waitFor(() => expect(screen.getByTestId("report-not-found")).toBeInTheDocument());
     expect(screen.getByTestId("report-not-found")).toHaveTextContent("Report not found");
+  });
+
+  it("offers a Download PDF link to the server-rendered brief (Phase P1)", async () => {
+    window.history.replaceState({}, "", "/report/OPP-001");
+    await mount();
+    const link = await screen.findByTestId("download-pdf");
+    expect(link).toHaveAttribute("href", "/executive-api/brief/OPP-001/pdf");
+    expect(link).toHaveTextContent(/Download PDF/);
   });
 
   it("evidence in the report opens the evidence drawer with provenance", async () => {

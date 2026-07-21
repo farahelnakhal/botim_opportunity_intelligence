@@ -4,6 +4,72 @@
 > decision would surprise a future maintainer or constrains future work.
 > Format: date · decision · reasoning · alternatives · consequences.
 
+## 2026-07-21 — P1 PDF export: render the existing brief model server-side, via reportlab (the repo's first runtime dependency)
+
+- **Decision (D1 — render the existing model, no new data):** the executive-brief
+  PDF is a **rendering target** for the brief read models the API already
+  serves (`serialize.brief_payload` for a committed `OPP-`,
+  `serialize.user_brief_payload` for a `UOPP-` draft) — a pure
+  `render_brief_pdf(payload) -> bytes` in `executive-ui/api/report_pdf.py`,
+  mirroring `impact/brief.py`'s "one view object, multiple pure renderers"
+  pattern. It **recomputes nothing, fetches nothing, invents nothing.** An
+  absent field renders as the exact honest note the web report uses; the
+  renderer accepts the web report's separately-fetched approved external-research
+  list (`None` = unavailable, `[]` = none, list = rows) as an optional arg.
+  Alternatives rejected: a second synthesis/summary step (out of scope,
+  fabrication risk); a client-side "print this page" (the roadmap explicitly
+  requires server-side rendering).
+- **Decision (D2 — reportlab, the repo's FIRST runtime third-party dependency):**
+  PDF generation uses **reportlab 5.0.0 (BSD-3-Clause; pure-Python via wheels,
+  no system libraries; transitive: pillow, charset-normalizer)**, pinned in a
+  new root `requirements.txt` and installed by one `pip install` line in the
+  runtime Dockerfile stage. This is a deliberate, logged deviation from the
+  stdlib-only invariant. It was chosen over a hand-rolled pure-stdlib PDF writer
+  after an explicit cost/risk comparison: stdlib has **no PDF primitive**, so
+  "stdlib PDF" means hand-authoring the byte format **plus** bundling Adobe
+  font-metric width tables for text wrapping and a manual layout/pagination
+  engine (~600–1000 LOC), with a real fidelity ceiling — the standard-14 fonts'
+  WinAnsi encoding has no glyph for `→`/`⚠`/`≥` (which appear in this data),
+  forcing ASCII downgrades or a font-embedding rabbit hole. reportlab handles
+  fonts/wrapping/Unicode/pagination robustly for a few hundred lines of section
+  code; BSD fits the license bar; WeasyPrint/pdfkit were rejected for needing
+  system libs / an external binary that break the slim container. NB — unlike
+  R6 email (`smtplib`/`email` were already stdlib), the SMTP precedent does
+  **not** transfer here; and unlike R7 (a stdlib PDF *parser* was rejected
+  because a bad parser *fabricates* content), *generating* a controlled PDF from
+  an already-built payload carries no fabrication risk, which is what reopens
+  the stdlib-vs-dependency question.
+  - **Precedent this sets (explicit):** this is the repository's first runtime
+    dependency, and it defines the **bar for every future dependency ask** — a
+    proposal must present the same **cost/risk comparison format used here**
+    (concrete stdlib-or-minimal-path scope vs. the dependency's footprint,
+    license, transitive deps, and container impact) and earn its own logged
+    sign-off. "reportlab was approved" is **not** blanket permission for the
+    next dependency; each is argued on its own merits against this bar.
+- **Decision (D3 — honest-state fidelity is a hard requirement of the renderer):**
+  every preliminary / candidate / unapproved / freshness / confidence
+  distinction the web `Report.tsx` makes is preserved as a visible PDF
+  treatment — colored classification/confidence/archived labels, per-evidence
+  freshness bands (stale keeps its ⚠ marker, unknown is labelled "Freshness
+  unknown"), the persistent "no decision" banner on every report, critical-flag
+  warnings, contradictory-vs-supporting evidence, and "candidate — not
+  repository evidence" labels on Merchant-Voice + external-research rows. Empty
+  sections render the web report's exact honest note (e.g. "cites no evidence
+  records", "nothing is fabricated") — **never** silently omitted or
+  placeholder-filled. All payload text is XML-escaped before reaching
+  reportlab's Paragraph parser (rendering safety **and** data-never-instructions),
+  and the assembled prose is routed through the **same overclaim/bounded-statement
+  guard as `impact/email.py`** (reusing its constants, not forking them).
+  Alternatives rejected: letting PDF export flatten preliminary/approved into an
+  undifferentiated document (defeats the point and misleads a reader).
+- **Consequences:** PR-P1a ships the renderer + `requirements.txt` + Dockerfile
+  line + offline tests; PR-P1b adds `GET /brief/{id}/pdf` (reusing the same
+  serializer + OPP demo-gating + UOPP ownership) and a "Download PDF" button.
+  The runtime image is no longer strictly stdlib-only — `architecture.md`/
+  current-state to be updated in PR-P1b. Content is asserted in tests via a
+  `visible_text()` helper (the exact segment log the guard sees) so fidelity is
+  checked without parsing compressed PDF streams.
+
 ## 2026-07-20 — R9a-4: multi-language querying is human-curated, not machine-translated
 
 - **Decision:** Multi-language querying issues search terms in more than one
@@ -631,6 +697,15 @@
   the offline logic. Use `scripts/smoke_smtp.py` (credential-free, reads
   `SMTP_*`) from a machine with egress to validate a real relay after a key
   rotation, provider change, or first deploy.
+- **Addendum (2026-07-21) — live validation complete; constraint closed.** The
+  live-send validation above has now been performed from a machine with SMTP
+  egress: `scripts/smoke_smtp.py` passed all three cases (real send succeeds;
+  wrong password → 502; unset `SMTP_*` → 503), and end-to-end the live
+  double-opt-in confirmation email and a real material-change digest — with a
+  working signed unsubscribe link — were verified against a real inbox. R6's
+  last "known-unverified" item (from the PR6a–d review) is closed; production
+  email may be relied upon. Operator responsibilities are unchanged
+  (SPF/DKIM/verified sending domain, per the Consequences above).
 
 ## 2026-07-19 — R6 cadence + recipients: per-chat `workspace_subscriptions` with a multi-recipient child table, owner-scoped, distinct from `MCFG-`
 

@@ -45,7 +45,10 @@ COPY executive-ui/web/ ./
 ENV VITE_APP_MODE=$APP_MODE
 RUN npm run build
 
-# ---- Stage 2: runtime (Python API only — stdlib, no dependencies) -------- #
+# ---- Stage 2: runtime (Python API — stdlib + one pinned dep: reportlab) --- #
+# The backend is stdlib-only by design; reportlab (BSD-3-Clause) is the sole
+# runtime third-party dependency, added for P1 server-side PDF export — a
+# deliberate logged decision (docs/decision-log.md "P1 PDF export").
 FROM python:3.11-slim
 ARG APP_MODE
 
@@ -66,6 +69,10 @@ ENV PORT=7860 \
 RUN mkdir -p /data && chmod -R 777 /data
 
 WORKDIR /app
+# P1 — install the sole runtime dependency (reportlab) before copying source so
+# the layer caches independently of application changes.
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 # Only what the two backends need at runtime — the rest of the repo (tests,
 # .git, the unbuilt web/ source, merchant-voice's server/tests) is not
 # required to serve requests.

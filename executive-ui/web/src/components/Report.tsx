@@ -31,6 +31,20 @@ function EmptyNote({ text }: { text: string }) {
   return <p className="source-tag" style={{ display: "block" }}>{text}</p>;
 }
 
+// Phase P1 — download the SAME brief as a server-rendered PDF. A plain link
+// (the server sets Content-Disposition: attachment and carries the session
+// cookie under required-auth mode); no button if the id shape is invalid.
+function DownloadPdfButton({ id }: { id: string }) {
+  const href = api.briefPdfUrl(id);
+  if (!href) return null;
+  return (
+    <a className="btn btn-secondary" href={href} rel="noopener"
+      data-testid="download-pdf" title="Download this brief as a PDF">
+      <Icon name="file" size={14} /> Download PDF
+    </a>
+  );
+}
+
 // Phase R3 — approved external web-research candidates for this opportunity,
 // visually separate from repository evidence. null = research API unreachable.
 function ExternalResearchSection({ candidates }: { candidates: ResearchCandidate[] | null }) {
@@ -119,6 +133,7 @@ function UserReport({ brief, researchCandidates }: { brief: UserBriefPayload; re
               <span className="tag neutral">Your opportunity</span>
             </div>
           </div>
+          <DownloadPdfButton id={brief.opportunity_id} />
         </div>
         <div className="banner-note"><Icon name="alert" /><span>{brief.decision_banner}</span></div>
 
@@ -244,6 +259,7 @@ export default function Report() {
               {brief.is_archived && <span className="tag reject">Archived</span>}
             </div>
           </div>
+          <DownloadPdfButton id={brief.opportunity_id} />
         </div>
 
         <div className="banner-note"><Icon name="alert" /><span>{brief.decision_banner}</span></div>

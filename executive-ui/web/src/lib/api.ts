@@ -141,6 +141,15 @@ export const api = {
     }
   },
 
+  // Phase P1 — the server-side PDF of the same brief. A direct GET URL (the
+  // server sets Content-Disposition: attachment), so a plain link downloads
+  // it and carries the session cookie under required-auth mode. Returns null
+  // for an id that isn't a valid OPP-/UOPP- shape (no button rendered then).
+  briefPdfUrl: (opportunityId: string): string | null =>
+    /^(OPP-\d{3}|UOPP-[0-9a-f]{12})$/.test(opportunityId)
+      ? `${BASE}/brief/${encodeURIComponent(opportunityId)}/pdf`
+      : null,
+
   // LEGACY (Phase 2J): the deterministic keyword router. copilot-backend now
   // owns conversational chat (lib/copilotApi.ts); this remains only as a
   // narrowly-scoped dashboard helper / compatibility path (Phase 2G) — the
