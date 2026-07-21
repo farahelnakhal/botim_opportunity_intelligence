@@ -1,0 +1,13 @@
+# Runtime Python dependencies.
+#
+# This repository is stdlib-only by default (a hard, load-bearing invariant —
+# see docs/architecture.md and the R6-SMTP / R7-documents decision-log entries).
+# reportlab is the FIRST and only runtime third-party dependency, added for
+# Phase P1 (server-side PDF export of executive briefs). It is a deliberate,
+# logged decision — see docs/decision-log.md, "P1 PDF export" — and it sets the
+# bar for any future dependency: match that entry's cost/risk comparison, don't
+# cite "reportlab got approved" as blanket permission.
+#
+# reportlab 5.0.0 — BSD-3-Clause; pure-Python install via wheels (no system
+# libraries needed on python:3.11-slim). Transitive: pillow, charset-normalizer.
+reportlab==5.0.0
