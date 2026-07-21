@@ -515,6 +515,10 @@ class Handler(BaseHTTPRequestHandler):
         # opportunity from its evidence-gap profile (proposals only).
         if sub.startswith("/opportunities/") and sub.endswith("/question-sets"):
             return self._question_sets_post(sub)
+        # Phase R10 (PR10c) — human review of a draft question set
+        # (approve/reject, with optional reviewer edits). Proposals only.
+        if sub.startswith("/question-sets/"):
+            return self._question_sets_review(sub)
         if sub in LEGACY_ROUTE_PATHS and not LEGACY_UNGROUNDED_ROUTES_ENABLED:
             return self._legacy_disabled()
         body = self._read_json_body()
@@ -739,11 +743,59 @@ class Handler(BaseHTTPRequestHandler):
                 opp = (query.get("opportunity_id") or [None])[0]
                 return self._json({"question_sets": get_question_store().list(
                     opportunity_id=opp, visible_to=vt)})
+            # PR10c — Merchant Voice hand-off for an APPROVED set (markdown + a
+            # MV-guide-shaped JSON a human pastes into MV; R10 never calls MV).
+            m = re.match(r"^/question-sets/(RQSET-[0-9a-f]{12})/handoff$", path)
+            if m:
+                qset = get_question_store().get(m.group(1), visible_to=vt)
+                if qset["status"] != "approved":
+                    return self._error(409, "hand-off is available only for an "
+                                            "approved question set")
+                return self._json({"question_set_id": qset["id"],
+                                   "opportunity_id": qset["opportunity_id"],
+                                   "handoff": question_generator.render_handoff(qset)})
             m = re.match(r"^/question-sets/([A-Za-z0-9-]{1,40})$", path)
             if m:
                 return self._json({"question_set": get_question_store().get(
                     m.group(1), visible_to=vt)})
             return self._error(404, "unknown endpoint")
+        except questions_pkg.QuestionStoreError as exc:
+            return self._error(exc.status, str(exc))
+
+    def _question_sets_review(self, sub):
+        """PR10c — approve/reject a draft set, with optional reviewer edits.
+        Edits are re-validated against Merchant Voice's OWN taxonomy before they
+        persist (a human edit can't bypass the taxonomy gate). Approval is not a
+        write to the KB or Merchant Voice; it only unlocks the manual hand-off."""
+        m = re.match(r"^/question-sets/(RQSET-[0-9a-f]{12})/review$", sub)
+        if not m:
+            return self._error(404, "unknown endpoint")
+        viewer = self._current_user() if auth_required() else None
+        vt = viewer["id"] if viewer else None
+        body = self._read_json_body()
+        action = body.get("action")
+        if action not in ("approve", "reject"):
+            return self._error(400, "action must be 'approve' or 'reject'")
+        questions = body.get("questions")
+        note = body.get("note")
+        try:
+            if action == "approve" and questions is not None:
+                # re-validate reviewer edits against MV's taxonomy (D1)
+                question_generator.validate_edited_questions(questions)
+            result = get_question_store().review(
+                m.group(1), action, questions=questions,
+                reviewer=vt, note=note, visible_to=vt)
+            return self._json({"question_set": result})
+        except question_generator.ValidationError as exc:
+            return self._error(400, f"edited question fails Merchant Voice taxonomy: {exc}")
+        except questions_pkg.QuestionStoreError as exc:
+            return self._error(exc.status, str(exc))
+
+    def _question_sets_delete(self, set_id):
+        viewer = self._current_user() if auth_required() else None
+        try:
+            return self._json(get_question_store().delete(
+                set_id, visible_to=viewer["id"] if viewer else None))
         except questions_pkg.QuestionStoreError as exc:
             return self._error(exc.status, str(exc))
 
@@ -1395,6 +1447,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._document_delete(m.group(1))
             if sub.startswith("/calculators/results/"):  # Phase C1
                 return self._calculators_delete(sub)
+            m = re.match(r"^/question-sets/(RQSET-[0-9a-f]{12})$", sub)  # R10 PR10c
+            if m:
+                return self._question_sets_delete(m.group(1))
         return self._error(404, "not found")
 
     def do_PATCH(self):

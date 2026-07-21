@@ -30,7 +30,7 @@ import uuid
 import datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_DB_PATH = REPO / "runtime" / "question-sets.db"
@@ -38,7 +38,8 @@ DEFAULT_DB_PATH = REPO / "runtime" / "question-sets.db"
 RQSET_RE = re.compile(r"^RQSET-[0-9a-f]{12}$")
 OPP_RE = re.compile(r"^OPP-\d{3}$")
 
-STATUSES = ("draft", "approved", "rejected")   # approved/rejected land in PR10c
+STATUSES = ("draft", "approved", "rejected")
+TERMINAL_STATUSES = ("approved", "rejected")   # a reviewed set is immutable
 
 # bounded sizes — oversize input is rejected, never silently truncated
 TEXT_MAX = 4000
@@ -126,6 +127,8 @@ class QuestionSetStore:
                 raise QuestionStoreError("question-sets database is newer than this code", status=500)
             if version < 1:
                 self._migrate_to_v1(conn)
+            if version < 2:
+                self._migrate_to_v2(conn)
             conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)",
                          (str(SCHEMA_VERSION),))
 
@@ -143,6 +146,17 @@ class QuestionSetStore:
             created_at TEXT NOT NULL)""")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_qset_owner ON question_sets(owner_user_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_qset_opp ON question_sets(opportunity_id)")
+
+    @staticmethod
+    def _migrate_to_v2(conn):
+        # PR10c — human review metadata. draft -> approved|rejected exactly once
+        # (the transition/edits live in review(); taxonomy re-validation of any
+        # human edits happens UPSTREAM in the route layer, never here — the store
+        # never imports Merchant Voice). Idempotent (PRAGMA-guarded).
+        existing = {r["name"] for r in conn.execute("PRAGMA table_info(question_sets)")}
+        for col in ("reviewed_at", "reviewer", "review_note"):
+            if col not in existing:
+                conn.execute(f"ALTER TABLE question_sets ADD COLUMN {col} TEXT")
 
     @staticmethod
     def _row_dict(row):
@@ -201,6 +215,63 @@ class QuestionSetStore:
                 f"SELECT * FROM question_sets {where} ORDER BY created_at DESC, id LIMIT ?",
                 (*params, limit)).fetchall()
         return [self._row_dict(r) for r in rows]
+
+    def review(self, set_id, action, *, questions=None, reviewer=None, note=None,
+               visible_to=None):
+        """Human review (PR10c): draft -> approved | rejected, EXACTLY once.
+
+        On approve, `questions` may carry the reviewer's edited set, which
+        REPLACES the draft's questions (re-bounded + re-ided here). Structural
+        bounds only — taxonomy conformance of edits is enforced UPSTREAM by the
+        route layer against Merchant Voice's validator before this is called
+        (D1: the store never imports Merchant Voice). Approval is NOT a write to
+        the KB or Merchant Voice and never mints an EV id — it only marks the
+        set usable for a human to hand off into MV's own review flow (D3)."""
+        _validate_id(set_id, RQSET_RE, "question-set id")
+        if action not in ("approve", "reject"):
+            raise QuestionStoreError("action must be 'approve' or 'reject'")
+        if note is not None and (not isinstance(note, str) or len(note) > TEXT_MAX):
+            raise QuestionStoreError("'note' must be a bounded string")
+        if reviewer is not None and (not isinstance(reviewer, str) or len(reviewer) > SHORT_MAX):
+            raise QuestionStoreError("'reviewer' must be a bounded string")
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM question_sets WHERE id=?", (set_id,)).fetchone()
+            if row is None or not _owner_visible(row["owner_user_id"], visible_to):
+                raise QuestionStoreError("question set not found", status=404)
+            if row["status"] in TERMINAL_STATUSES:
+                raise QuestionStoreError(
+                    f"question set already reviewed ('{row['status']}')", status=409)
+            status = "approved" if action == "approve" else "rejected"
+            questions_json = row["questions"]
+            if questions is not None:
+                if not isinstance(questions, list):
+                    raise QuestionStoreError("questions must be a list")
+                if len(questions) > QUESTIONS_MAX:
+                    raise QuestionStoreError(f"too many questions (max {QUESTIONS_MAX})")
+                bounded = []
+                for i, q in enumerate(questions):
+                    item = _bounded_question(q, i)
+                    item["question_id"] = f"{set_id}-Q{i + 1}"
+                    bounded.append(item)
+                questions_json = json.dumps(bounded)
+            conn.execute(
+                """UPDATE question_sets
+                   SET status=?, questions=?, reviewed_at=?, reviewer=?, review_note=?
+                   WHERE id=?""",
+                (status, questions_json, _now(), reviewer, note, set_id))
+        return self.get(set_id, visible_to=visible_to)
+
+    def delete(self, set_id, visible_to=None):
+        """Owner-scoped hard delete of a draft/reviewed set (a proposal is
+        disposable). A foreign or absent set answers an indistinguishable 404."""
+        _validate_id(set_id, RQSET_RE, "question-set id")
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT owner_user_id FROM question_sets WHERE id=?", (set_id,)).fetchone()
+            if row is None or not _owner_visible(row["owner_user_id"], visible_to):
+                raise QuestionStoreError("question set not found", status=404)
+            conn.execute("DELETE FROM question_sets WHERE id=?", (set_id,))
+        return {"id": set_id, "deleted": True}
 
 
 def _owner_visible(row_owner, viewer):

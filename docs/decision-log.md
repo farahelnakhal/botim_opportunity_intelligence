@@ -170,6 +170,40 @@
   corroboration rule reads this field directly. Firms up the 2026-07-20
   source-tiering decision with the storage/default specifics. (PR9a-1.)
 
+## 2026-07-20 — R10 PR10c: human review + Merchant Voice hand-off (still no cross-service write)
+
+- **Decision:** PR10c completes R10 with the human-review surface and a **manual**
+  Merchant Voice hand-off. The store gains a `review(set_id, action, questions?,
+  reviewer?, note?)` transition (draft → approved|rejected **exactly once**;
+  schema **v2** adds `reviewed_at`/`reviewer`/`review_note`) and an owner-scoped
+  `delete`. Routes `POST /question-sets/{id}/review`, `GET
+  /question-sets/{id}/handoff` (approved-only), `DELETE /question-sets/{id}`. A
+  frontend "Research questions" panel lists sets, lets a reviewer approve
+  (optionally editing question text), reject, or delete, and shows the hand-off.
+- **Decision (edits re-validated at the boundary):** a reviewer's edited
+  questions REPLACE the set on approve, and are **re-validated against Merchant
+  Voice's own taxonomy in the route layer** (`question_generator.validate_edited_questions`)
+  before they persist — a human edit can no more bypass the taxonomy gate than
+  the LLM draft could. The pure store enforces structural bounds only and never
+  imports Merchant Voice (D1 preserved).
+- **Decision (hand-off is a document, not a call):** `GET …/handoff` returns
+  copy-paste markdown **plus** a Merchant-Voice-guide-shaped JSON payload, so a
+  human pastes it into MV's own `POST /campaigns/{id}/guides` → `guides.approve`
+  flow. R10 still **never** calls Merchant Voice, writes the KB, changes a score,
+  mints an EV id, or contacts a merchant — approval only *unlocks* the manual
+  hand-off (D3 upheld). The UI states this boundary at the review and hand-off
+  steps.
+- **Alternatives rejected:** auto-creating an MV (draft) guide on approve (the
+  cross-service write D3 defers to its own future phase); letting reviewer edits
+  skip taxonomy validation (would reopen the fabrication gate the generator
+  closes); a status transition that can be re-run (approvals must be immutable
+  like candidate review).
+- **Consequences:** R10 is feature-complete as scoped — a reviewed, taxonomy-valid
+  draft set with a manual MV hand-off. This branch is based on pre-R9a `67f3ddf`;
+  merging to `main` (now carrying R9a) needs a rebase + reconciliation of the
+  shared docs/`index.css` first. A future human-triggered "create the MV guide
+  from an approved set" automation remains its own phase with its own review.
+
 ## 2026-07-20 — R10 evidence-gap-driven merchant question generation: 3-PR shape, layering, distinct RQSET- object, and NO cross-service write into Merchant Voice
 
 - **Decision (phase shape):** R10 ships as **three PRs**: **PR10a** — a

@@ -97,5 +97,93 @@ class ValidationTests(unittest.TestCase):
             s.create("OPP-001", [q() for _ in range(41)])
 
 
+class ReviewTests(unittest.TestCase):
+    """PR10c — draft -> approved|rejected exactly once, optional reviewer edits."""
+
+    def test_approve_transitions_once_and_records_reviewer(self):
+        s = make_store()
+        sid = s.create("OPP-001", [q()])["id"]
+        out = s.review(sid, "approve", reviewer="USER-a", note="looks good")
+        self.assertEqual(out["status"], "approved")
+        self.assertEqual(out["reviewer"], "USER-a")
+        self.assertEqual(out["review_note"], "looks good")
+        self.assertIsNotNone(out["reviewed_at"])
+        # immutable afterwards
+        with self.assertRaises(QuestionStoreError) as cm:
+            s.review(sid, "reject")
+        self.assertEqual(cm.exception.status, 409)
+
+    def test_reject_transitions(self):
+        s = make_store()
+        sid = s.create("OPP-001", [q()])["id"]
+        self.assertEqual(s.review(sid, "reject")["status"], "rejected")
+
+    def test_approve_with_edits_replaces_and_reids_questions(self):
+        s = make_store()
+        sid = s.create("OPP-001", [q()])["id"]
+        edited = [q(text="Edited question one?"), q(text="Edited question two?")]
+        out = s.review(sid, "approve", questions=edited)
+        self.assertEqual([qq["text"] for qq in out["questions"]],
+                         ["Edited question one?", "Edited question two?"])
+        self.assertEqual([qq["question_id"] for qq in out["questions"]],
+                         [f"{sid}-Q1", f"{sid}-Q2"])
+
+    def test_edited_question_still_structurally_bounded(self):
+        s = make_store()
+        sid = s.create("OPP-001", [q()])["id"]
+        with self.assertRaises(QuestionStoreError):
+            s.review(sid, "approve", questions=[{"text": "   "}])  # empty text
+
+    def test_review_owner_scoped_404(self):
+        s = make_store()
+        sid = s.create("OPP-001", [q()], owner_user_id="USER-a")["id"]
+        with self.assertRaises(QuestionStoreError) as cm:
+            s.review(sid, "approve", visible_to="USER-b")
+        self.assertEqual(cm.exception.status, 404)
+
+    def test_bad_action_rejected(self):
+        s = make_store()
+        sid = s.create("OPP-001", [q()])["id"]
+        with self.assertRaises(QuestionStoreError):
+            s.review(sid, "maybe")
+
+
+class DeleteTests(unittest.TestCase):
+    def test_delete_then_gone(self):
+        s = make_store()
+        sid = s.create("OPP-001", [q()])["id"]
+        self.assertTrue(s.delete(sid)["deleted"])
+        with self.assertRaises(QuestionStoreError) as cm:
+            s.get(sid)
+        self.assertEqual(cm.exception.status, 404)
+
+    def test_delete_foreign_is_404(self):
+        s = make_store()
+        sid = s.create("OPP-001", [q()], owner_user_id="USER-a")["id"]
+        with self.assertRaises(QuestionStoreError) as cm:
+            s.delete(sid, visible_to="USER-b")
+        self.assertEqual(cm.exception.status, 404)
+        self.assertEqual(s.get(sid, visible_to="USER-a")["id"], sid)  # untouched
+
+
+class MigrationTests(unittest.TestCase):
+    def test_v1_db_migrates_to_v2_in_place(self):
+        import sqlite3
+        d = Path(tempfile.mkdtemp()) / "old.db"
+        # simulate a v1 database (no review columns)
+        conn = sqlite3.connect(d)
+        conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        conn.execute("INSERT INTO meta VALUES ('schema_version','1')")
+        conn.execute("""CREATE TABLE question_sets (id TEXT PRIMARY KEY,
+            opportunity_id TEXT NOT NULL, status TEXT NOT NULL, questions TEXT NOT NULL,
+            provenance TEXT, rejected_count INTEGER NOT NULL DEFAULT 0, note TEXT,
+            owner_user_id TEXT, created_at TEXT NOT NULL)""")
+        conn.commit()
+        conn.close()
+        s = make_store(d)   # opening runs the v1->v2 migration
+        sid = s.create("OPP-001", [q()])["id"]
+        self.assertEqual(s.review(sid, "approve")["status"], "approved")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,45 @@
 // Types mirror the read-only Python API (executive-ui/api/serialize.py).
 // The UI never invents these values; it renders engine truth.
 
+// Phase R10 — draft merchant research-question sets (proposals only; a reviewed
+// set is handed off MANUALLY into Merchant Voice, never auto-written).
+export interface QuestionDraft {
+  question_id?: string;
+  text: string;
+  purpose: string | null;
+  question_type: string | null;
+  follow_up_prompts: string[];
+  linked_assumption: string | null;
+  linked_hypothesis?: string | null;
+  signals?: string[];
+  source_weak_link_rank?: number | null;
+}
+
+export interface QuestionSet {
+  id: string; // RQSET-<12 hex>
+  opportunity_id: string;
+  status: "draft" | "approved" | "rejected";
+  questions: QuestionDraft[];
+  provenance: {
+    generator?: string;
+    model?: string | null;
+    generated_at?: string;
+    gap_profile_weak_links?: { assumption_id: string; priority_rank: number; signals: string[] }[];
+  } | null;
+  rejected_count: number;
+  note: string | null;
+  owner_user_id: string | null;
+  created_at: string;
+  reviewed_at?: string | null;
+  reviewer?: string | null;
+  review_note?: string | null;
+}
+
+export interface QuestionSetHandoff {
+  markdown: string;
+  mv_guide_payload: QuestionDraft[];
+}
+
 export interface Factor {
   key: string;
   score: number;

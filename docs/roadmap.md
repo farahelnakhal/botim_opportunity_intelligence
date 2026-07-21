@@ -373,7 +373,7 @@ traced to an `RSRC-` id. Results are **candidate/preliminary**, human-reviewed,
 never auto-written to committed scores. **Risks:** sizing figures often
 single-source/paywalled → frequent honest low-confidence; tolerance tuning.
 
-### Phase R10 — Evidence-gap-driven research-question generation — SKETCH
+### Phase R10 — Evidence-gap-driven research-question generation — ✅ DONE (PR10a–c, this branch)
 **Value:** turn "weakest links" into targeted next questions. **Gap signals:**
 fewest approved evidence records; assumption-capped scorecard dimensions;
 contradictory evidence; stale load-bearing evidence (>180d); open
@@ -383,6 +383,13 @@ set** → only then attached to a guide/campaign. **No auto-send to a real
 merchant.** Answers flow into the existing candidate→review pipeline; never
 auto-update models. **Depends on:** the gap/assumption engine + Merchant Voice;
 benefits from R9 but not blocked by it.
+**Shipped as:** PR10a (deterministic `impact/gap_profile.py` + copilot tool +
+`GET /gap-profile`) → PR10b (LLM draft + MV-taxonomy validation + `RQSET-` store
+`shared/questions/`) → PR10c (human review + Merchant Voice hand-off + frontend).
+**D3 upheld:** R10 stops at a reviewed, taxonomy-valid draft set; a human creates
+the MV guide manually — no executive→MV cross-service write. A future
+human-triggered "create the MV guide" automation is its own phase. (Branch cut
+from pre-R9a `67f3ddf`; rebase onto current `main` before merge.)
 
 ### Phase P1 — PDF export — (existing phase above)
 Confirmed not built; web reports only. Architecturally independent — recommend
