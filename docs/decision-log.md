@@ -697,6 +697,15 @@
   the offline logic. Use `scripts/smoke_smtp.py` (credential-free, reads
   `SMTP_*`) from a machine with egress to validate a real relay after a key
   rotation, provider change, or first deploy.
+- **Addendum (2026-07-21) — live validation complete; constraint closed.** The
+  live-send validation above has now been performed from a machine with SMTP
+  egress: `scripts/smoke_smtp.py` passed all three cases (real send succeeds;
+  wrong password → 502; unset `SMTP_*` → 503), and end-to-end the live
+  double-opt-in confirmation email and a real material-change digest — with a
+  working signed unsubscribe link — were verified against a real inbox. R6's
+  last "known-unverified" item (from the PR6a–d review) is closed; production
+  email may be relied upon. Operator responsibilities are unchanged
+  (SPF/DKIM/verified sending domain, per the Consequences above).
 
 ## 2026-07-19 — R6 cadence + recipients: per-chat `workspace_subscriptions` with a multi-recipient child table, owner-scoped, distinct from `MCFG-`
 
