@@ -23,6 +23,7 @@ import datetime
 import json
 import os
 import re
+import sys
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -31,12 +32,12 @@ from urllib.parse import parse_qs, urlparse
 
 try:
     from . import (auth_store, generate, modes, monitoring_runner,
-                   question_generator, router, serialize, user_store)
+                   question_generator, report_pdf, router, serialize, user_store)
 except ImportError:  # run directly as a script (python3 executive-ui/api/server.py)
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from api import (auth_store, generate, modes, monitoring_runner,
-                     question_generator, router, serialize, user_store)
+                     question_generator, report_pdf, router, serialize, user_store)
 
 # shared.research lives at the repo root (the platform layer, reused later by
 # the runner/monitoring), not under executive-ui — make the root importable
@@ -297,8 +298,74 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _error(self, status, msg):
-        self._json({"error": msg}, status=status)
+    def _error(self, status, msg, err_type=None):
+        body = {"error": msg}
+        if err_type:
+            # a machine-distinguishable tag so specific, expected error
+            # conditions are not confused with a generic/unexpected 500
+            body["type"] = err_type
+        self._json(body, status=status)
+
+    def _pdf_response(self, pdf_bytes, filename):
+        safe = re.sub(r"[^A-Za-z0-9._-]", "_", filename)  # header-safe ASCII
+        self.send_response(200)
+        self.send_header("Content-Type", "application/pdf")
+        self.send_header("Content-Disposition", f'attachment; filename="{safe}"')
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Content-Length", str(len(pdf_bytes)))
+        self.end_headers()
+        self.wfile.write(pdf_bytes)
+
+    # -- Phase P1: server-side brief PDF ------------------------------------ #
+    def _brief_pdf(self, rid, root, mode):
+        """Render the brief to a downloadable PDF. Resolves the EXACT same
+        read model as the JSON /brief route with IDENTICAL gating (UOPP served
+        in every mode; committed OPP demo-gated), then renders server-side.
+        On the renderer's honest hard-failure (e.g. an overclaim in the brief
+        content) it returns a clear JSON error — never a 200 with a blank or
+        partial PDF, never a bare stack trace."""
+        if rid.startswith("UOPP-"):
+            try:
+                payload = serialize.user_brief_payload(get_user_store(), rid)
+            except user_store.StoreError as exc:
+                return self._error(exc.status, str(exc))
+        else:
+            if not modes.demo_corpus_visible(mode):
+                return self._error(404, "demo reports are not available in normal mode")
+            try:
+                payload = serialize.brief_payload(rid, root)
+            except ValueError:
+                return self._error(400, "invalid opportunity id")
+            if not payload:
+                return self._error(404, "no such opportunity")
+        # Approved external-research candidates, mirroring the web report's
+        # separate fetch. Best-effort: any failure renders an honest
+        # "unavailable" note in the PDF — it never blocks the export or fabricates.
+        candidates = None
+        try:
+            viewer = self._current_user() if auth_required() else None
+            candidates = get_research_store().list_candidates(
+                status="approved", opportunity_ref=rid,
+                visible_to=viewer["id"] if viewer else None)
+        except Exception:
+            candidates = None
+        try:
+            pdf = report_pdf.render_brief_pdf(payload, research_candidates=candidates)
+        except report_pdf.ReportPdfError as exc:
+            # Loud, human-noticeable log: if the honesty guard trips on the
+            # brief's (already human-reviewed) content, reviewed data itself
+            # contains something flagged as an overclaim — that needs a person
+            # to look, not a quiet 500 a user silently retries. stderr is the
+            # surfacing channel here (container platforms capture it; the
+            # access-log quieting via log_message() does not touch it).
+            sys.stderr.write(
+                f"[P1 content_integrity_guard] brief PDF for {rid} REJECTED by the "
+                f"honesty guard — reviewed brief content tripped it: {exc}. "
+                f"A human should review this opportunity's committed brief.\n")
+            sys.stderr.flush()
+            return self._error(500, f"brief PDF could not be generated: {exc}",
+                               err_type="content_integrity_guard")
+        return self._pdf_response(pdf, f"{rid}-brief.pdf")
 
     # -- Phase R8a: sessions -------------------------------------------------- #
 
@@ -1591,6 +1658,11 @@ class Handler(BaseHTTPRequestHandler):
             # Phase 4/6 — full web-report read model for one opportunity.
             # UOPP- ids resolve from the runtime user store in every mode;
             # committed OPP- briefs are demo corpus, hidden in normal mode.
+            # Phase P1 — server-side PDF of the SAME brief read model, with
+            # IDENTICAL visibility/gating to the JSON /brief route below.
+            m = re.match(r"^/brief/([A-Za-z0-9-]{1,40})/pdf$", path)
+            if m:
+                return self._brief_pdf(m.group(1), root, mode)
             m = re.match(r"^/brief/([A-Za-z0-9-]{1,40})$", path)
             if m:
                 rid = m.group(1)

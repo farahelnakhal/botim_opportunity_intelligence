@@ -24,8 +24,14 @@ impact/ · knowledge-base/ (committed, Git, read-only at runtime)
 merchant-voice/server.py (8020) — separate service, own storage (mv.db + identity.db)
 ```
 
-All backends are **pure Python 3 stdlib** (nothing to pip-install). The frontend is the
-only Node dependency surface.
+All backends are **pure Python 3 stdlib** with a **single pinned runtime
+dependency**: `reportlab` (BSD-3-Clause), added in Phase P1 for server-side
+executive-brief PDF export and declared in the root `requirements.txt`. It is
+the repo's first and only such dependency — a deliberate, logged decision (see
+docs/decision-log.md "P1 PDF export"), and the bar every future dependency must
+clear: a proposal must present the same explicit stdlib-vs-dependency cost/risk
+comparison and earn its own sign-off, never cite this one as blanket permission.
+The frontend is the only Node dependency surface.
 
 ## Components
 
