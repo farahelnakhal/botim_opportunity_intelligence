@@ -20,6 +20,7 @@ sys.path.insert(0, str(REPO_ROOT / "opportunity-intelligence" / "tools"))
 
 from impact import brief as impact_brief                      # noqa: E402
 from impact import gaps as impact_gaps                        # noqa: E402
+from impact import gap_profile as impact_gap_profile          # noqa: E402
 from impact import history as impact_history                  # noqa: E402
 from impact import paths as impact_paths                      # noqa: E402
 from impact import proposal as impact_proposal                # noqa: E402
@@ -166,6 +167,20 @@ def get_assumption_register(opp_id):
 
 def get_evidence_gaps():
     return impact_gaps.build_portfolio(_now())
+
+
+def get_evidence_gap_profile(opp_id):
+    """Phase R10 — the deterministic evidence-gap PROFILE for one opportunity:
+    its ranked weakest links across five signals (no supporting evidence,
+    assumption-capped dimensions, contradicted evidence, stale load-bearing
+    evidence, open gaps). Read-only; recomputes no score; every input shown.
+    This surfaces WHERE evidence is weakest so a human can target research —
+    it never drafts or sends anything to a merchant."""
+    _validate(OPP_RE, opp_id, "opportunity")
+    try:
+        return impact_gap_profile.build_gap_profile(opp_id, _now())
+    except FileNotFoundError:
+        raise ToolError(f"{opp_id} not found", not_found=True)
 
 
 # --- evidence / segment / inflection / competitor / experiment ---------------
@@ -601,6 +616,8 @@ REGISTRY = {
     "get_opportunity_assumptions": (get_opportunity_assumptions, _schema({"opp_id": _ID}, ["opp_id"]), "Assumption summary"),
     "get_assumption_register": (get_assumption_register, _schema({"opp_id": _ID}, ["opp_id"]), "Rich assumption register"),
     "get_evidence_gaps": (get_evidence_gaps, _schema({}, []), "Portfolio evidence gaps, prioritized"),
+    "get_evidence_gap_profile": (get_evidence_gap_profile, _schema({"opp_id": _ID}, ["opp_id"]),
+                                 "Ranked evidence-gap profile (weakest links) for one opportunity — where its evidence is thinnest"),
     "get_evidence_record": (get_evidence_record, _schema({"ev_id": _ID}, ["ev_id"]), "One Part A evidence record"),
     "get_segment": (get_segment, _schema({"seg_id": _ID}, ["seg_id"]), "Segment profile"),
     "get_inflection_point": (get_inflection_point, _schema({"ip_id": _ID}, ["ip_id"]), "Inflection point"),

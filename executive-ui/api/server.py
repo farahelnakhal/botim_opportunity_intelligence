@@ -19,6 +19,7 @@ and this server will also serve web/dist.
 """
 
 import argparse
+import datetime
 import json
 import os
 import re
@@ -29,13 +30,13 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 try:
-    from . import (auth_store, generate, modes, monitoring_runner, router,
-                   serialize, user_store)
+    from . import (auth_store, generate, modes, monitoring_runner,
+                   question_generator, router, serialize, user_store)
 except ImportError:  # run directly as a script (python3 executive-ui/api/server.py)
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from api import (auth_store, generate, modes, monitoring_runner, router,
-                     serialize, user_store)
+    from api import (auth_store, generate, modes, monitoring_runner,
+                     question_generator, router, serialize, user_store)
 
 # shared.research lives at the repo root (the platform layer, reused later by
 # the runner/monitoring), not under executive-ui — make the root importable
@@ -54,6 +55,8 @@ try:
     from shared import email as email_pkg
     from shared.email import monitoring_digest
     from shared import calculators as calculators_pkg
+    from shared import questions as questions_pkg
+    from impact import gap_profile as impact_gap_profile
 except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -70,6 +73,8 @@ except ImportError:
     from shared import email as email_pkg
     from shared.email import monitoring_digest
     from shared import calculators as calculators_pkg
+    from shared import questions as questions_pkg
+    from impact import gap_profile as impact_gap_profile
 
 
 class _ExtractionLLMConfig:
@@ -169,6 +174,24 @@ def get_calculator_store():
     return _CALCULATOR_STORE
 
 
+# Phase R10 — shared runtime store for draft merchant research-question sets
+# (path from QUESTION_SETS_DB_PATH, default runtime/question-sets.db). Lazy.
+_QUESTION_STORE = None
+
+
+def get_question_store():
+    global _QUESTION_STORE
+    if _QUESTION_STORE is None:
+        _QUESTION_STORE = questions_pkg.QuestionSetStore()
+    return _QUESTION_STORE
+
+
+def _iso_now():
+    """UTC ISO-8601 timestamp (seconds, trailing Z) — the `now` impact read
+    models require (they never invent it themselves)."""
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 # Phase R8a — accounts + sessions (path from AUTH_DB_PATH, default
 # runtime/auth.db). Lazy for the same reason.
 _AUTH_STORE = None
@@ -226,7 +249,7 @@ def registration_open():
 QUOTA_DEFAULTS = {"chat": 200, "research_execute": 25, "research_extract": 25,
                   "workspace_refresh": 25, "monitoring_run": 25,
                   "document_upload": 25, "monitoring_workspace_run": 6,
-                  "calculator_save": 100}
+                  "calculator_save": 100, "question_generate": 25}
 
 
 def monitoring_run_quota_limit(ws, owner_user_id):
@@ -488,6 +511,14 @@ class Handler(BaseHTTPRequestHandler):
         # Phase C1 — deterministic calculators: compute (stateless) or save.
         if sub.startswith("/calculators"):
             return self._calculators_post(sub)
+        # Phase R10 — generate a DRAFT merchant research-question set for an
+        # opportunity from its evidence-gap profile (proposals only).
+        if sub.startswith("/opportunities/") and sub.endswith("/question-sets"):
+            return self._question_sets_post(sub)
+        # Phase R10 (PR10c) — human review of a draft question set
+        # (approve/reject, with optional reviewer edits). Proposals only.
+        if sub.startswith("/question-sets/"):
+            return self._question_sets_review(sub)
         if sub in LEGACY_ROUTE_PATHS and not LEGACY_UNGROUNDED_ROUTES_ENABLED:
             return self._legacy_disabled()
         body = self._read_json_body()
@@ -673,6 +704,99 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(get_calculator_store().delete(
                 m.group(1), owner_user_id=owner["id"] if owner else None))
         except calculators_pkg.CalculatorError as exc:
+            return self._error(exc.status, str(exc))
+
+    # -- Phase R10: draft merchant research-question sets ------------------- #
+    # Generate a taxonomy-valid DRAFT question set for a committed opportunity
+    # from its evidence-gap profile. Proposals only: nothing is written to the
+    # knowledge base or Merchant Voice, and nothing is sent to a merchant.
+    def _question_sets_post(self, sub):
+        m = re.match(r"^/opportunities/(OPP-\d{3})/question-sets/?$", sub)
+        if not m:
+            return self._error(404, "unknown endpoint")
+        if not modes.demo_corpus_visible(modes.get_mode()):
+            return self._error(404, "demo opportunities are not available in normal mode")
+        if not self._quota_guard("question_generate"):
+            return
+        owner = self._current_user() if auth_required() else None
+        cfg = _ExtractionLLMConfig()
+        provider = None
+        if cfg.provider in ("anthropic", "openai_compatible"):
+            provider = llm_provider.make_provider(cfg)
+        try:
+            result = question_generator.generate_question_set(
+                get_question_store(), m.group(1), provider, cfg,
+                now=_iso_now(), owner_user_id=owner["id"] if owner else None)
+            return self._json({"question_set": result}, status=201)
+        except FileNotFoundError:
+            return self._error(404, "no such opportunity")
+        except questions_pkg.QuestionStoreError as exc:
+            return self._error(exc.status, str(exc))
+        except Exception as exc:  # never leak a stack trace
+            return self._error(500, f"{type(exc).__name__}: {exc}")
+
+    def _question_sets_get(self, path, query):
+        try:
+            viewer = self._current_user() if auth_required() else None
+            vt = viewer["id"] if viewer else None
+            if path in ("/question-sets", "/question-sets/"):
+                opp = (query.get("opportunity_id") or [None])[0]
+                return self._json({"question_sets": get_question_store().list(
+                    opportunity_id=opp, visible_to=vt)})
+            # PR10c — Merchant Voice hand-off for an APPROVED set (markdown + a
+            # MV-guide-shaped JSON a human pastes into MV; R10 never calls MV).
+            m = re.match(r"^/question-sets/(RQSET-[0-9a-f]{12})/handoff$", path)
+            if m:
+                qset = get_question_store().get(m.group(1), visible_to=vt)
+                if qset["status"] != "approved":
+                    return self._error(409, "hand-off is available only for an "
+                                            "approved question set")
+                return self._json({"question_set_id": qset["id"],
+                                   "opportunity_id": qset["opportunity_id"],
+                                   "handoff": question_generator.render_handoff(qset)})
+            m = re.match(r"^/question-sets/([A-Za-z0-9-]{1,40})$", path)
+            if m:
+                return self._json({"question_set": get_question_store().get(
+                    m.group(1), visible_to=vt)})
+            return self._error(404, "unknown endpoint")
+        except questions_pkg.QuestionStoreError as exc:
+            return self._error(exc.status, str(exc))
+
+    def _question_sets_review(self, sub):
+        """PR10c — approve/reject a draft set, with optional reviewer edits.
+        Edits are re-validated against Merchant Voice's OWN taxonomy before they
+        persist (a human edit can't bypass the taxonomy gate). Approval is not a
+        write to the KB or Merchant Voice; it only unlocks the manual hand-off."""
+        m = re.match(r"^/question-sets/(RQSET-[0-9a-f]{12})/review$", sub)
+        if not m:
+            return self._error(404, "unknown endpoint")
+        viewer = self._current_user() if auth_required() else None
+        vt = viewer["id"] if viewer else None
+        body = self._read_json_body()
+        action = body.get("action")
+        if action not in ("approve", "reject"):
+            return self._error(400, "action must be 'approve' or 'reject'")
+        questions = body.get("questions")
+        note = body.get("note")
+        try:
+            if action == "approve" and questions is not None:
+                # re-validate reviewer edits against MV's taxonomy (D1)
+                question_generator.validate_edited_questions(questions)
+            result = get_question_store().review(
+                m.group(1), action, questions=questions,
+                reviewer=vt, note=note, visible_to=vt)
+            return self._json({"question_set": result})
+        except question_generator.ValidationError as exc:
+            return self._error(400, f"edited question fails Merchant Voice taxonomy: {exc}")
+        except questions_pkg.QuestionStoreError as exc:
+            return self._error(exc.status, str(exc))
+
+    def _question_sets_delete(self, set_id):
+        viewer = self._current_user() if auth_required() else None
+        try:
+            return self._json(get_question_store().delete(
+                set_id, visible_to=viewer["id"] if viewer else None))
+        except questions_pkg.QuestionStoreError as exc:
             return self._error(exc.status, str(exc))
 
     # -- Phase 6/7: user-opportunity + monitoring-config API ---------------- #
@@ -1323,6 +1447,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._document_delete(m.group(1))
             if sub.startswith("/calculators/results/"):  # Phase C1
                 return self._calculators_delete(sub)
+            m = re.match(r"^/question-sets/(RQSET-[0-9a-f]{12})$", sub)  # R10 PR10c
+            if m:
+                return self._question_sets_delete(m.group(1))
         return self._error(404, "not found")
 
     def do_PATCH(self):
@@ -1408,6 +1535,9 @@ class Handler(BaseHTTPRequestHandler):
             # Phase C1 — calculator catalog + saved-calculation reads
             if path.startswith("/calculators"):
                 return self._calculators_get(path, query)
+            # Phase R10 — draft question-set reads (owner-scoped)
+            if path.startswith("/question-sets"):
+                return self._question_sets_get(path, query)
             if path == "/research/candidates":
                 status_f = (query.get("status") or [None])[0]
                 opp_ref = (query.get("opportunity_ref") or [None])[0]
@@ -1477,6 +1607,17 @@ class Handler(BaseHTTPRequestHandler):
                 except ValueError:
                     return self._error(400, "invalid opportunity id")
                 return self._json(data) if data else self._error(404, "no such opportunity")
+            # Phase R10 — deterministic evidence-gap profile for one committed
+            # opportunity (read-only; recomputes no score). Mode-gated exactly
+            # like the opportunity detail route.
+            m = re.match(r"^/opportunities/(OPP-\d{3})/gap-profile$", path)
+            if m:
+                if not modes.demo_corpus_visible(mode):
+                    return self._error(404, "demo opportunities are not available in normal mode")
+                try:
+                    return self._json(impact_gap_profile.build_gap_profile(m.group(1), _iso_now()))
+                except FileNotFoundError:
+                    return self._error(404, "no such opportunity")
             m = re.match(r"^/opportunities/(OPP-\d{3})$", path)
             if m:
                 if not modes.demo_corpus_visible(mode):
