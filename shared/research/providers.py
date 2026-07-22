@@ -253,8 +253,13 @@ class RedditProvider:
     network is injectable so tests never touch the live network. Post text is
     stored verbatim as untrusted data, never interpreted as instructions.
 
-    Live use is refused by `from_env` unless the fail-closed
-    RESEARCH_ALLOW_LIVE_SOCIAL gate is on (the privacy/security review)."""
+    Live use via `from_env` is HARD-BLOCKED regardless of any env value
+    (decision log 2026-07-22): Reddit's Data API requires a paid
+    commercial-partner agreement for business use — the free/OAuth tier is
+    personal-use only — so there is no cleared live path. The adapter stays
+    registered (buildable in tests / by an explicit caller that owns the
+    responsibility) but no operator env can live-enable it until a separate
+    future decision clears it."""
 
     name = "reddit"
     TOKEN_ENDPOINT = "https://www.reddit.com/api/v1/access_token"
@@ -377,10 +382,20 @@ class RedditProvider:
 # / tests can construct them, but from_env() will NOT live-enable a GATED one
 # unless the fail-closed privacy/security gate (below) is explicitly on.
 
-# The one fail-closed switch operators flip ONLY after the Merchant-Voice-style
-# privacy/security review passes. Default off; ONLY the exact value "1" enables
-# — any typo / "true" / "yes" / empty stays off (mirrors MV_SYNTHETIC_ONLY).
-LIVE_SOCIAL_ENV = "RESEARCH_ALLOW_LIVE_SOCIAL"
+# Per-adapter live-ingestion policy — the outcome of the R9a privacy/security
+# review (decision log 2026-07-22), which replaced the earlier all-or-nothing
+# RESEARCH_ALLOW_LIVE_SOCIAL switch (now RETIRED, no back-compat alias):
+#
+#   * Apple App Store reviews (`appstore`): CLEARED for live use (public,
+#     unauthenticated, approved RSS feed, no commercial license). Still requires
+#     an explicit fail-closed operator opt-in — RESEARCH_ALLOW_LIVE_APPSTORE=1
+#     — as defensive hygiene, NOT a second privacy gate. Only the exact value
+#     "1" enables (any typo / "true" / "yes" / empty stays off).
+#   * Reddit (`reddit`): HARD-BLOCKED. Its Data API needs a paid
+#     commercial-partner agreement for business use; not cleared. NO env value
+#     enables it — turning it on later is a code change + a separate decision,
+#     never an ops toggle.
+APPSTORE_LIVE_ENV = "RESEARCH_ALLOW_LIVE_APPSTORE"
 
 
 def _build_brave(env, fetch_fn):
@@ -399,16 +414,30 @@ def _build_reddit(env, fetch_fn):
 
 _PROVIDER_BUILDERS = {"brave": _build_brave, "appstore": _build_appstore,
                       "reddit": _build_reddit}
-# adapters that ingest real external (potentially PII-bearing) content — live
-# use via the environment is blocked unless LIVE_SOCIAL_ENV is explicitly on.
+# adapters that ingest real external (potentially PII-bearing) content.
 _GATED_PROVIDERS = {"appstore", "reddit"}
+# cleared adapters -> the fail-closed opt-in env that live-enables them ("1" only)
+_LIVE_OPT_IN_ENV = {"appstore": APPSTORE_LIVE_ENV}
+# hard-blocked adapters -> the reason. NO env value enables these.
+_HARD_BLOCKED = {
+    "reddit": "Reddit's Data API requires a paid commercial-partner agreement "
+              "for business use (the free/OAuth tier is personal-use only); not "
+              "cleared by the R9a privacy/security review (decision log "
+              "2026-07-22). It stays refused until a separate decision clears it.",
+}
 
 
-def live_social_enabled(env=None):
-    """True only when the privacy/security gate is explicitly opted in
-    (LIVE_SOCIAL_ENV == "1"). Fail-closed: anything else is off."""
+def live_enabled(name, env=None):
+    """True only when adapter `name` is CLEARED and its fail-closed opt-in env
+    is exactly "1". A HARD-BLOCKED adapter is never enabled, whatever the env
+    says; an ungated adapter (e.g. brave) is trivially allowed."""
     e = env if env is not None else os.environ
-    return e.get(LIVE_SOCIAL_ENV, "0") == "1"
+    if name in _HARD_BLOCKED:
+        return False
+    envvar = _LIVE_OPT_IN_ENV.get(name)
+    if envvar is None:
+        return name not in _GATED_PROVIDERS
+    return e.get(envvar, "0") == "1"
 
 
 def build_provider(name, env=None, fetch_fn=None):
@@ -427,18 +456,25 @@ def from_env(env=None, fetch_fn=None):
     """The configured provider, or None when research is not configured.
     `mock` is intentionally not accepted here — synthetic results must never
     be produced by a deployment's environment configuration. Real-content
-    social adapters are refused unless the fail-closed RESEARCH_ALLOW_LIVE_SOCIAL
-    gate (the R9a privacy/security review) is explicitly on."""
+    social adapters follow the per-adapter R9a policy: a HARD-BLOCKED one
+    (Reddit) is always refused; a CLEARED one (Apple) is refused unless its own
+    fail-closed opt-in env is explicitly on (decision log 2026-07-22)."""
     e = env if env is not None else os.environ
     name = (e.get("RESEARCH_SEARCH_PROVIDER") or "").strip().lower()
     if not name:
         return None
     if name not in _PROVIDER_BUILDERS:
         raise SearchProviderError(f"unknown search provider '{name}'")
-    if name in _GATED_PROVIDERS and not live_social_enabled(e):
+    if name in _HARD_BLOCKED:
+        raise SearchProviderError(
+            f"search provider '{name}' is not cleared for live ingestion: "
+            f"{_HARD_BLOCKED[name]}")
+    if name in _GATED_PROVIDERS and not live_enabled(name, e):
+        opt_in = _LIVE_OPT_IN_ENV.get(name)
+        how = (f"its R9a privacy/security review has passed, so an operator must "
+               f"opt in explicitly by setting {opt_in}=1" if opt_in
+               else "it has no cleared live path")   # gated but neither cleared nor hard-blocked
         raise SearchProviderError(
             f"search provider '{name}' ingests real external content "
-            "(reviews/posts, possibly personal data) and is disabled by "
-            "default; it stays off until the R9a privacy/security review "
-            f"passes and an operator sets {LIVE_SOCIAL_ENV}=1")
+            f"(reviews, possibly personal data) and is disabled by default; {how}")
     return build_provider(name, e, fetch_fn)
