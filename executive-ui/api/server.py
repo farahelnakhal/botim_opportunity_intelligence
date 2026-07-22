@@ -58,6 +58,9 @@ try:
     from shared import calculators as calculators_pkg
     from shared import questions as questions_pkg
     from impact import gap_profile as impact_gap_profile
+    from shared.research import figures as research_figures
+    from shared import market_sizing as market_sizing_pkg
+    from . import market_sizing_builder
 except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -76,6 +79,9 @@ except ImportError:
     from shared import calculators as calculators_pkg
     from shared import questions as questions_pkg
     from impact import gap_profile as impact_gap_profile
+    from shared.research import figures as research_figures
+    from shared import market_sizing as market_sizing_pkg
+    from api import market_sizing_builder
 
 
 class _ExtractionLLMConfig:
@@ -187,6 +193,18 @@ def get_question_store():
     return _QUESTION_STORE
 
 
+# Phase C2 — candidate market-sizing store (path from MARKET_SIZING_DB_PATH,
+# default runtime/market-sizing.db). Lazy.
+_MARKET_SIZING_STORE = None
+
+
+def get_market_sizing_store():
+    global _MARKET_SIZING_STORE
+    if _MARKET_SIZING_STORE is None:
+        _MARKET_SIZING_STORE = market_sizing_pkg.MarketSizingStore()
+    return _MARKET_SIZING_STORE
+
+
 def _iso_now():
     """UTC ISO-8601 timestamp (seconds, trailing Z) — the `now` impact read
     models require (they never invent it themselves)."""
@@ -250,7 +268,8 @@ def registration_open():
 QUOTA_DEFAULTS = {"chat": 200, "research_execute": 25, "research_extract": 25,
                   "workspace_refresh": 25, "monitoring_run": 25,
                   "document_upload": 25, "monitoring_workspace_run": 6,
-                  "calculator_save": 100, "question_generate": 25}
+                  "calculator_save": 100, "question_generate": 25,
+                  "research_extract_figures": 25, "market_sizing_build": 25}
 
 
 def monitoring_run_quota_limit(ws, owner_user_id):
@@ -586,6 +605,11 @@ class Handler(BaseHTTPRequestHandler):
         # (approve/reject, with optional reviewer edits). Proposals only.
         if sub.startswith("/question-sets/"):
             return self._question_sets_review(sub)
+        # Phase C2 — build a candidate verified-source market sizing / review one.
+        if sub.startswith("/opportunities/") and sub.endswith("/market-sizing"):
+            return self._market_sizing_build(sub)
+        if sub.startswith("/market-sizing/"):
+            return self._market_sizing_review(sub)
         if sub in LEGACY_ROUTE_PATHS and not LEGACY_UNGROUNDED_ROUTES_ENABLED:
             return self._legacy_disabled()
         body = self._read_json_body()
@@ -704,6 +728,24 @@ class Handler(BaseHTTPRequestHandler):
                 detail = self._research_run_detail(store, m.group(1))
                 detail["extraction_summary"] = summary
                 return self._json(detail)
+            # Phase C2 — extract + persist VERIFIED numeric figures from a run's
+            # sources (exact-substring + verbatim-value verified; tier-tagged).
+            m = re.match(r"^/research/runs/(RRUN-[0-9a-f]{12})/extract-figures$", sub)
+            if m:
+                if not self._research_owner_guard(store, m.group(1)):
+                    return
+                if not self._quota_guard("research_extract_figures"):
+                    return
+                cfg = _ExtractionLLMConfig()
+                if cfg.provider not in ("anthropic", "openai_compatible"):
+                    return self._error(400, "no model provider configured for figure "
+                                            "extraction (set BOTIM_LLM_API_KEY)")
+                provider = llm_provider.make_provider(cfg)
+                out = research_figures.extract_figures(store, m.group(1), provider, cfg)
+                persisted = [store.add_figure(m.group(1), fig) for fig in out["accepted"]]
+                return self._json({"run_id": m.group(1), "proposed": out["proposed"],
+                                   "accepted": len(persisted), "rejected": out["rejected"],
+                                   "figures": persisted})
             return self._error(404, "unknown research endpoint")
         except research_store.ResearchStoreError as exc:
             return self._error(exc.status, str(exc))
@@ -760,6 +802,73 @@ class Handler(BaseHTTPRequestHandler):
                     m.group(1), visible_to=viewer["id"] if viewer else None)})
             return self._error(404, "unknown calculator endpoint")
         except calculators_pkg.CalculatorError as exc:
+            return self._error(exc.status, str(exc))
+
+    # -- Phase C2: verified-source market sizing ---------------------------- #
+    # Compose a candidate TAM/SAM/SOM from a run's corroborated, tier-ranked
+    # figures (deterministic; no model at build time). Candidate/human-reviewed:
+    # approval never writes committed scores or the knowledge base.
+    def _market_sizing_build(self, sub):
+        m = re.match(r"^/opportunities/(OPP-\d{3})/market-sizing/?$", sub)
+        if not m:
+            return self._error(404, "unknown endpoint")
+        if not modes.demo_corpus_visible(modes.get_mode()):
+            return self._error(404, "demo opportunities are not available in normal mode")
+        if not self._quota_guard("market_sizing_build"):
+            return
+        body = self._read_json_body()
+        run_id = body.get("run_id")
+        if not isinstance(run_id, str) or not re.match(r"^RRUN-[0-9a-f]{12}$", run_id):
+            return self._error(400, "'run_id' must be a research-run id")
+        if not self._research_owner_guard(get_research_store(), run_id):
+            return
+        owner = self._current_user() if auth_required() else None
+        try:
+            result = market_sizing_builder.build_market_sizing(
+                get_research_store(), get_market_sizing_store(),
+                opportunity_id=m.group(1), run_id=run_id,
+                method=body.get("method", "top_down"), inputs=body.get("inputs") or {},
+                owner_user_id=owner["id"] if owner else None)
+            return self._json({"market_sizing": result}, status=201)
+        except market_sizing_builder.MarketSizingBuildError as exc:
+            return self._error(exc.status, str(exc))
+        except market_sizing_pkg.MarketSizingStoreError as exc:
+            return self._error(exc.status, str(exc))
+        except research_store.ResearchStoreError as exc:
+            return self._error(exc.status, str(exc))
+        except Exception as exc:  # never leak a stack trace
+            return self._error(500, f"{type(exc).__name__}: {exc}")
+
+    def _market_sizing_review(self, sub):
+        m = re.match(r"^/market-sizing/(MSZ-[0-9a-f]{12})/review$", sub)
+        if not m:
+            return self._error(404, "unknown endpoint")
+        body = self._read_json_body()
+        action = body.get("action")
+        if action not in ("approve", "reject"):
+            return self._error(400, "action must be 'approve' or 'reject'")
+        owner = self._current_user() if auth_required() else None
+        vt = owner["id"] if owner else None
+        try:
+            return self._json({"market_sizing": get_market_sizing_store().review(
+                m.group(1), action, reviewer=vt, note=body.get("note"), owner_user_id=vt)})
+        except market_sizing_pkg.MarketSizingStoreError as exc:
+            return self._error(exc.status, str(exc))
+
+    def _market_sizing_get(self, path, query):
+        try:
+            viewer = self._current_user() if auth_required() else None
+            vt = viewer["id"] if viewer else None
+            if path in ("/market-sizing", "/market-sizing/"):
+                opp = (query.get("opportunity_id") or [None])[0]
+                return self._json({"market_sizings": get_market_sizing_store().list(
+                    opportunity_id=opp, visible_to=vt)})
+            m = re.match(r"^/market-sizing/(MSZ-[0-9a-f]{12})$", path)
+            if m:
+                return self._json({"market_sizing": get_market_sizing_store().get(
+                    m.group(1), visible_to=vt)})
+            return self._error(404, "unknown endpoint")
+        except market_sizing_pkg.MarketSizingStoreError as exc:
             return self._error(exc.status, str(exc))
 
     def _calculators_delete(self, sub):
@@ -1605,6 +1714,15 @@ class Handler(BaseHTTPRequestHandler):
             # Phase R10 — draft question-set reads (owner-scoped)
             if path.startswith("/question-sets"):
                 return self._question_sets_get(path, query)
+            # Phase C2 — candidate market-sizing reads (owner-scoped)
+            if path.startswith("/market-sizing"):
+                return self._market_sizing_get(path, query)
+            # Phase C2 — a run's verified numeric figures (owner-guarded)
+            m = re.match(r"^/research/runs/(RRUN-[0-9a-f]{12})/figures$", path)
+            if m:
+                if not self._research_owner_guard(get_research_store(), m.group(1)):
+                    return
+                return self._json({"figures": get_research_store().list_figures(m.group(1))})
             if path == "/research/candidates":
                 status_f = (query.get("status") or [None])[0]
                 opp_ref = (query.get("opportunity_ref") or [None])[0]

@@ -48,7 +48,7 @@ try:
 except ImportError:  # imported with repo root not on sys.path (e.g. as shared.research from elsewhere)
     from ..source_urls import safe_url
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_DB_PATH = REPO / "runtime" / "research.db"
@@ -57,6 +57,7 @@ RUN_RE = re.compile(r"^RRUN-[0-9a-f]{12}$")
 QUERY_RE = re.compile(r"^RQRY-[0-9a-f]{12}$")
 SOURCE_RE = re.compile(r"^RSRC-[0-9a-f]{12}$")
 CANDIDATE_RE = re.compile(r"^RCAND-[0-9a-f]{12}$")
+FIGURE_RE = re.compile(r"^RFIG-[0-9a-f]{12}$")           # C2 — verified numeric figures
 REVALIDATION_OUTCOMES = ("unchanged", "changed", "unreachable")
 # a run may optionally be linked to a committed or user opportunity
 OPP_REF_RE = re.compile(r"^(OPP-\d{3}|UOPP-[0-9a-f]{12})$")
@@ -204,6 +205,8 @@ class ResearchStore:
                 self._migrate_to_v5(conn)
             if version < 6:
                 self._migrate_to_v6(conn)
+            if version < 7:
+                self._migrate_to_v7(conn)
             conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)",
                          (str(SCHEMA_VERSION),))
 
@@ -377,6 +380,24 @@ class ResearchStore:
         existing = {row["name"] for row in conn.execute("PRAGMA table_info(research_queries)")}
         if "language" not in existing:
             conn.execute("ALTER TABLE research_queries ADD COLUMN language TEXT")
+
+    @staticmethod
+    def _migrate_to_v7(conn):
+        # Phase C2 — verified numeric figures extracted from a run's sources
+        # (shared/research/figures.py). Each figure is exact-substring +
+        # verbatim-value verified against ONE source of the run and carries that
+        # source's DERIVED tier; nothing here is scored or promoted. Idempotent.
+        conn.execute("""CREATE TABLE IF NOT EXISTS research_figures (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL REFERENCES research_runs(id),
+            source_id TEXT NOT NULL REFERENCES research_sources(id),
+            quantity TEXT NOT NULL,
+            value REAL NOT NULL,
+            unit TEXT,
+            tier TEXT,
+            supporting_quote TEXT,
+            created_at TEXT NOT NULL)""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_rfig_run ON research_figures(run_id)")
 
     def create_run(self, payload, owner_user_id=None):
         if not isinstance(payload, dict):
@@ -748,6 +769,57 @@ class ResearchStore:
                 if row is not None:
                     out.append(self._source_dict(row))
         return out
+
+    # -- verified numeric figures (Phase C2) --------------------------------- #
+
+    @staticmethod
+    def _figure_dict(row):
+        return dict(row)
+
+    def add_figure(self, run_id, payload):
+        """Persist ONE verified numeric figure for a run. `payload` is a figure
+        dict from shared/research/figures.py (already exact-substring +
+        verbatim-value verified). The cited source_id must belong to the run;
+        the tier is stored as given (figures.py derives it from the registry,
+        never the model). Nothing here is scored or promoted."""
+        if not isinstance(payload, dict):
+            raise ResearchStoreError("payload must be an object")
+        quantity = _require_str(payload, "quantity", SHORT_MAX, required=True)
+        value = payload.get("value")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ResearchStoreError("'value' must be a number")
+        unit = _require_str(payload, "unit", SHORT_MAX)
+        tier = _require_str(payload, "tier", 8)
+        quote = _require_str(payload, "supporting_quote", EXCERPT_MAX)
+        source_id = payload.get("source_id")
+        _validate_id(source_id, SOURCE_RE, "source id")
+        fig_id = _new_id("RFIG")
+        now = _now()
+        with self._connect() as conn:
+            self._get_run_row(conn, run_id)
+            src = conn.execute("SELECT run_id FROM research_sources WHERE id=?",
+                               (source_id,)).fetchone()
+            if src is None or src["run_id"] != run_id:
+                raise ResearchStoreError("'source_id' must belong to the same run")
+            conn.execute(
+                """INSERT INTO research_figures
+                   (id, run_id, source_id, quantity, value, unit, tier, supporting_quote, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (fig_id, run_id, source_id, quantity, float(value), unit, tier, quote, now))
+            return self._figure_dict(conn.execute(
+                "SELECT * FROM research_figures WHERE id=?", (fig_id,)).fetchone())
+
+    def list_figures(self, run_id, quantity=None):
+        _validate_id(run_id, RUN_RE, "research run id")
+        clauses, params = ["run_id=?"], [run_id]
+        if quantity is not None:
+            clauses.append("quantity=?")
+            params.append(quantity)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM research_figures WHERE {' AND '.join(clauses)} "
+                "ORDER BY created_at, id", params).fetchall()
+        return [self._figure_dict(r) for r in rows]
 
     # -- source revalidation (Phase R4b) ------------------------------------- #
 
