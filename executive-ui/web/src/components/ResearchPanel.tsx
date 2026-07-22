@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { researchApi } from "../lib/researchApi";
 import { safeExternalUrl } from "../lib/safeUrl";
 import Icon from "./Icon";
+import MarketSizingSection from "./MarketSizingSection";
 import type { ResearchCandidate, ResearchRun, ResearchRunSummary, ResearchSource } from "../types";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -259,6 +260,9 @@ function RunDetail({ runId, onBack }: { runId: string; onBack: () => void }) {
       <h3>Candidate claims</h3>
       {candidates.length === 0 && <p className="empty-note">No candidate claims recorded yet.</p>}
       {candidates.map((c) => <CandidateRow key={c.id} c={c} onReviewed={() => void reload()} />)}
+
+      <MarketSizingSection runId={runId} opportunityRef={run.opportunity_ref}
+        hasSources={sources.length > 0} />
     </div>
   );
 }

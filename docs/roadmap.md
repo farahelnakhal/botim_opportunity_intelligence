@@ -376,17 +376,22 @@ Prerequisite for C2, now built (see the C1 section earlier in this file and the
 2026-07-20 decision-log entry). C2 builds on `shared/calculators/` (the
 `market_sizing` calculator + the reserved `source_id` input seam).
 
-### Phase C2 — Verified-source market sizing (TAM/SAM/SOM) — SKETCH
-**Value:** traceable TAM/SAM/SOM for the SME case. **Depends on:** C1 +
-R9a source-tier layer. **"Verified" =** ≥2 independent **T1/T2** sources
-agreeing within a **conservative (tight) tolerance** band, else flagged
-low-confidence (decision to be logged with C2; starting tight so disagreeing
-sources are never quietly treated as agreeing). Figures are **extracted** from
-sources (PR3 exact-substring discipline), **never computed/estimated by the
-LLM**; the C1 calculator derives TAM→SAM→SOM via shown formulas, every input
-traced to an `RSRC-` id. Results are **candidate/preliminary**, human-reviewed,
-never auto-written to committed scores. **Risks:** sizing figures often
-single-source/paywalled → frequent honest low-confidence; tolerance tuning.
+### Phase C2 — Verified-source market sizing (TAM/SAM/SOM) — DONE
+Built across PR1 (corroboration engine + figure extraction), PR2 (composition +
+`MSZ-` candidate store + routes), PR3 (UI + contracts + docs). See the
+2026-07-22 decision-log entry for the settled rules. **"Verified" =** ≥2
+independent (distinct registrable domain) **T1/T2** sources agreeing within a
+**10% relative** tolerance band (`C2_CORROBORATION_TOLERANCE`); T3/T4 never count
+(Statista is T3 as an aggregator → one voice with any primary it repeats); else
+`low_confidence`, stored and shown, never identical to a verified figure.
+Figures are extracted with exact-substring **and** a verbatim-value guard (no LLM
+expansion/rounding/recompute), persisted as `RFIG-` (research schema v7). The C1
+calculator derives TAM→SAM→SOM with every sourced input carrying its `source_id`
+and H3 F/A label. Results are `pending_review` `MSZ-` candidates; approval never
+writes committed scores or the KB. **Deferred:** per-quantity/looser tolerance
+bands, competitor benchmarking, copilot-chat integration of sizings, PDF export
+of a sizing (P1). **Standing risk (as predicted):** sizing figures are often
+single-source/paywalled → frequent honest low-confidence.
 
 ### Phase R10 — Evidence-gap-driven research-question generation — ✅ DONE (PR10a–c, this branch)
 **Value:** turn "weakest links" into targeted next questions. **Gap signals:**

@@ -71,6 +71,8 @@ describe("ResearchPanel (Phase R3)", () => {
 
   it("run detail shows partial status reason, failed query, stale source, and review controls", async () => {
     global.fetch = fetchMockFor({
+      "/figures": { figures: [] },
+      "/market-sizing": { market_sizings: [] },
       "/research/runs/RRUN-aaaaaaaaaaaa": runDetail,
       "/research/runs": { runs: [runDetail] },
     }) as unknown as typeof fetch;
@@ -104,6 +106,8 @@ describe("ResearchPanel (Phase R3)", () => {
       }],
     };
     global.fetch = fetchMockFor({
+      "/figures": { figures: [] },
+      "/market-sizing": { market_sizings: [] },
       "/research/runs/RRUN-aaaaaaaaaaaa": withSynthesized,
       "/research/runs": { runs: [withSynthesized] },
     }) as unknown as typeof fetch;
@@ -125,6 +129,8 @@ describe("ResearchPanel (Phase R3)", () => {
   it("approving a candidate posts the review action", async () => {
     const fetchMock = fetchMockFor({
       "/review": { ...runDetail.candidate_evidence![0], status: "approved" },
+      "/figures": { figures: [] },
+      "/market-sizing": { market_sizings: [] },
       "/research/runs/RRUN-aaaaaaaaaaaa": runDetail,
       "/research/runs": { runs: [runDetail] },
     });
@@ -162,6 +168,8 @@ describe("source revalidation (Phase R4b)", () => {
     };
     const fetchMock = fetchMockFor({
       "/revalidate": revalidated,
+      "/figures": { figures: [] },
+      "/market-sizing": { market_sizings: [] },
       "/research/runs/RRUN-aaaaaaaaaaaa": runDetail,
       "/research/runs": { runs: [runDetail] },
     });

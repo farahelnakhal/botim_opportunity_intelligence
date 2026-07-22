@@ -12,6 +12,14 @@ Each contract states: required / optional / nullable fields, enums, `schema_vers
 | `research-request.schema.md` | `impact/research_request.py` (`impact.cli research-request`) | derived (draft) |
 | `merchant-voice-api.schema.md` | `merchant-voice/` HTTP API (port 8020) | operational (persisted in `merchant-voice/data/mv.db`; not a Part A/B authoritative source — prototype-grade, synthetic-only in v1, see the contract for scope) |
 
+**Runtime store contracts** (backend-owned gitignored SQLite; user/candidate
+state, never authoritative knowledge): `research.schema.md`,
+`calculators.schema.md`, `market-sizing.schema.md`, `workspace.schema.md`,
+`documents.schema.md`, `user-opportunities.schema.md`. Each states its own
+`schema_version`, id namespace, and lifecycle; all follow the same rule — the
+committed knowledge base stays read-only at runtime, and human review /
+approval never mints an EV id or writes `knowledge-base/`.
+
 **Common `meta` block (every generated output):**
 ```json
 { "kind": "...", "schema_version": "1.0", "generator_version": "1.0.0",
