@@ -400,12 +400,22 @@ runtime dependency — logged decision). `executive-ui/api/report_pdf.py` +
 `GET /brief/{id}/pdf` + a Download button; renders the same read model with all
 honest-state distinctions preserved, no client-side print hack.
 
-### Phase H2 — External-content ingestion hardening — SKETCH
+### Phase H2 — External-content ingestion hardening — ✅ DONE (this branch, PR-H2a..d)
 **Value:** R9's real-external-content ingestion sharply widens the untrusted-
-content + PII + ToS surface the deferred H1 sweep doesn't cover. **Scope:**
-adversarial prompt-injection tests over scraped review/forum content; PII
-detection/redaction; per-adapter ToS/rate-limit conformance; translation-
-fidelity checks (with R9c). **Depends on:** R9 (and C2 ingestion).
+content + PII + ToS surface the deferred H1 sweep doesn't cover.
+**Shipped (all offline/adversarial-only against the gated R9a adapters — the
+live gate stays closed pending the human privacy/security review):**
+- PR-H2a — adversarial prompt-injection suite proving social-adapter content is
+  inert data across adapter→runner→extraction.
+- PR-H2b — PII redact-and-flag at ingestion via one shared floor
+  (`shared/redaction.py`, lifted from Merchant Voice, MV re-imports it),
+  fail-closed; web-search path untouched.
+- PR-H2c — bounded inter-call throttle + retry backoff for the social adapters
+  (a gap the pass uncovered), wired on by the production builders.
+- PR-H2d — translation-fidelity confirmed a no-op (R9a is querying-only; content
+  translation is R9c), locked by a verbatim-storage tripwire.
+**Note:** H2 does not clear the R9a privacy/security review; it hardens the path
+so that when the review clears, the protections already apply to live traffic.
 
 ### Suggested sequence
 ```

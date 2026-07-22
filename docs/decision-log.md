@@ -4,6 +4,33 @@
 > decision would surprise a future maintainer or constrains future work.
 > Format: date · decision · reasoning · alternatives · consequences.
 
+## 2026-07-22 — H2 complete (PR-H2d): translation-fidelity is a no-op; phase summary
+
+- **Decision (PR-H2d):** translation-fidelity checks are a deliberate **no-op**
+  right now — R9a's multi-language work is querying-only, and source CONTENT is
+  never translated (deferred to R9c), so there is no translation step whose
+  fidelity could be wrong. Rather than skip the check, it's locked by a
+  **verbatim-storage tripwire** (`test_h2_translation_fidelity.py`): non-English
+  review/post content is stored byte-for-byte untranslated, so the moment R9c
+  introduces translation these tests start to matter — the check becomes real
+  scope automatically, never silently absent.
+- **H2 phase summary (all four PRs offline/adversarial-only against the GATED
+  R9a adapters):** H2a proved social-adapter content is inert data across
+  adapter→runner→extraction; H2b added PII redact-and-flag at ingestion via one
+  shared floor (`shared/redaction.py`, lifted from Merchant Voice, MV re-imports
+  it, fail-closed, web-search path untouched); H2c added the inter-call
+  throttle + retry backoff the pass uncovered (wired on by the production
+  builders); H2d confirmed the translation-fidelity no-op.
+- **What H2 does NOT do (important):** it does **not** clear the R9a
+  privacy/security review, and does **not** flip `RESEARCH_ALLOW_LIVE_SOCIAL`.
+  The live-ingestion gate stays closed. H2 hardens the path so that when the
+  human review eventually clears the gate, injection resistance, PII redaction,
+  and polite rate-limiting **already apply to real traffic** without revisiting.
+- **Consequences:** the R9a open items are unchanged (the human privacy/security
+  review is still outstanding; `hi`/`ur`/`ml`/`tl` querying still uncurated).
+  H2 added no live network path and no runtime behavior change until the gate is
+  opened.
+
 ## 2026-07-22 — H2 PR-H2c: throttle a social adapter's internal HTTP calls (a fix the hardening pass uncovered, not a pre-existing requirement)
 
 - **Transparency first (why this exists):** this is a **real behavior fix that
