@@ -133,11 +133,15 @@ SQL/paths/keys/fetched content in messages.
   `REDDIT_CLIENT_ID`/`REDDIT_CLIENT_SECRET`). All secrets are sent only as
   request headers, never logged/stored/echoed. Unset ⇒ no provider ⇒ honest
   failure. **`appstore`/`reddit` ingest real external (possibly PII-bearing)
-  content and are GATED**: `from_env` refuses to construct them unless the
-  fail-closed `RESEARCH_ALLOW_LIVE_SOCIAL=1` switch (the Merchant-Voice-style
-  privacy/security review — only the exact value `1` opts in) is set;
-  `build_provider(name)` constructs any registered adapter for tests/offline
-  use and does not consult the gate. The deterministic `MockSearchProvider` is
+  content and are GATED per-adapter** (R9a privacy/security review outcome,
+  decision log 2026-07-22; the old all-or-nothing `RESEARCH_ALLOW_LIVE_SOCIAL`
+  switch is **retired**, no back-compat alias): `appstore` is **cleared** for
+  live use but still requires an explicit fail-closed operator opt-in
+  `RESEARCH_ALLOW_LIVE_APPSTORE=1` (only the exact `1`; defensive hygiene, not a
+  second privacy gate); `reddit` is **hard-blocked** — `from_env` refuses it
+  regardless of any env value (its commercial Data API terms are not cleared),
+  so no operator toggle exists. `build_provider(name)` constructs any registered
+  adapter for tests/offline use and does not consult the gate. The deterministic `MockSearchProvider` is
   injectable in code for tests but **deliberately not reachable via environment
   configuration** — a deployment can never serve synthetic results as real.
 - **Bounded**: per-run caps (default 20 queries, 8 results/query, 12 page
@@ -240,10 +244,11 @@ Both migrate in place (PRAGMA-guarded, idempotent).
 - **Provider adapters** (see the Execution-rules "Provider seam" above): `brave`
   (web), `appstore` (Apple App Store reviews), `reddit` (Reddit official API).
   `appstore`/`reddit` ingest real external (possibly PII-bearing) content and
-  are **gated** — `from_env` constructs them only when the fail-closed
-  `RESEARCH_ALLOW_LIVE_SOCIAL=1` switch is set (the Merchant-Voice-style
-  privacy/security review; **the human review itself is a separate, still-open
-  deliverable — the flag only enforces its outcome**). Adapter results may carry
+  are **gated per-adapter** (R9a review outcome, decision log 2026-07-22):
+  `appstore` is cleared behind the fail-closed `RESEARCH_ALLOW_LIVE_APPSTORE=1`
+  opt-in; `reddit` is hard-blocked regardless of any env (commercial Data API
+  terms not cleared). The retired `RESEARCH_ALLOW_LIVE_SOCIAL` switch no longer
+  exists. Adapter results may carry
   `rating` (verbatim, e.g. App Store stars) and `url_synthesized` (the URL was
   constructed, not a real permalink) — recorded as source `quality_signals`.
 - **Source tier** (`source_tier`, `T1|T2|T3|T4`): derived at ingestion from the

@@ -12,8 +12,8 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from shared.research.providers import (  # noqa: E402
-    LIVE_SOCIAL_ENV, RedditProvider, SearchProviderError, build_provider,
-    from_env)
+    APPSTORE_LIVE_ENV, RedditProvider, SearchProviderError, build_provider,
+    from_env, live_enabled)
 
 TOKEN = {"access_token": "tok-abc", "token_type": "bearer", "expires_in": 3600}
 _POST_1 = {"data": {
@@ -117,17 +117,23 @@ class RegistryAndGate(unittest.TestCase):
                               fetch_fn=make_fetch())
         self.assertIsInstance(prov, RedditProvider)
 
-    def test_from_env_refuses_reddit_when_gate_closed(self):
-        with self.assertRaises(SearchProviderError) as cm:
-            from_env(env={"RESEARCH_SEARCH_PROVIDER": "reddit",
-                          "REDDIT_CLIENT_ID": "id", "REDDIT_CLIENT_SECRET": "s"})
-        self.assertIn("privacy/security review", str(cm.exception))
+    def test_from_env_hard_blocks_reddit_regardless_of_env(self):
+        # Reddit is HARD-BLOCKED (decision log 2026-07-22): no env value opens
+        # it — not the retired flag, not the Apple opt-in, not a made-up one.
+        for extra in ({},
+                      {"RESEARCH_ALLOW_LIVE_SOCIAL": "1"},   # the retired flag
+                      {APPSTORE_LIVE_ENV: "1"},               # Apple's opt-in
+                      {"RESEARCH_ALLOW_LIVE_REDDIT": "1"}):   # a nonexistent one
+            env = {"RESEARCH_SEARCH_PROVIDER": "reddit",
+                   "REDDIT_CLIENT_ID": "id", "REDDIT_CLIENT_SECRET": "s", **extra}
+            with self.assertRaises(SearchProviderError) as cm:
+                from_env(env=env, fetch_fn=make_fetch())
+            self.assertIn("not cleared for live ingestion", str(cm.exception))
 
-    def test_from_env_serves_reddit_when_gate_opted_in(self):
-        prov = from_env(env={"RESEARCH_SEARCH_PROVIDER": "reddit",
-                             "REDDIT_CLIENT_ID": "id", "REDDIT_CLIENT_SECRET": "s",
-                             LIVE_SOCIAL_ENV: "1"}, fetch_fn=make_fetch())
-        self.assertEqual(prov.name, "reddit")
+    def test_live_enabled_is_false_for_reddit_under_any_env(self):
+        self.assertFalse(live_enabled("reddit", env={}))
+        self.assertFalse(live_enabled("reddit", env={APPSTORE_LIVE_ENV: "1"}))
+        self.assertFalse(live_enabled("reddit", env={"RESEARCH_ALLOW_LIVE_REDDIT": "1"}))
 
 
 if __name__ == "__main__":

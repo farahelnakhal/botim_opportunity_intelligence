@@ -292,16 +292,27 @@ plus the shared **source-tier/provenance** layer that C2's "verified sources"
 also needs.
 **Depends on:** R1–R3 (research store, provider seam, candidate review); reuses
 `shared/research/providers.py`, `retrieval.py`, `freshness.py`, `source_urls.py`.
-**Blocked on:** the Merchant-Voice-style **privacy/security review** before any
-LIVE ingestion of real (non-synthetic) content (decision log 2026-07-20).
-> ⚠️ **OPEN non-code deliverable — NOT done (as of 2026-07-20):** the human
-> privacy/security review of ingesting real Reddit / App Store content has
-> **not** been performed. The `RESEARCH_ALLOW_LIVE_SOCIAL` env gate (PR9a-3)
-> only *enforces* that decision fail-closed — it is **not** the decision, and
-> its existence must never be read as the review being complete. Flipping the
-> flag before this item is closed (by the product owner) is a policy breach,
-> not just an ops toggle. Close-out belongs with H2 (PII/ToS hardening) or an
-> explicit sign-off, whichever comes first.
+**Live-ingestion status:** the Merchant-Voice-style **privacy/security review**
+was performed 2026-07-22 — **Apple cleared, Reddit still blocked** (see the split
+box below and decision log 2026-07-22).
+> **SPLIT status — privacy/security review performed 2026-07-22** (decision log):
+> - ✅ **Apple App Store reviews RSS — CLEARED.** Public, unauthenticated,
+>   unlicensed; live ingestion allowed behind the fail-closed opt-in
+>   `RESEARCH_ALLOW_LIVE_APPSTORE=1` (defensive ops hygiene, not a second review).
+> - ⚠️ **Reddit — STILL OPEN / GATED / UNRESOLVED.** Its Data API requires a
+>   paid commercial-partner agreement for business use; **hard-blocked in code**
+>   (no env can enable it) until a separate future decision clears it. This half
+>   of the item is deliberately NOT closed.
+> The old all-or-nothing `RESEARCH_ALLOW_LIVE_SOCIAL` gate is **retired**. H2
+> (PII/injection/ToS hardening) still applies to any live ingestion, Apple included.
+>
+> **Other sources surveyed against the same bar (2026 terms):** Google Play
+> reviews, Google Maps reviews, G2, Capterra — all **blocked** (no third-party
+> API and/or ToS-prohibited). **Trustpilot — pursuable but paid** (needs an
+> Enterprise API license): a real expansion option if the business wants it,
+> not a dead end. UAE/GCC SME directories (Dubai SME, Abu Dhabi DED, Beehive)
+> are relevant leads but expose no public reviews API — per-platform ToS read
+> required before any adapter. No new adapters built yet.
 **Ships as (approved 2026-07-20):** PR9a-1 (source-tier registry) → PR9a-2
 (Apple App Store adapter + provider registry) → PR9a-3 (Reddit adapter +
 privacy gate) → PR9a-4 (multi-language querying + docs). Reviewed one PR at a
@@ -311,8 +322,9 @@ time, R6 cadence.
   no scraping aggregator):
   - **Apple App Store customer-reviews RSS** — public, per-app/per-country, no
     auth; bounded/polite like the Brave adapter.
-  - **Reddit** — official API (OAuth key, rate-limited); keyed, ToS/cost
-    accepted as an ops decision, injectable in tests.
+  - **Reddit** — official API adapter is built and injectable in tests, but its
+    ToS/cost were **NOT** accepted: the 2026-07-22 review found its commercial
+    Data API terms uncleared, so it is hard-blocked in code (see the split box).
   - **Explicitly out of scope** (decision log): Google Play reviews, X,
     Instagram, TikTok, Facebook (no clean API / ToS-hostile), and
     WhatsApp/Telegram (private, consent-gated — belongs to Merchant Voice).

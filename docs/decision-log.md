@@ -48,6 +48,72 @@
   uninstalled). PDF export requires `pip install -r requirements.txt`; the deploy
   Dockerfile already does this. CLAUDE.md's "nothing to install" note is
   corrected to describe the lazy-optional dependency.
+## 2026-07-22 — R9a privacy/security review: Apple cleared for live ingestion, Reddit hard-blocked; per-adapter gate
+
+- **Decision:** The R9a privacy/security review has been performed against the
+  **actual platform terms** (not a guess). Outcome is a **split**: Apple's App
+  Store reviews RSS feed is **cleared** for live ingestion; Reddit is **not**,
+  and stays gated **indefinitely**. This **supersedes** the earlier "OPEN —
+  privacy/security review not yet performed" flag **for Apple only**. Reddit's
+  half of that item stays exactly as it was: open, gated, unresolved.
+- **Reasoning (recorded verbatim):** Reddit's Data API Terms require a separate,
+  contract-gated commercial-partner agreement for any commercial use (roughly
+  $0.24/1,000 calls, application-based approval, no guaranteed timeline) — the
+  free/OAuth tier is explicitly personal-use-only. Using it for BOTIM's business
+  purposes without that agreement would be a straightforward ToS violation, not
+  a gray area. Reddit also locked down unauthenticated endpoints in May 2026 and
+  named unauthorized scraping a rule violation, closing off any workaround.
+  Apple's reviews RSS/Atom feed, by contrast, is public, unauthenticated, has no
+  ToS click-wall, and is widely used by third parties for exactly this purpose
+  without commercial licensing friction — it's rate-limited and capped at 500
+  reviews/app/sort (technical constraints, not legal ones). There's no PII/legal
+  reviewer available at BOTIM right now, so we're not resolving Reddit's
+  commercial-terms question informally — that gate has a real cost/approval
+  process attached, not something to route around.
+- **Code decision — per-adapter gate** (`shared/research/providers.py`): the old
+  all-or-nothing `RESEARCH_ALLOW_LIVE_SOCIAL` switch is **retired with no
+  back-compat alias** (honoring it would imply enabling Reddit too, and it was
+  never legitimately on since the review hadn't happened). Replaced by a
+  three-state policy: `appstore` is **cleared** behind its own fail-closed opt-in
+  `RESEARCH_ALLOW_LIVE_APPSTORE=1` (only the exact `1`); `reddit` is
+  **hard-blocked in code** (`_HARD_BLOCKED`) — **no env value enables it**, so
+  turning it on later is a code change plus a separate decision, never an ops
+  toggle. Apple keeps a fail-closed opt-in (not on-by-default) as **defensive
+  hygiene** — the review removed the legal/privacy blocker, not the discipline of
+  never letting live network ingestion be silently on in a deployment.
+- **Platform survey — other sources checked against the same bar** (public/
+  official access, no commercial-partner agreement or paid data license, no ToS
+  scraping prohibition). Verdicts from current (2026) terms:
+
+  | Platform | Verdict | Basis |
+  |---|---|---|
+  | Apple App Store reviews RSS | **Clear** | public, unauthenticated, approved RSS feed; ~500 reviews/app cap is technical |
+  | Reddit Data API | **Blocked (paid commercial agreement)** | free tier personal-use only; unauth JSON 403 since May 2026 |
+  | Google Play reviews | **Blocked (no third-party API)** | Play Developer API `reviews` is own-apps-only; scraping violates ToS |
+  | Google Maps/Business reviews | **Blocked / capped** | Places API max 5 reviews, no-store/no-competing-dataset terms; scraping banned |
+  | G2 | **Blocked** | no public read API; terms restrict third-party collection |
+  | Capterra | **Blocked** | terms prohibit duplicating/distributing content beyond individual use |
+  | **Trustpilot** | **Needs paid Enterprise license — a PURSUABLE option** | reading review content programmatically needs an Enterprise API contract; legal but paid |
+  | UAE/GCC (Dubai SME / Abu Dhabi DED directories, Beehive) | **Leads only — not cleared** | relevant to BOTIM's base but no public reviews API; per-platform ToS read needed first |
+
+  **Trustpilot is deliberately distinguished from the fully-blocked set:** it is a
+  real, actionable expansion path if BOTIM ever wants to broaden sourcing — a
+  business decision (buy the Enterprise license) rather than a legal dead end.
+  Reddit, Google Play, Google Maps, G2, and Capterra are not pursuable without
+  either a ToS breach or an absent API.
+- **Alternatives rejected:** keeping the single all-or-nothing gate (can't
+  express Apple-yes/Reddit-no); giving Reddit its own opt-in env
+  (`RESEARCH_ALLOW_LIVE_REDDIT`) (would let an operator flip a
+  not-legally-cleared source — the decision is that it stays off in code);
+  making Apple on-by-default (drops the defensive ops opt-in for live ingestion);
+  resolving Reddit's commercial terms informally without a legal/PII reviewer
+  (the thing this repo forbids).
+- **Consequences:** live Apple ingestion is now reachable via
+  `RESEARCH_SEARCH_PROVIDER=appstore` + `RESEARCH_ALLOW_LIVE_APPSTORE=1`. Reddit
+  stays registered/testable but unreachable from any environment config. No new
+  adapters were built — the survey is a record so future sourcing work doesn't
+  re-litigate it. H2 (external-content ingestion hardening — PII/injection/ToS
+  conformance) still applies to any live ingestion, Apple included.
 
 ## 2026-07-21 — P1 PDF export: render the existing brief model server-side, via reportlab (the repo's first runtime dependency)
 

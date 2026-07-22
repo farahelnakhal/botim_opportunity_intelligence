@@ -12,8 +12,8 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from shared.research.providers import (  # noqa: E402
-    AppStoreReviewsProvider, BraveSearchProvider, LIVE_SOCIAL_ENV,
-    SearchProviderError, build_provider, from_env, live_social_enabled)
+    AppStoreReviewsProvider, BraveSearchProvider, APPSTORE_LIVE_ENV,
+    SearchProviderError, build_provider, from_env, live_enabled)
 
 # a reviews feed: first entry is app metadata (no im:rating -> skipped),
 # then two real reviews
@@ -113,22 +113,30 @@ class RegistryAndGate(unittest.TestCase):
         with self.assertRaises(SearchProviderError):
             build_provider("tiktok", env={})
 
-    def test_from_env_refuses_gated_appstore_when_live_social_disabled(self):
-        # default: the privacy gate is off, so a gated provider is refused
+    def test_from_env_refuses_appstore_when_opt_in_disabled(self):
+        # default: the Apple opt-in is off, so the (cleared but gated) provider
+        # is still refused — naming its own env var, not a generic gate.
         with self.assertRaises(SearchProviderError) as cm:
             from_env(env={"RESEARCH_SEARCH_PROVIDER": "appstore"})
-        self.assertIn("privacy/security review", str(cm.exception))
+        self.assertIn(APPSTORE_LIVE_ENV, str(cm.exception))
 
-    def test_live_social_gate_is_fail_closed(self):
-        # ONLY the exact value "1" opens the gate — typos/truthy stay closed
-        self.assertFalse(live_social_enabled(env={}))
+    def test_appstore_opt_in_is_fail_closed(self):
+        # ONLY the exact value "1" opens Apple's opt-in — typos/truthy stay closed
+        self.assertFalse(live_enabled("appstore", env={}))
         for val in ("0", "true", "yes", "on", "1 ", "", "TRUE"):
-            self.assertFalse(live_social_enabled(env={LIVE_SOCIAL_ENV: val}), val)
-        self.assertTrue(live_social_enabled(env={LIVE_SOCIAL_ENV: "1"}))
+            self.assertFalse(live_enabled("appstore", env={APPSTORE_LIVE_ENV: val}), val)
+        self.assertTrue(live_enabled("appstore", env={APPSTORE_LIVE_ENV: "1"}))
 
-    def test_from_env_serves_gated_appstore_when_gate_opted_in(self):
+    def test_appstore_opt_in_does_not_enable_reddit(self):
+        # the Apple opt-in is adapter-scoped: it must NOT open Reddit
+        self.assertFalse(live_enabled("reddit", env={APPSTORE_LIVE_ENV: "1"}))
+
+    def test_ungated_provider_is_trivially_enabled(self):
+        self.assertTrue(live_enabled("brave", env={}))
+
+    def test_from_env_serves_appstore_when_opted_in(self):
         prov = from_env(env={"RESEARCH_SEARCH_PROVIDER": "appstore",
-                             LIVE_SOCIAL_ENV: "1"}, fetch_fn=make_fetch())
+                             APPSTORE_LIVE_ENV: "1"}, fetch_fn=make_fetch())
         self.assertIsInstance(prov, AppStoreReviewsProvider)
 
     def test_from_env_still_serves_brave_and_none(self):
