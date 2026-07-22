@@ -4,6 +4,40 @@
 > decision would surprise a future maintainer or constrains future work.
 > Format: date · decision · reasoning · alternatives · consequences.
 
+## 2026-07-22 — H2 PR-H2c: throttle a social adapter's internal HTTP calls (a fix the hardening pass uncovered, not a pre-existing requirement)
+
+- **Transparency first (why this exists):** this is a **real behavior fix that
+  the H2 hardening/grounding pass discovered** — it was **not** an item anyone
+  scoped up front. While mapping the adapters I found that the runner's polite
+  delay (`fetch_delay_s`/`sleep_fn`) throttles only per-result *page fetches*,
+  while a single `provider.search()` fires its own internal API calls
+  (App Store resolve→reviews, Reddit token→search) **back-to-back with no
+  delay**. Flagging it as new scope in its own right — same standard as flagging
+  the C2 verbatim-value guard as newly-discovered scope rather than folding it
+  in silently.
+- **Decision:** add a **bounded polite delay between a social adapter's internal
+  HTTP calls, and before its single retry** (backoff), via an injectable
+  `sleep_fn` + `request_delay_s`. The delay is wired ON by the production
+  builders (`from_env`/`build_provider`, the only paths live traffic uses) at
+  `DEFAULT_REQUEST_DELAY_S` (0.5s, matching the runner's page-fetch delay); bare
+  construction defaults to **no delay** so the existing injected-clock adapter
+  tests stay fast and untouched (a composition-root wiring choice). Result caps
+  and one-retry-no-storm already held; H2c adds conformance tests that prove
+  them **under rapid-fire**, not just happy-path.
+- **Reasoning:** ToS/politeness — one search must not rapid-fire an external
+  API. The runner can't fix this (it calls `search()` as a black box and can't
+  reach the internal calls), so the throttle must live in the adapter. Wiring
+  the real delay at the builder (composition root) keeps the leaf adapters
+  injectable and the offline suite fast while guaranteeing live traffic is
+  throttled.
+- **Alternatives rejected:** throttling in the runner (impossible — the internal
+  calls are inside `search()`); default-on delay in bare construction (would
+  slow the offline suite for zero benefit, since the delay only matters against
+  a real API); leaving the gap (the adapters would rapid-fire live).
+- **Consequences:** no runtime effect until live ingestion is enabled (social
+  adapters are gated), at which point every live `search()` spaces its internal
+  calls and backs off once on failure. Purely offline-proven now.
+
 ## 2026-07-22 — H2 PR-H2b: PII redact-and-flag at social-content ingestion, via one shared floor lifted from Merchant Voice
 
 - **Decision:** For R9a's social adapters (Apple/Reddit — flagged `pii_sensitive`),

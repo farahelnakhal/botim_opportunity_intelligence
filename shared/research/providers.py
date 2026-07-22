@@ -28,6 +28,7 @@ import base64
 import datetime
 import json
 import os
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -35,6 +36,12 @@ import urllib.request
 USER_AGENT = "BOTIM-Opportunity-Intelligence-research/1.0 (internal research; contact: product team)"
 DEFAULT_TIMEOUT_S = 10
 MAX_RESULTS_CAP = 20
+# H2 — polite delay applied BETWEEN a social adapter's internal HTTP calls
+# (e.g. App Store resolve→reviews, Reddit token→search) and before its single
+# retry, so one search() cannot rapid-fire an external API. Bare construction
+# defaults to 0 (keeps injected-clock tests fast); the production builders
+# (from_env / build_provider) wire this real value on — see build_provider.
+DEFAULT_REQUEST_DELAY_S = 0.5
 
 
 class SearchProviderError(Exception):
@@ -165,10 +172,19 @@ class AppStoreReviewsProvider:
     pii_sensitive = True   # H2 — real user-generated review text
     SEARCH_ENDPOINT = "https://itunes.apple.com/search"
 
-    def __init__(self, fetch_fn=None, country="us", timeout_s=DEFAULT_TIMEOUT_S):
+    def __init__(self, fetch_fn=None, country="us", timeout_s=DEFAULT_TIMEOUT_S,
+                 request_delay_s=0.0, sleep_fn=None):
         self._fetch = fetch_fn or self._http_fetch
         self._country = ((country or "us").strip().lower() or "us")
         self._timeout = timeout_s
+        self._delay = request_delay_s
+        self._sleep = sleep_fn or time.sleep
+
+    def _throttle(self):
+        """Polite gap between this adapter's internal HTTP calls / before a
+        retry. No-op when no delay is configured (bare construction)."""
+        if self._delay and self._delay > 0:
+            self._sleep(self._delay)
 
     def _http_fetch(self, url, headers):
         req = urllib.request.Request(url, headers=headers, method="GET")
@@ -185,6 +201,8 @@ class AppStoreReviewsProvider:
             except (urllib.error.URLError, TimeoutError, OSError) as exc:
                 last_error = exc
                 raw = None
+                if attempt == 1:
+                    self._throttle()   # bounded backoff before the single retry
         if raw is None:
             raise SearchProviderError(
                 f"app store request failed after retry ({type(last_error).__name__})")
@@ -211,7 +229,11 @@ class AppStoreReviewsProvider:
         if not isinstance(query, str) or not query.strip():
             raise SearchProviderError("empty query")
         q = query.strip()
-        app_id = q if q.isdigit() else self._resolve_app_id(q)
+        if q.isdigit():
+            app_id = q
+        else:
+            app_id = self._resolve_app_id(q)     # live API call #1
+            self._throttle()                     # polite gap before call #2
         max_results = max(1, min(int(max_results), MAX_RESULTS_CAP))
         url = (f"https://itunes.apple.com/{self._country}/rss/customerreviews/"
                f"id={app_id}/sortby=mostrecent/json")
@@ -265,7 +287,7 @@ class RedditProvider:
     SEARCH_ENDPOINT = "https://oauth.reddit.com/search"
 
     def __init__(self, client_id, client_secret, fetch_fn=None,
-                 timeout_s=DEFAULT_TIMEOUT_S):
+                 timeout_s=DEFAULT_TIMEOUT_S, request_delay_s=0.0, sleep_fn=None):
         if not client_id or not client_secret:
             raise SearchProviderError(
                 "reddit provider selected but no API credentials configured")
@@ -273,6 +295,14 @@ class RedditProvider:
         self._client_secret = client_secret
         self._fetch = fetch_fn or self._http_fetch
         self._timeout = timeout_s
+        self._delay = request_delay_s
+        self._sleep = sleep_fn or time.sleep
+
+    def _throttle(self):
+        """Polite gap between this adapter's internal HTTP calls / before a
+        retry. No-op when no delay is configured (bare construction)."""
+        if self._delay and self._delay > 0:
+            self._sleep(self._delay)
 
     def _http_fetch(self, url, headers, data=None):
         req = urllib.request.Request(
@@ -290,6 +320,8 @@ class RedditProvider:
             except (urllib.error.URLError, TimeoutError, OSError) as exc:
                 last_error = exc
                 raw = None
+                if attempt == 1:
+                    self._throttle()   # bounded backoff before the single retry
         if raw is None:
             raise SearchProviderError(
                 f"{what} request failed after retry ({type(last_error).__name__})")
@@ -341,7 +373,8 @@ class RedditProvider:
         subreddit, terms = self._parse_target(query)
         if not terms:
             raise SearchProviderError("empty query")
-        token = self._access_token()
+        token = self._access_token()            # live API call #1 (OAuth token)
+        self._throttle()                        # polite gap before call #2 (search)
         params = {"q": terms, "limit": max_results, "sort": "relevance",
                   "type": "link", "raw_json": 1}
         if subreddit:
@@ -392,13 +425,17 @@ def _build_brave(env, fetch_fn):
 
 
 def _build_appstore(env, fetch_fn):
+    # H2 — the production/runner construction path wires the polite inter-call
+    # delay on (bare construction stays delay-free for fast injected-clock tests)
     return AppStoreReviewsProvider(fetch_fn=fetch_fn,
-                                   country=env.get("APPSTORE_COUNTRY", "us"))
+                                   country=env.get("APPSTORE_COUNTRY", "us"),
+                                   request_delay_s=DEFAULT_REQUEST_DELAY_S)
 
 
 def _build_reddit(env, fetch_fn):
     return RedditProvider(env.get("REDDIT_CLIENT_ID", ""),
-                          env.get("REDDIT_CLIENT_SECRET", ""), fetch_fn=fetch_fn)
+                          env.get("REDDIT_CLIENT_SECRET", ""), fetch_fn=fetch_fn,
+                          request_delay_s=DEFAULT_REQUEST_DELAY_S)
 
 
 _PROVIDER_BUILDERS = {"brave": _build_brave, "appstore": _build_appstore,
