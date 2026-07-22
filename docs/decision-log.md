@@ -4,6 +4,51 @@
 > decision would surprise a future maintainer or constrains future work.
 > Format: date · decision · reasoning · alternatives · consequences.
 
+## 2026-07-22 — reportlab is a dependency of the PDF feature, not the API server's import path (+ named CI gap)
+
+- **Decision:** `report_pdf.py` imports `reportlab` **lazily** via
+  `_require_reportlab()`, not at module top. Importing `report_pdf` — and
+  therefore `server.py`, and therefore the entire `executive-ui/api` test suite
+  and the `integration_check.py` pre-merge gate — now succeeds on the **stdlib
+  alone**. Only an actual PDF render needs reportlab, and if it is absent the
+  render raises the existing `ReportPdfError` ("… run pip install -r
+  requirements.txt") — the same honest "unavailable" contract the rest of the
+  app uses — instead of crashing an unrelated import path.
+- **Reasoning:** P1 (2026-07-21) correctly added reportlab as the sole pinned
+  runtime dependency, but wired it as a **hard top-level import** in a module the
+  API server imports unconditionally. On any checkout where
+  `pip install -r requirements.txt` had not been run, `import server` failed with
+  `ModuleNotFoundError: reportlab`, taking down every API test and the pre-merge
+  gate. That is a scope violation of the repo's load-bearing "backends are
+  stdlib-only by default" invariant: reportlab is a dependency of the **PDF
+  export feature**, and its absence should disable **only that feature**, not the
+  server's ability to import. The deploy path was never affected — the Dockerfile
+  `pip install`s requirements before copying source — so production PDF export is
+  unchanged.
+- **Named gap — this repo has NO CI that runs the test suite on push or PR.** The
+  only GitHub workflow is `monitoring-tick.yml`, an hourly cron that POSTs a
+  shared-secret endpoint on the *deployed* app; it runs no tests and installs no
+  dependencies. That absence is exactly why the reportlab regression sat
+  undetected from P1 merging until it was caught by hand: **nothing runs the
+  suite automatically, ever.** This is recorded as a **known, tracked gap**, not
+  a silent one — a repo with no automated test run will keep surfacing
+  regressions by luck rather than catching them at the point of merge. Building
+  CI is deliberately **out of scope** for this fix; it is flagged here (and a
+  candidate for a future hardening item) so the next person does not have to
+  rediscover the gap from scratch.
+- **Alternatives rejected:** documenting a `pip install -r requirements.txt`
+  prerequisite and pretty-printing the gate's ImportError (Fix A) — leaves the
+  scope violation in place (the whole API server still fails to import without a
+  third-party lib) with nicer error handling bolted on; not good enough given how
+  deliberately every other dependency decision in this repo has been treated.
+  Reverting reportlab / P1 — the feature and its logged dependency decision are
+  fine; only the import wiring was wrong.
+- **Consequences:** a fresh clone runs the full API suite + integration gate
+  green with nothing installed (verified on a clean checkout with reportlab
+  uninstalled). PDF export requires `pip install -r requirements.txt`; the deploy
+  Dockerfile already does this. CLAUDE.md's "nothing to install" note is
+  corrected to describe the lazy-optional dependency.
+
 ## 2026-07-21 — P1 PDF export: render the existing brief model server-side, via reportlab (the repo's first runtime dependency)
 
 - **Decision (D1 — render the existing model, no new data):** the executive-brief

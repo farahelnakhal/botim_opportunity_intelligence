@@ -22,6 +22,15 @@ for p in (str(UI), str(REPO)):
 
 from api import server, user_store  # noqa: E402
 
+try:
+    import reportlab  # noqa: F401
+    _HAS_REPORTLAB = True
+except ImportError:
+    _HAS_REPORTLAB = False
+
+_NEEDS_RL = unittest.skipUnless(
+    _HAS_REPORTLAB, "reportlab not installed — PDF download tests need the feature dep")
+
 
 def _an_opportunity():
     cards = sorted((REPO / "knowledge-base" / "opportunity-scores").glob("*-scorecard.json"))
@@ -65,6 +74,7 @@ class _ServerCase(unittest.TestCase):
             os.environ["BOTIM_APP_MODE"] = cls._prev
 
 
+@_NEEDS_RL
 class PdfRouteDemoMode(_ServerCase):
     MODE = "demo"
 
@@ -121,6 +131,7 @@ class PdfRouteDemoMode(_ServerCase):
         self.assertIn(self.opp, logged)
 
 
+@_NEEDS_RL
 class PdfRouteNormalMode(_ServerCase):
     MODE = "normal"
 

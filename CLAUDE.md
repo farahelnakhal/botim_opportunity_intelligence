@@ -49,7 +49,12 @@ partnership assumptions stay labelled as assumptions.
 ## Setup & common commands
 
 ```bash
-# Backends are pure Python 3 stdlib — nothing to install.
+# Backends run on the Python 3 stdlib. The one exception is PDF export (Phase
+# P1), which needs `reportlab` — the sole third-party runtime dependency,
+# pinned in requirements.txt. It is imported LAZILY, so the server, the whole
+# test suite, and the integration gate all run stdlib-only WITHOUT installing
+# it; only PDF export is unavailable until you `pip install -r requirements.txt`
+# (and it degrades to an honest error, never a crash).
 python3 executive-ui/api/server.py --port 8000            # dashboard API (normal mode)
 BOTIM_APP_MODE=demo python3 executive-ui/api/server.py    # demo corpus
 COPILOT_PROVIDER=mock python3 copilot-backend/server.py   # chat backend, keyless
