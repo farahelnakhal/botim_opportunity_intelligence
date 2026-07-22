@@ -13,3 +13,8 @@ from .providers import MockSearchProvider, SearchProviderError, from_env as prov
 from .runner import execute_run  # noqa: F401
 from .revalidate import revalidate_run  # noqa: F401
 from .extract import extract_claims, validate_claim  # noqa: F401
+# R9a: source-tier registry (T1-T4). C2: verified-source market sizing —
+# figure extraction + the corroboration engine that reuses the tiers.
+from .source_tier import tier_for  # noqa: F401
+from .figures import extract_figures, validate_figure  # noqa: F401
+from .corroboration import corroborate  # noqa: F401

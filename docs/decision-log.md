@@ -4,6 +4,81 @@
 > decision would surprise a future maintainer or constrains future work.
 > Format: date · decision · reasoning · alternatives · consequences.
 
+## 2026-07-22 — C2: verified-source market sizing (TAM/SAM/SOM) from corroborated figures
+
+Phase C2 is complete across three PRs (C2-PR1 corroboration engine + figure
+extraction; C2-PR2 composition + candidate store + routes; C2-PR3 UI + contracts
++ docs). It computes TAM/SAM/SOM from live, cited, tier-ranked sources — never
+invented or estimated — and wires every figure into C1's typed-step provenance.
+
+- **Decision — the corroboration rule (G1/G2), verbatim as signed off:**
+  A quantity is **`verified`** iff **≥2 INDEPENDENT T1/T2 sources agree within
+  the tolerance band**. *Independent* = **distinct registrable domain**: a figure
+  repeated across a primary and an aggregator is one voice, not two. **T3/T4
+  sources never count toward the ≥2 T1/T2 requirement** — recorded as context
+  only. This is where the Statista gap is closed at the tier layer: Statista is
+  tiered **T3** in the R9a registry *precisely because it is an AGGREGATOR that
+  re-publishes others' figures*, so "a primary source + Statista repeating it"
+  can never look like two independent sources. Otherwise **`low_confidence`** —
+  single-source, only lower-tier, disagreeing T1/T2, or mixed units. Never
+  dropped, never silently upgraded: an uncorroborated figure is stored and shown
+  as low-confidence, **never identical to a verified one**.
+- **Decision — what "tolerance band" means numerically:** two values agree iff
+  `|a-b| / max(|a|,|b|) <= tolerance`, default **0.10** (10% relative), overridable
+  via `C2_CORROBORATION_TOLERANCE`. Deliberately tight — genuinely disagreeing
+  market-sizing figures are often 2–5× apart and must never look corroborated.
+  The representative value is the **median** of the agreeing T1/T2 set
+  (outlier-robust, conservative).
+- **Decision — where the corroboration logic lives:** `shared/research/corroboration.py`
+  (pure, deterministic, no model/network/wall-clock). Composition orchestration
+  (figures + corroboration + the C1 calculator) lives one layer up in
+  `executive-ui/api/market_sizing_builder.py`, so `shared/` never imports up.
+- **Decision — H3, evidence label vs review status (kept distinct):** inside the
+  C1 calculator's own typed-step labels, a corroborated sourced input carries
+  **F**, a low-confidence sourced input carries **A**, and analyst fractions
+  always carry **A**. This was pushed back from an earlier "verified→E,
+  low→A" proposal: using E for verified and A for low-confidence conflates two
+  different axes — evidence strength (F/E/A) and review status
+  (pending/approved) — and would let a doubly-corroborated T1 figure and a
+  single-low-tier figure carry the identical label once inside C1's provenance,
+  violating this phase's own hard constraint. So the two axes stay separate: the
+  F/A label is evidence strength; `pending_review`/`approved` is a separate
+  lifecycle on the `MSZ-` store. The C2-PR2 test suite asserts F and A never
+  collapse at the engine level, and C2-PR3 asserts it again at the rendered-DOM
+  level (Verified vs Low-confidence badges, and Fact vs Assumption input chips,
+  differ in both text and class name when shown side by side) — because the
+  constraint is about what a human actually sees, not just the data model.
+- **Decision — new scope beyond the original G4 sign-off: the verbatim-value
+  guard.** G4 signed off exact-substring quote verification. During C2-PR1 I
+  added a **stricter, separately-scoped** guard: a figure's own numeric value
+  must appear verbatim in the supporting quote, so a model may not expand, round,
+  or recompute — "1.2 billion" persists as `1.2`, never `1200000000`. This was
+  **not** part of the G4 sign-off and is recorded here as deliberate new scope,
+  not folded in as if always planned. It is the same "model proposes,
+  deterministic validation disposes" discipline as PR3 claim extraction.
+- **Decision — candidate, never committed:** a composed sizing lands in the
+  runtime `MSZ-` store (`shared/market_sizing/`, gitignored SQLite) as
+  `pending_review`; a human approves/rejects exactly once (409 if terminal).
+  Approval records reviewer/note/timestamp and **nothing else** — no committed
+  score, no `knowledge-base/` write, no EV id. That path stays the `impact` CLI
+  (`--approver`).
+- **Decision — contract split:** figures are an additive extension of the
+  research store (`research.schema.md` **v7**, `RFIG-`), because they are
+  run-scoped and source-verified; the candidate sizing gets its own new
+  `market-sizing.schema.md` (**v1**, `MSZ-`), because its lifecycle and ownership
+  are distinct. Both additive; existing contracts unchanged.
+- **Alternatives rejected:** letting the model compute/estimate any number
+  (the core thing this phase forbids); counting an aggregator (Statista) as an
+  independent corroborator (would manufacture false confidence); a single shared
+  E/A label for verified+low (conflates evidence and review, see H3); auto-writing
+  an approved sizing into committed scores (violates the read-only-KB invariant).
+- **Consequences:** market-sizing build is mode-gated to the demo corpus (it
+  attaches to committed `OPP-nnn` opportunities) and quota-guarded; figure
+  extraction needs a configured provider (honest 400 otherwise, never fabricated
+  figures). The tolerance band is a single global 10% for now; per-quantity or
+  looser bands, competitor benchmarking, copilot-chat integration of sizings, and
+  PDF export of a sizing are deferred.
+
 ## 2026-07-22 — reportlab is a dependency of the PDF feature, not the API server's import path (+ named CI gap)
 
 - **Decision:** `report_pdf.py` imports `reportlab` **lazily** via

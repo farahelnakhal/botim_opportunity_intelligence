@@ -725,6 +725,37 @@ select.field-input{appearance:none; -webkit-appearance:none; cursor:pointer; bac
 .calc-save{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px;}
 .calc-saved-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;}
 .calc-saved-title{font-weight:600;}
+/* corroborated inputs (Fact) read as solid/confident; assumptions carry the
+   warn colour set on .calc-basis-A above — the two must never look identical. */
+.calc-basis-F{color:var(--ok,#177245);border-color:currentColor;}
+
+/* --- Phase C2: verified-source market sizing ------------------------------ */
+.msz-section{margin-top:20px;border-top:1px solid var(--border);padding-top:14px;}
+.msz-figure-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:13px;padding:5px 0;border-bottom:1px solid var(--border);}
+.msz-figure-quantity{font-weight:600;}
+.msz-figure-value{font-variant-numeric:tabular-nums;}
+.msz-tier{font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px;border:1px solid currentColor;letter-spacing:.4px;}
+.msz-tier-T1{color:var(--ok,#177245);}
+.msz-tier-T2{color:#2a6db3;}
+.msz-tier-T3{color:var(--warn,#9a6b00);}
+.msz-tier-T4{color:var(--danger,#b3261e);}
+.msz-extract-actions,.msz-build{margin-top:12px;display:flex;flex-direction:column;gap:8px;}
+.msz-result{margin-top:12px;border:1px solid var(--border);border-radius:8px;padding:12px;}
+.msz-result-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+.msz-result-id{font-family:monospace;font-size:12px;color:var(--text-dim);}
+/* verified vs low-confidence: distinct colour AND fill, never the same chip. */
+.msz-confidence{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;letter-spacing:.3px;}
+.msz-confidence-verified{color:#fff;background:var(--ok,#177245);}
+.msz-confidence-low_confidence{color:var(--warn,#9a6b00);background:transparent;border:1px dashed currentColor;}
+.msz-confidence-basis{font-size:12px;color:var(--text-dim);margin:6px 0;}
+.msz-status{font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-dim);}
+.msz-outputs{display:flex;flex-wrap:wrap;gap:14px;margin:8px 0;}
+.msz-output{display:flex;flex-direction:column;}
+.msz-output-label{font-size:10px;color:var(--text-dim);letter-spacing:.4px;}
+.msz-output-value{font-weight:700;font-variant-numeric:tabular-nums;}
+.msz-input-basis{list-style:none;padding:0;margin:6px 0;font-size:12.5px;display:flex;flex-direction:column;gap:4px;}
+.msz-source-ref{color:var(--text-dim);font-size:11px;}
+.msz-review{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px;}
 
 /* --- Phase R4a: monitoring events (manual runs) --------------------------- */
 .uop-mon-events{margin-top:18px;}
