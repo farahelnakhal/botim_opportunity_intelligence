@@ -4,6 +4,44 @@
 > decision would surprise a future maintainer or constrains future work.
 > Format: date · decision · reasoning · alternatives · consequences.
 
+## 2026-07-22 — H2 PR-H2b: PII redact-and-flag at social-content ingestion, via one shared floor lifted from Merchant Voice
+
+- **Decision:** For R9a's social adapters (Apple/Reddit — flagged `pii_sensitive`),
+  PII is **detected, redacted, and flagged at the ingestion boundary** (the
+  runner, the single chokepoint that sees the final excerpt — snippet OR
+  fetched-page text) **before storage, and thus before any model exposure**.
+  The source records `pii_redaction` (`clean`|`redacted`|`failed`),
+  `pii_categories` (joined string), and `pii_manual_review`. **Fail-closed:** if
+  the floor cannot run on a field (non-text/control bytes), that field's raw
+  content is **withheld** (`[content withheld: PII redaction failed]`), never
+  passed through.
+- **The shared floor (lift):** the redaction implementation was moved from
+  `merchant-voice/app/redaction.py` into **`shared/redaction.py`** — one
+  deterministic floor, no second copy to drift. `merchant-voice/app/redaction.py`
+  is now a thin re-export shim. **Merchant Voice's existing `test_redaction.py`
+  suite passes UNMODIFIED against the relocated module** (verified — not
+  "adapted to pass"; behavior is byte-for-byte the same code, only its home
+  changed), and `test_provider_integration.py`'s file-content check still holds
+  (the shim references `shared.redaction`, never the provider layer).
+- **Reasoning:** this mirrors Merchant Voice's own posture — redaction is the
+  mandatory gate before any AI call touches real text — so when the live-ingestion
+  gate clears, social review/post content is redacted at the boundary exactly as
+  merchant text is, with no revisiting. One shared floor prevents the
+  second-implementation drift this repo avoids everywhere. "A floor, not a
+  ceiling": no claim of perfect PII detection.
+- **Alternatives rejected:** flag-only (raw PII would still reach the extraction
+  model — weaker than MV's precedent); a parallel shared redaction module (the
+  exact drift risk the lift avoids); redacting inside the adapter (misses
+  fetched-page excerpts and complicates flag propagation — the runner sees the
+  final text); applying redaction to ALL providers incl. web search (out of H2
+  scope, and would silently alter the existing Brave path).
+- **Consequences:** redaction runs only for `pii_sensitive` providers, which are
+  gated/offline today — so it's proven now (offline tests) and simply begins
+  applying when the privacy/security review clears the gate. It deliberately
+  ALTERS stored social excerpts/titles. `shared/contracts/research.schema.md`
+  documents the new `quality_signals` keys (additive). If MV later wires
+  redaction into its runtime, it imports the same shared floor.
+
 ## 2026-07-22 — H2 external-content ingestion hardening: built offline/adversarial-only against the gated R9a adapters
 
 - **Decision:** H2 is written and proven **entirely offline** against R9a's

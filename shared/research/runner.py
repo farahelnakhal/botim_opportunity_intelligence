@@ -57,6 +57,48 @@ def _quality_signals(result, fetched, preferred_domains, excluded_domains, domai
     return signals
 
 
+def _redact_pii(payload):
+    """H2 — redact PII from a PII-sensitive source's free-text fields (title,
+    excerpt) BEFORE it is stored or can ever reach a model, using the shared
+    deterministic floor (`shared.redaction`; "a floor, not a ceiling"). Mutates
+    `payload` in place and returns quality-signal additions recording what
+    happened. Fail-closed: if redaction cannot run on a field, that field's raw
+    content is WITHHELD (never stored/surfaced), not passed through.
+
+    Applied only to providers that flag `pii_sensitive` (R9a's social adapters);
+    the web-search path is unchanged. Categories are recorded as a joined string
+    because the store's quality_signals accept flat scalars only."""
+    try:
+        from shared import redaction
+    except ImportError:  # repo root not on path (imported as shared.research.*)
+        from .. import redaction
+    categories, manual, failed = set(), False, False
+    for field in ("title", "excerpt"):
+        value = payload.get(field)
+        if not value:
+            continue
+        try:
+            res = redaction.process_text(value)
+        except (ValueError, TypeError):
+            payload[field] = "[content withheld: PII redaction failed]"
+            failed = True
+            continue
+        payload[field] = res.redacted_text
+        categories.update(res.categories)
+        manual = manual or res.manual_review_required
+    signals = {}
+    if failed:
+        signals["pii_redaction"] = "failed"          # fail-closed; content withheld
+    elif categories:
+        signals["pii_redaction"] = "redacted"
+        signals["pii_categories"] = ",".join(sorted(categories))
+    else:
+        signals["pii_redaction"] = "clean"           # ran, found nothing (floor, not ceiling)
+    if manual:
+        signals["pii_manual_review"] = True
+    return signals
+
+
 def execute_run(store, run_id, provider, fetch_fn=None, limits=None,
                 preferred_domains=(), excluded_domains=(), sleep_fn=time.sleep,
                 now_fn=None):
@@ -146,6 +188,11 @@ def execute_run(store, run_id, provider, fetch_fn=None, limits=None,
                 "quality_signals": _quality_signals(result, fetched, preferred_domains,
                                                     excluded_domains, domain),
             }
+            # H2 — PII-sensitive (social) sources are redacted at ingestion,
+            # before storage or any model exposure; the flag travels on the
+            # source's quality_signals. Non-social providers are untouched.
+            if getattr(provider, "pii_sensitive", False):
+                payload["quality_signals"].update(_redact_pii(payload))
             source = store.add_source(run_id, payload)
             kept += 1
             if duplicate_of is None:

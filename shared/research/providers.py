@@ -77,6 +77,7 @@ class MockSearchProvider:
     given — it invents nothing on its own."""
 
     name = "mock"
+    pii_sensitive = False
 
     def __init__(self, canned=None, fail_queries=()):
         self._canned = canned or {}
@@ -97,6 +98,7 @@ class BraveSearchProvider:
     JSON REST endpoint. Requires BRAVE_SEARCH_API_KEY."""
 
     name = "brave"
+    pii_sensitive = False
     ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 
     def __init__(self, api_key, fetch_fn=None, timeout_s=DEFAULT_TIMEOUT_S):
@@ -160,6 +162,7 @@ class AppStoreReviewsProvider:
     verbatim as untrusted data, never interpreted as instructions."""
 
     name = "appstore"
+    pii_sensitive = True   # H2 — real user-generated review text
     SEARCH_ENDPOINT = "https://itunes.apple.com/search"
 
     def __init__(self, fetch_fn=None, country="us", timeout_s=DEFAULT_TIMEOUT_S):
@@ -257,6 +260,7 @@ class RedditProvider:
     RESEARCH_ALLOW_LIVE_SOCIAL gate is on (the privacy/security review)."""
 
     name = "reddit"
+    pii_sensitive = True   # H2 — real user-generated post text
     TOKEN_ENDPOINT = "https://www.reddit.com/api/v1/access_token"
     SEARCH_ENDPOINT = "https://oauth.reddit.com/search"
 

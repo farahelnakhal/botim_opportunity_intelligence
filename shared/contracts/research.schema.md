@@ -155,6 +155,14 @@ SQL/paths/keys/fetched content in messages.
   CONSTRUCTED the source URL rather than receiving a real permalink, so the
   link opens the linked page, not the exact item — surfaced as "(not a direct
   link)" in the UI)) — no invented scores; interpretation belongs to review (R3).
+  **H2** adds, for `pii_sensitive` providers (the R9a social adapters) only:
+  `pii_redaction` (`clean`|`redacted`|`failed`), `pii_categories` (joined
+  category string when redacted), `pii_manual_review` (true when a name pattern
+  fired). Title/excerpt are run through the shared deterministic floor
+  (`shared/redaction.py`, "a floor, not a ceiling") at ingestion — before
+  storage or any model exposure; a redaction failure **withholds** the field's
+  raw content (fail-closed), never passes it through. The web-search path is
+  unchanged.
 - **Honest outcomes**: all queries executed → `complete`; some queries or
   page fetches failed → `partial` with the counts in `error`; nothing
   succeeded → `failed`. Failed pages keep their search-result metadata
