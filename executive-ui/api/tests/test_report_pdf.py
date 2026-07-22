@@ -17,6 +17,15 @@ for p in (str(UI), str(REPO)):
 
 from api import report_pdf  # noqa: E402
 
+try:
+    import reportlab  # noqa: F401
+    _HAS_REPORTLAB = True
+except ImportError:
+    _HAS_REPORTLAB = False
+
+_NEEDS_RL = unittest.skipUnless(
+    _HAS_REPORTLAB, "reportlab not installed — PDF rendering tests need the feature dep")
+
 
 def committed(**overrides):
     payload = {
@@ -80,6 +89,7 @@ def joined(payload, rc=None):
     return "\n".join(report_pdf.visible_text(payload, rc))
 
 
+@_NEEDS_RL
 class CommittedContent(unittest.TestCase):
     def test_core_fields_and_banner_present(self):
         t = joined(committed())
@@ -117,6 +127,7 @@ class CommittedContent(unittest.TestCase):
         self.assertIn("No logged predictions reference this opportunity.", t)
 
 
+@_NEEDS_RL
 class UserContent(unittest.TestCase):
     def test_not_yet_defined_and_no_fabrication_note(self):
         t = joined(user())
@@ -129,6 +140,7 @@ class UserContent(unittest.TestCase):
         self.assertIn("awaiting monitoring run", joined(user()))
 
 
+@_NEEDS_RL
 class ExternalResearchDistinction(unittest.TestCase):
     def test_none_unavailable_empty_and_candidate_label(self):
         self.assertIn("External research is unavailable right now.",
@@ -141,6 +153,7 @@ class ExternalResearchDistinction(unittest.TestCase):
         self.assertIn("candidate — not repository evidence", t)
 
 
+@_NEEDS_RL
 class PdfBytesAndGuard(unittest.TestCase):
     def test_render_produces_valid_pdf(self):
         for payload in (committed(), user()):
@@ -165,6 +178,49 @@ class PdfBytesAndGuard(unittest.TestCase):
         # a title containing XML-ish chars must not break reportlab parsing
         pdf = report_pdf.render_brief_pdf(committed(title="A <b>bold</b> & risky <title>"))
         self.assertTrue(pdf.startswith(b"%PDF-"))
+
+
+class ReportlabIsOptional(unittest.TestCase):
+    """reportlab is a dependency of the PDF FEATURE, not of the API server's
+    import path. Importing report_pdf/server must not require it; only an actual
+    render does, and it degrades to an honest ReportPdfError when it is absent."""
+
+    def test_module_imports_without_touching_reportlab(self):
+        # importing this module never pulls reportlab into the process
+        import importlib
+        for m in [k for k in list(sys.modules) if k == "reportlab" or k.startswith("reportlab.")]:
+            sys.modules.pop(m, None)
+        mod = importlib.import_module("api.report_pdf")
+        importlib.reload(mod)
+        self.assertNotIn("reportlab", sys.modules)   # import path stayed stdlib-only
+        self.assertIsNone(mod.Paragraph)             # names unbound until first render
+
+    def test_render_degrades_honestly_when_reportlab_absent(self):
+        import api.report_pdf as rp
+        names = ["colors", "TA_LEFT", "A4", "ParagraphStyle", "mm", "HRFlowable",
+                 "ListFlowable", "ListItem", "Paragraph", "SimpleDocTemplate",
+                 "Spacer", "Table", "TableStyle"]
+        saved = {n: getattr(rp, n) for n in names}
+        saved_semantic = dict(rp._SEMANTIC)
+        saved_mods = {k: sys.modules[k] for k in list(sys.modules)
+                      if k == "reportlab" or k.startswith("reportlab.")}
+        try:
+            for n in names:
+                setattr(rp, n, None)          # simulate the never-imported state
+            rp._SEMANTIC.clear()
+            for k in saved_mods:
+                sys.modules.pop(k, None)
+            sys.modules["reportlab"] = None    # force ImportError on `import reportlab…`
+            with self.assertRaises(rp.ReportPdfError) as cm:
+                rp.render_brief_pdf(committed())
+            self.assertIn("pip install -r requirements.txt", str(cm.exception))
+        finally:
+            sys.modules.pop("reportlab", None)
+            sys.modules.update(saved_mods)
+            for n, v in saved.items():
+                setattr(rp, n, v)
+            rp._SEMANTIC.clear()
+            rp._SEMANTIC.update(saved_semantic)
 
 
 if __name__ == "__main__":

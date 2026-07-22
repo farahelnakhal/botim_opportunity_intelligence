@@ -21,13 +21,15 @@ guard as `impact/email.py`.
 import io
 from xml.sax.saxutils import escape as _xml_escape
 
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_LEFT
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.units import mm
-from reportlab.platypus import (HRFlowable, ListFlowable, ListItem, Paragraph,
-                                SimpleDocTemplate, Spacer, Table, TableStyle)
+# reportlab is the repo's SOLE third-party runtime dependency and is needed ONLY
+# for PDF export (Phase P1). It is imported LAZILY via _require_reportlab() so
+# that importing this module — and therefore `server.py` and the entire test
+# suite / integration gate — succeeds on stdlib alone. A missing reportlab makes
+# only PDF export unavailable (an honest ReportPdfError), never a hard failure of
+# the whole API server's import path. The names below are bound on first render.
+colors = TA_LEFT = A4 = ParagraphStyle = mm = None
+HRFlowable = ListFlowable = ListItem = Paragraph = None
+SimpleDocTemplate = Spacer = Table = TableStyle = None
 
 # Reuse the authoritative honesty vocabulary — do not fork it.
 from impact.email import BOUNDED_STATEMENTS, OVERCLAIMS
@@ -39,17 +41,50 @@ class ReportPdfError(Exception):
 
 # Semantic colors mirroring the web report's tag classes (format.ts / index.css:
 # success/accent/warning/critical/neutral). Print-friendly, theme-independent.
-_SEMANTIC = {
-    "success": colors.HexColor("#177245"),
-    "accent": colors.HexColor("#1a56db"),
-    "warning": colors.HexColor("#9a6b00"),
-    "critical": colors.HexColor("#b3261e"),
-    "neutral": colors.HexColor("#5f6368"),
-    "ink": colors.HexColor("#1a1a1a"),
-    "muted": colors.HexColor("#6b7280"),
-    "rule": colors.HexColor("#d0d5dd"),
-    "banner_bg": colors.HexColor("#fff4e5"),
-}
+# Populated lazily by _require_reportlab() (values need reportlab's colors).
+_SEMANTIC = {}
+
+
+def _require_reportlab():
+    """Import reportlab on demand, binding its names as module globals and
+    populating the color palette. Idempotent. Raises ReportPdfError (never a
+    bare ImportError) if the package is absent, so PDF export degrades to the
+    same honest 'unavailable' contract the rest of the app uses."""
+    global colors, TA_LEFT, A4, ParagraphStyle, mm
+    global HRFlowable, ListFlowable, ListItem, Paragraph
+    global SimpleDocTemplate, Spacer, Table, TableStyle
+    if Paragraph is not None:          # already imported
+        return
+    try:
+        from reportlab.lib import colors as _colors
+        from reportlab.lib.enums import TA_LEFT as _TA_LEFT
+        from reportlab.lib.pagesizes import A4 as _A4
+        from reportlab.lib.styles import ParagraphStyle as _ParagraphStyle
+        from reportlab.lib.units import mm as _mm
+        from reportlab.platypus import (
+            HRFlowable as _HRFlowable, ListFlowable as _ListFlowable,
+            ListItem as _ListItem, Paragraph as _Paragraph,
+            SimpleDocTemplate as _SimpleDocTemplate, Spacer as _Spacer,
+            Table as _Table, TableStyle as _TableStyle)
+    except ImportError as exc:
+        raise ReportPdfError(
+            "PDF export requires the 'reportlab' package — the repo's sole "
+            "runtime dependency (Phase P1). Install it with: "
+            "pip install -r requirements.txt") from exc
+    colors, TA_LEFT, A4, ParagraphStyle, mm = _colors, _TA_LEFT, _A4, _ParagraphStyle, _mm
+    HRFlowable, ListFlowable, ListItem, Paragraph = _HRFlowable, _ListFlowable, _ListItem, _Paragraph
+    SimpleDocTemplate, Spacer, Table, TableStyle = _SimpleDocTemplate, _Spacer, _Table, _TableStyle
+    _SEMANTIC.update({
+        "success": colors.HexColor("#177245"),
+        "accent": colors.HexColor("#1a56db"),
+        "warning": colors.HexColor("#9a6b00"),
+        "critical": colors.HexColor("#b3261e"),
+        "neutral": colors.HexColor("#5f6368"),
+        "ink": colors.HexColor("#1a1a1a"),
+        "muted": colors.HexColor("#6b7280"),
+        "rule": colors.HexColor("#d0d5dd"),
+        "banner_bg": colors.HexColor("#fff4e5"),
+    })
 
 # classification value -> semantic color key (mirrors format.ts tagClass)
 _CLASS_COLOR = {
@@ -452,6 +487,7 @@ def visible_text(payload, research_candidates=None):
     honesty guard runs on. Exposed so tests (and callers) can assert content
     faithfully without parsing compressed PDF byte streams. Does not run the
     guard (pure inspection); render_brief_pdf enforces it."""
+    _require_reportlab()
     d, _title = _assemble(payload, research_candidates)
     return list(d._text)
 
@@ -463,6 +499,7 @@ def render_brief_pdf(payload, research_candidates=None):
     external-research list: None = unavailable, [] = none, list = rows.
     Recomputes/invents nothing; raises ReportPdfError on a bad payload or a
     failed honesty guard."""
+    _require_reportlab()
     try:
         d, title = _assemble(payload, research_candidates)
         _guard(d._text)          # honesty contract, before we emit any bytes
