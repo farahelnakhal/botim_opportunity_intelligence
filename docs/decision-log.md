@@ -4,6 +4,32 @@
 > decision would surprise a future maintainer or constrains future work.
 > Format: date · decision · reasoning · alternatives · consequences.
 
+## 2026-07-22 — H2 external-content ingestion hardening: built offline/adversarial-only against the gated R9a adapters
+
+- **Decision:** H2 is written and proven **entirely offline** against R9a's
+  injectable Apple App Store / Reddit adapters — it does **not** flip
+  `RESEARCH_ALLOW_LIVE_SOCIAL` and does not depend on any real external content.
+  Adversarial fixtures (hostile review/post bodies) are injected via the same
+  `fetch_fn` seam used everywhere else. The hardening is built so that when the
+  human privacy/security review eventually clears the live-ingestion gate, it
+  **already applies to real traffic without revisiting**.
+- **Reasoning:** live social ingestion is gated pending a human review that
+  hasn't happened; hardening shouldn't wait on that unrelated decision, and it
+  shouldn't require flipping the gate to be provable. Offline-first matches the
+  repo's universal injected-network test discipline.
+- **Alternatives rejected:** waiting for the gate to clear before hardening
+  (leaves the eventual live window unhardened, couples hardening to a human
+  decision); exercising a real network / flipping the gate in tests (would wire
+  the very live ingestion the gate exists to prevent).
+- **Consequences:** **PR-H2a** proves the social adapters carry a hostile
+  body ("ignore previous instructions", fake system frame, embedded
+  `<script>`) as inert **data** across every surfacing layer — adapter →
+  runner/stored-excerpt → extraction model — closing the specific gap the
+  hardening pass found (strong data-never-instructions precedents existed for
+  fetched web pages and extraction, but none targeted the social adapters).
+  Later H2 PRs add PII redact-and-flag at ingestion (H2b), per-adapter request
+  throttling (H2c), and the translation-fidelity no-op + docs sweep (H2d).
+
 ## 2026-07-21 — P1 PDF export: render the existing brief model server-side, via reportlab (the repo's first runtime dependency)
 
 - **Decision (D1 — render the existing model, no new data):** the executive-brief
