@@ -470,9 +470,11 @@ def from_env(env=None, fetch_fn=None):
             f"search provider '{name}' is not cleared for live ingestion: "
             f"{_HARD_BLOCKED[name]}")
     if name in _GATED_PROVIDERS and not live_enabled(name, e):
+        opt_in = _LIVE_OPT_IN_ENV.get(name)
+        how = (f"its R9a privacy/security review has passed, so an operator must "
+               f"opt in explicitly by setting {opt_in}=1" if opt_in
+               else "it has no cleared live path")   # gated but neither cleared nor hard-blocked
         raise SearchProviderError(
             f"search provider '{name}' ingests real external content "
-            "(reviews, possibly personal data) and is disabled by default; "
-            "its R9a privacy/security review has passed, so an operator must "
-            f"opt in explicitly by setting {_LIVE_OPT_IN_ENV[name]}=1")
+            f"(reviews, possibly personal data) and is disabled by default; {how}")
     return build_provider(name, e, fetch_fn)

@@ -114,6 +114,19 @@
   adapters were built — the survey is a record so future sourcing work doesn't
   re-litigate it. H2 (external-content ingestion hardening — PII/injection/ToS
   conformance) still applies to any live ingestion, Apple included.
+- **Sources (verified against current 2026 terms/reporting, not memory):**
+  Reddit Data API — free tier is non-commercial/personal use only; commercial
+  use requires prior approval + a paid agreement (~$0.24/1,000 calls, ~2–4 week
+  manual review, not guaranteed): Reddit Data API Terms
+  (https://redditinc.com/policies/data-api-terms); pricing/approval breakdown
+  (https://www.citybiz.co/article/868288/reddit-api-pricing-in-2026-what-youll-actually-pay-at-every-tier/,
+  https://prowlo.com/blog/reddit-data-api). 2026 lockdown of unauthenticated
+  endpoints (https://www.redditapis.com/blogs/reddit-data-api-2026). Apple's
+  reviews RSS is a public, approved feed (scraping separately prohibited):
+  Apple App Review Guidelines (https://developer.apple.com/app-store/review/guidelines/);
+  feed access/500-cap (https://www.datashake.com/blog/app-store-review-data-api-access-what-you-can-and-cant-get-in-2026).
+  These corroborate the reasoning above; the review decision itself is the
+  product owner's, recorded verbatim.
 
 ## 2026-07-21 — P1 PDF export: render the existing brief model server-side, via reportlab (the repo's first runtime dependency)
 
